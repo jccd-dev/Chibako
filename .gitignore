@@ -1,0 +1,27 @@
+node_modules
+.next
+out
+dist
+data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.env.local
+.env*.local
+.DS_Store
+npm-debug.log*
+
+# Project docs kept local (not pushed to GitHub)
+PRD/
+
+# Agent configs & skills (all agents)
+.agent/
+.agents/
+.claude/
+.codex/
+.cursor/
+.hermes/
+.impeccable/
+.opencode/
