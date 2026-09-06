@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import type { ReactNode } from "react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
@@ -23,9 +24,9 @@ export function IconTip({
     <Tooltip>
       <TooltipTrigger
         render={
-          <button type="button" className={className ?? "btn"} onClick={onClick} aria-label={label} aria-pressed={active}>
+          <Button variant={className?.includes("btn-danger") ? "destructive" : "ghost"} size="icon" type="button" onClick={onClick} aria-label={label} aria-pressed={active}>
             {children}
-          </button>
+          </Button>
         }
       />
       <TooltipContent>
