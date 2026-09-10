@@ -27,7 +27,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
     <Sidebar collapsed={collapsed} mobile={mobile} mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} onExpand={toggleSidebar} />
     <div className="flex min-w-0 flex-1 flex-col">
       <TopBar sidebarOpen={mobile ? mobileOpen : !collapsed} onToggleSidebar={toggleSidebar} />
-      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+      <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
     </div>
   </>;
 }

@@ -1,9 +1,15 @@
 import { NextRequest } from "next/server";
 import { withAuth } from "@/lib/api";
-import { listNotes, createNote, folderTree } from "@/lib/notes";
+import { listNotes, createNote, folderTree, filterByProperties, type PropertyFilter } from "@/lib/notes";
 
-export const GET = withAuth("notes:read", async () => {
-  return Response.json({ notes: listNotes(), folders: folderTree() });
+export const GET = withAuth("notes:read", async (req: NextRequest) => {
+  // Optional property filter: /api/notes?prop.status=done&prop.tags=work
+  const filters: PropertyFilter[] = [];
+  for (const [key, value] of req.nextUrl.searchParams.entries()) {
+    if (key.startsWith("prop.") && value) filters.push({ key: key.slice(5), value });
+  }
+  const notes = filterByProperties(listNotes(), filters);
+  return Response.json({ notes, folders: folderTree() });
 });
 
 export const POST = withAuth("notes:write", async (req: NextRequest) => {
@@ -16,6 +22,7 @@ export const POST = withAuth("notes:write", async (req: NextRequest) => {
     folder: typeof body.folder === "string" ? body.folder : undefined,
     content: typeof body.content === "string" ? body.content : undefined,
     kind: body.kind === "wiki" ? "wiki" : body.kind === "index" ? "index" : "note",
+    properties: body.properties && typeof body.properties === "object" && !Array.isArray(body.properties) ? body.properties : undefined,
   });
   return Response.json({ note }, { status: 201 });
 });

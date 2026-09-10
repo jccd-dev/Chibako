@@ -3,8 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import type { Note, NoteKind, NoteSummary } from "@/lib/notes";
+import type { Note, NoteKind, NoteSummary, UpdateNoteInput } from "@/lib/notes";
+import type { Bookmark } from "@/lib/bookmarks";
+import { parseFrontmatter, serializeFrontmatter, type PropValue } from "@/lib/markdown";
+import { PROPERTY_TYPES, type PropertyDef, type PropertyType } from "@/lib/property-types";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
+import { RichTextEditor } from "@/components/editor/RichTextEditor";
 import { relTime } from "@/components/Sidebar";
 import {
   Dialog,
@@ -15,12 +19,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { IconTip } from "@/components/IconTip";
-import { IconCheck, IconEye, IconFile, IconLink, IconMoon, IconPencil, IconPin, IconPlus, IconSun, IconTrash, IconX } from "@/components/icons";
-import { useTheme } from "@/components/ThemeProvider";
+import { IconBookmark, IconCheck, IconChevron, IconHome, IconLink, IconPin, IconPlus, IconTrash, IconX } from "@/components/icons";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
-type ViewMode = "edit" | "split" | "preview";
+type ViewMode = "write" | "edit" | "split" | "preview";
 type SaveState = "saved" | "saving" | "unsaved" | "error";
+
+/** Select sentinel for the "create a new bookmark group" option. */
+const NEW_GROUP_VALUE = "__new__";
+
+// Kind colors match the graph view so a note reads as the same entity in both.
+const KIND_COLOR: Record<NoteKind, string> = {
+  note: "var(--primary)",
+  wiki: "var(--graph-wiki)",
+  index: "var(--graph-index)",
+};
 
 interface LinkInfo {
   outlinks: Array<{ target: string; target_id: string | null; resolved: boolean }>;
@@ -36,9 +54,43 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+/**
+ * Uncontrolled property value input. Commits on blur/Enter (Enter blurs).
+ * Being uncontrolled means a trailing separator comma stays visible while the
+ * user is typing — a controlled input bound to the parsed value would swallow
+ * it on every keystroke. `defaultValue` comes from the note's current value;
+ * remounting (keyed by note id) keeps it fresh across notes.
+ */
+function PropTextEditor({ initial, onCommit, placeholder, type, ariaLabel }: {
+  initial: string;
+  onCommit: (raw: string) => void;
+  placeholder?: string;
+  type: "text" | "number" | "date";
+  ariaLabel: string;
+}) {
+  return (
+    <input
+      type={type}
+      defaultValue={initial}
+      className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      onBlur={(e) => onCommit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          e.currentTarget.value = initial;
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
 export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | null; allNotes: NoteSummary[] }) {
   const router = useRouter();
-  const { theme, toggle } = useTheme();
 
   const [note, setNote] = useState<Note | null>(initial);
   const [allNotes, setAllNotes] = useState<NoteSummary[]>(initialAll);
@@ -47,6 +99,29 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   const [content, setContent] = useState(initial?.content ?? "");
   const [kind, setKind] = useState<NoteKind>(initial?.kind ?? "note");
   const [pinned, setPinned] = useState(initial?.is_pinned === 1);
+  const [bookmark, setBookmark] = useState<Bookmark | null>(null);
+  const [bookmarkOpen, setBookmarkOpen] = useState(false);
+  const [bmGroups, setBmGroups] = useState<string[]>([]);
+  const [bmGroup, setBmGroup] = useState("");
+  const [bmNewGroup, setBmNewGroup] = useState("");
+  const [bmBusy, setBmBusy] = useState(false);
+  // Single-scroll panes: the typed-properties block collapses under this toggle.
+  const [showProps, setShowProps] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("chibako_props") === "hide") setShowProps(false);
+    } catch {
+      // private mode — keep default
+    }
+  }, []);
+  function setPropsAndRemember(next: boolean) {
+    setShowProps(next);
+    try {
+      localStorage.setItem("chibako_props", next ? "show" : "hide");
+    } catch {
+      // private mode — ignore
+    }
+  }
   // Server renders "split"; stored preference / mobile default applies after
   // mount so server HTML and first client render always match (no hydration
   // mismatch).
@@ -55,11 +130,11 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   useEffect(() => {
     try {
       const stored = localStorage.getItem("chibako_view");
-      if (stored === "edit" || stored === "split" || stored === "preview") {
-        setView(stored);
-      } else if (window.innerWidth < 768) {
-        setView("edit");
-      }
+      const wide = window.innerWidth >= 1024;
+      if (stored === "write" || stored === "edit" || stored === "preview") setView(stored);
+      else if (stored === "split") setView(wide ? "split" : "edit");
+      else if (!wide) setView("edit"); // split needs room for two panes
+      else setView("write");
     } catch {
       // private mode — keep default
     }
@@ -71,13 +146,25 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   const [showLinks, setShowLinks] = useState(true);
   const [createModal, setCreateModal] = useState<string | null>(null);
   const [createFolder, setCreateFolder] = useState("");
-  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [addingProp, setAddingProp] = useState(false);
+  const [newPropKey, setNewPropKey] = useState("");
+  const [newPropType, setNewPropType] = useState<PropertyType>("string");
+  const [newPropOptions, setNewPropOptions] = useState("");
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editWrapRef = useRef<HTMLDivElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const dirty = useRef(false);
-  const debounced = useDebounced({ title, folder, content, kind }, 700);
+  const pending = useRef<UpdateNoteInput>({});
+  const saving = useRef<Promise<void> | null>(null);
+  const noteRef = useRef(note);
+  noteRef.current = note;
+  const documentVersion = useRef(0);
+  const [editorKey, setEditorKey] = useState(0);
+  const snapshot = useMemo(() => ({ title, folder, content, kind, pinned }), [title, folder, content, kind, pinned]);
+  const debounced = useDebounced(snapshot, 700);
+
+  useEffect(() => { void refreshAllNotes(); }, []);
 
   // ---- [[wikilink autocomplete ----
   const [suggest, setSuggest] = useState<{ prefix: string; top: number; left: number } | null>(null);
@@ -150,28 +237,116 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     if (!ta || !suggest) return;
     const cursor = ta.selectionStart ?? content.length;
     const start = cursor - (suggest.prefix.length + 2);
-    const next = `${content.slice(0, start)}[[${target}]]${content.slice(cursor)}`;
-    setContent(next);
-    dirty.current = true;
-    setSaveState("unsaved");
+    replaceSelection(start, cursor, `[[${target}]]`);
     setSuggest(null);
-    const end = start + target.length + 4;
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(end, end);
-    });
   }
 
-  const folders = useMemo(() => {
-    const set = new Set<string>();
-    for (const n of allNotes) if (n.folder) set.add(n.folder);
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [allNotes]);
+  const homeNote = useMemo(() => allNotes.find((n) => n.kind === "index" && !n.deleted_at), [allNotes]);
+  const crumbs = useMemo(() => folder.split("/").filter(Boolean), [folder]);
+  const indexNoteFor = useCallback(
+    (path: string) => allNotes.find((n) => !n.deleted_at && n.kind === "index" && n.folder === path),
+    [allNotes]
+  );
+  function goHome() {
+    router.push(homeNote && homeNote.id !== note?.id ? `/app/note/${homeNote.id}` : "/app");
+  }
+
+  // ---- properties (YAML frontmatter, typed via the vault dictionary) ----
+  const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
+  const loadPropDefs = useCallback(() => {
+    fetch("/api/properties").then((r) => r.json()).then((d) => setPropDefs(d.properties ?? [])).catch(() => {});
+  }, []);
+  useEffect(() => { loadPropDefs(); }, [loadPropDefs]);
+  const defFor = useCallback((key: string) => propDefs.find((d) => d.name === key), [propDefs]);
+
+  const fm = useMemo(() => parseFrontmatter(content), [content]);
+  const propKeys = useMemo(() => {
+    const present = new Set(Object.keys(fm.props));
+    // dictionary order first, then any ad-hoc keys in insertion order
+    const keys = propDefs.filter((d) => present.has(d.name)).map((d) => d.name);
+    for (const k of present) if (!keys.includes(k)) keys.push(k);
+    return keys;
+  }, [fm, propDefs]);
+
+  /** Type for a property: dictionary wins; otherwise inferred from the value shape. */
+  function propType(key: string): PropertyType {
+    const def = defFor(key);
+    if (def) return def.type;
+    const value = fm.props[key];
+    if (Array.isArray(value)) return "tags";
+    if (typeof value === "boolean") return "checkbox";
+    if (typeof value === "number") return "number";
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return "date";
+    return "string";
+  }
+
+  function writeProps(mutate: (props: Record<string, PropValue>) => void) {
+    const { props, body } = parseFrontmatter(content);
+    const next = { ...props };
+    mutate(next);
+    handleChangeContent(serializeFrontmatter(next) + body);
+  }
+
+  function setPropText(key: string, raw: string) {
+    const type = propType(key);
+    let value: PropValue = raw;
+    if (type === "list" || type === "tags") value = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    else if (type === "number") value = raw.trim() === "" ? "" : Number(raw);
+    writeProps((props) => { props[key] = value; });
+  }
+
+  function setPropCheck(key: string, checked: boolean) {
+    writeProps((props) => { props[key] = checked; });
+  }
+
+  function removeProp(key: string) {
+    writeProps((props) => { delete props[key]; });
+  }
+
+  function cancelAddProp() {
+    setAddingProp(false);
+    setNewPropKey("");
+    setNewPropType("string");
+    setNewPropOptions("");
+  }
+
+  function handleNewPropKey(v: string) {
+    setNewPropKey(v);
+    const d = defFor(v);
+    if (d) {
+      setNewPropType(d.type);
+      setNewPropOptions((d.options ?? []).join(", "));
+    }
+  }
+
+  function addProp() {
+    const clean = newPropKey.trim();
+    if (!clean) return;
+    if (fm.props[clean] !== undefined) {
+      toast.error("This note already has that property.");
+      return;
+    }
+    const type = newPropType;
+    const options = newPropOptions.split(",").map((s) => s.trim()).filter(Boolean);
+    if (type === "select" && options.length === 0) {
+      toast.error("Select properties need allowed values (comma-separated).");
+      return;
+    }
+    const initial: PropValue = type === "checkbox" ? false : type === "list" || type === "tags" ? [] : "";
+    writeProps((props) => { props[clean] = initial; });
+    // Auto-register the type vault-wide so the next note gets the same editor.
+    fetch("/api/properties/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: clean, type, options: type === "select" ? options : undefined }),
+    }).then((r) => { if (r.ok) loadPropDefs(); }).catch(() => {});
+    cancelAddProp();
+  }
 
   const wordCount = useMemo(() => {
-    const w = content.trim().split(/\s+/).filter(Boolean);
-    return content.trim() ? w.length : 0;
-  }, [content]);
+    const w = fm.body.trim().split(/\s+/).filter(Boolean);
+    return fm.body.trim() ? w.length : 0;
+  }, [fm.body]);
 
   function setViewAndRemember(m: ViewMode) {
     setView(m);
@@ -193,45 +368,50 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     return m;
   }, [allNotes]);
 
-  async function persist() {    setSaveState("saving");
-    try {
-      if (note) {
-        const res = await fetch(`/api/notes/${note.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, folder, content, kind, is_pinned: pinned ? 1 : 0 }),
-        });
-        if (!res.ok) throw new Error("save failed");
-        const { note: updated } = await res.json();
-        setNote(updated);
-        setPinned(updated.is_pinned === 1);
-        setSaveState("saved");
-        dirty.current = false;
-        if (allNotes.some((n) => n.id !== updated.id && n.title.toLowerCase() === updated.title.toLowerCase())) {
-          toast.warning("Duplicate title", {
-            description: "Another note has the same title — [[links]] resolve to the first match.",
-          });
-        }
-        refreshLinks();
-        refreshAllNotes();
-      } else {
-        const res = await fetch(`/api/notes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, folder, content, kind }),
-        });
-        if (!res.ok) throw new Error("create failed");
-        const { note: created } = await res.json();
-        setNote(created);
-        setPinned(created.is_pinned === 1);
-        dirty.current = false;
-        setSaveState("saved");
-        refreshAllNotes();
-        router.replace(`/app/note/${created.id}`);
-      }
-    } catch {
-      setSaveState("error");
+  async function persist(): Promise<void> {
+    if (saving.current) {
+      await saving.current;
+      if (dirty.current) return persistRef.current();
+      return;
     }
+    if (!dirty.current) return;
+    const patch = pending.current;
+    pending.current = {};
+    const version = documentVersion.current;
+    const current = noteRef.current;
+    setSaveState("saving");
+    const job = (async () => {
+      try {
+        const res = await fetch(current ? `/api/notes/${current.id}` : "/api/notes", {
+          method: current ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(current ? patch : { title, folder, content, kind }),
+          keepalive: true,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Save failed");
+        if (version !== documentVersion.current) return;
+        const updated: Note = data.note;
+        noteRef.current = updated;
+        setNote(updated);
+        dirty.current = Object.keys(pending.current).length > 0;
+        setSaveState(dirty.current ? "unsaved" : "saved");
+        window.dispatchEvent(new Event("chibako:notes-changed"));
+        void refreshAllNotes();
+        void refreshLinks();
+        if (!current) router.replace(`/app/note/${updated.id}`);
+      } catch (error) {
+        if (version === documentVersion.current) {
+          pending.current = { ...patch, ...pending.current };
+          dirty.current = true;
+          setSaveState("error");
+          toast.error(error instanceof Error ? error.message : "Save failed");
+        }
+        throw error;
+      }
+    })();
+    saving.current = job;
+    try { await job; } finally { if (saving.current === job) saving.current = null; }
   }
 
   // Flush pending edits when leaving the note (route change / unmount) and
@@ -240,7 +420,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   persistRef.current = persist;
   useEffect(() => {
     return () => {
-      if (dirty.current) persistRef.current();
+      if (dirty.current) void persistRef.current().catch(() => {});
     };
   }, []);
   useEffect(() => {
@@ -249,6 +429,46 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     }
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
+  }, []);
+
+  useEffect(() => {
+    if ((initial?.id ?? null) === (noteRef.current?.id ?? null)) return;
+    if (dirty.current) void persistRef.current().catch(() => {});
+    documentVersion.current++;
+    pending.current = {};
+    dirty.current = false;
+    noteRef.current = initial;
+    setNote(initial); setTitle(initial?.title ?? ""); setFolder(initial?.folder ?? "");
+    setContent(initial?.content ?? ""); setKind(initial?.kind ?? "note"); setPinned(initial?.is_pinned === 1);
+    setSaveState(initial ? "saved" : "unsaved"); setLinks(null); setMentions([]); setSuggest(null);
+    setEditorKey(key => key + 1);
+  }, [initial]);
+
+  useEffect(() => {
+    const before = (event: Event) => {
+      if (event instanceof CustomEvent) event.detail.push(persistRef.current());
+    };
+    const organized = async () => {
+      const id = noteRef.current?.id;
+      if (!id) return;
+      try {
+        const response = await fetch(`/api/notes/${id}`);
+        if (!response.ok || noteRef.current?.id !== id) return;
+        const { note: updated } = await response.json();
+        if (pending.current.title === undefined) setTitle(updated.title);
+        if (pending.current.folder === undefined) setFolder(updated.folder);
+        if (pending.current.content === undefined && !saving.current) setContent(updated.content);
+        setNote(updated);
+        void refreshAllNotes();
+        void refreshLinks();
+      } catch { toast.error("Could not refresh the organized note."); }
+    };
+    window.addEventListener("chibako:before-organize", before);
+    window.addEventListener("chibako:organized", organized);
+    return () => {
+      window.removeEventListener("chibako:before-organize", before);
+      window.removeEventListener("chibako:organized", organized);
+    };
   }, []);
 
   async function refreshAllNotes() {
@@ -296,40 +516,115 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.id]);
 
+  // ---- bookmarks ----
+  useEffect(() => {
+    const id = note?.id;
+    if (!id) {
+      setBookmark(null);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/bookmarks")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const list = (d.bookmarks ?? []) as Bookmark[];
+        setBmGroups([...new Set(list.map((b) => b.group_name).filter(Boolean))]);
+        setBookmark(list.find((x) => x.note_id === id) ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [note?.id]);
+
+  function openBookmarkDialog() {
+    if (!note) return;
+    setBmGroup(bookmark?.group_name ?? "");
+    setBmNewGroup("");
+    setBookmarkOpen(true);
+  }
+
+  async function submitBookmark(e: React.FormEvent) {
+    e.preventDefault();
+    if (!note || bmBusy) return;
+    setBmBusy(true);
+    try {
+      const group = bmGroup === NEW_GROUP_VALUE ? bmNewGroup.trim() : bmGroup;
+      const res = await fetch("/api/bookmarks", {
+        method: bookmark ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          bookmark
+            ? { id: bookmark.id, label: "", group_name: group }
+            : { note_id: note.id, label: "", group_name: group }
+        ),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save bookmark.");
+      setBookmark(data.bookmark ?? bookmark);
+      if (group) setBmGroups((prev) => (prev.includes(group) ? prev : [...prev, group]));
+      setBookmarkOpen(false);
+      toast(bookmark ? "Bookmark updated." : "Bookmarked");
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save bookmark.");
+    } finally {
+      setBmBusy(false);
+    }
+  }
+
+  async function removeBookmark() {
+    if (!bookmark) return;
+    const res = await fetch(`/api/bookmarks?id=${encodeURIComponent(bookmark.id)}`, { method: "DELETE" });
+    if (res.ok) {
+      setBookmark(null);
+      setBookmarkOpen(false);
+      toast("Bookmark removed.");
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+    } else {
+      toast.error("Could not remove bookmark.");
+    }
+  }
+
   useEffect(() => {
     if (!dirty.current) return;
-    const t = setTimeout(() => persist(), 300);
+    const t = setTimeout(() => { void persist().catch(() => {}); }, 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced]);
 
-  function handleChangeTitle(v: string) {
-    setTitle(v);
-    dirty.current = true;
-    setSaveState("unsaved");
-  }
-  function handleChangeFolder(v: string) {
-    setFolder(v);
-    dirty.current = true;
-    setSaveState("unsaved");
-  }
-  function handleChangeKind(k: NoteKind) {
-    setKind(k);
-    dirty.current = true;
-    setSaveState("unsaved");
-  }
-  function togglePinned() {
-    setPinned((p) => !p);
-    dirty.current = true;
-    setSaveState("unsaved");
-  }
-  function handleChangeContent(v: string) {
-    setContent(v);
+  function markDirty(patch: UpdateNoteInput) {
+    pending.current = { ...pending.current, ...patch };
     dirty.current = true;
     setSaveState("unsaved");
   }
 
+  function handleChangeTitle(v: string) {
+    setTitle(v);
+    markDirty({ title: v });
+  }
+  function handleChangeKind(k: NoteKind) {
+    setKind(k);
+    markDirty({ kind: k });
+  }
+  function togglePinned() {
+    setPinned(!pinned);
+    markDirty({ is_pinned: pinned ? 0 : 1 });
+  }
+  function handleChangeContent(v: string) {
+    setContent(v);
+    markDirty({ content: v });
+  }
+
+  /** WYSIWYG editor edits only the body; frontmatter is preserved as-is. */
+  function handleWriteBody(md: string) {
+    const { props } = parseFrontmatter(content);
+    handleChangeContent(serializeFrontmatter(props) + md);
+  }
+
   function handleEditorKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.nativeEvent.isComposing) return;
     const mod = e.metaKey || e.ctrlKey;
     if (mod) {
       const k = e.key.toLowerCase();
@@ -337,13 +632,19 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
         e.preventDefault();
         fn();
       };
+      if (k === "z" || (k === "y" && !e.shiftKey)) return run(() => {
+        document.execCommand(k === "y" || e.shiftKey ? "redo" : "undo");
+        handleChangeContent(e.currentTarget.value);
+        setSuggest(null);
+      });
       if (!e.shiftKey && k === "b") return run(() => insertAtCursor("**", "**", "bold"));
       if (!e.shiftKey && k === "i") return run(() => insertAtCursor("*", "*", "italic"));
       if (!e.shiftKey && k === "j") return run(() => insertAtCursor("`", "`", "code"));
-      if (!e.shiftKey && k === "1") return run(() => setViewAndRemember("edit"));
-      if (!e.shiftKey && k === "2") return run(() => setViewAndRemember("split"));
-      if (!e.shiftKey && k === "3") return run(() => setViewAndRemember("preview"));
-      if (!e.shiftKey && k === "/") return run(() => setShowShortcuts(true));
+      if (!e.shiftKey && k === "1") return run(() => setViewAndRemember("write"));
+      if (!e.shiftKey && k === "2") return run(() => setViewAndRemember("edit"));
+      if (!e.shiftKey && k === "3") return run(() => setViewAndRemember("split"));
+      if (!e.shiftKey && k === "4") return run(() => setViewAndRemember("preview"));
+      if (!e.shiftKey && k === "/") return run(() => window.dispatchEvent(new Event("chibako:open-shortcuts")));
       if (e.shiftKey && k === "x") return run(() => insertAtCursor("~~", "~~", "struck"));
       if (e.shiftKey && k === "j") return run(() => insertAtCursor("```\n", "\n```", "code"));
       if (e.shiftKey && k === "l") return run(() => insertAtCursor("[", "](https://)", "text"));
@@ -436,19 +737,26 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     router.push("/app/note/new");
   }
 
+  // insertText preserves the browser undo stack for toolbar and autocomplete edits.
+  function replaceSelection(start: number, end: number, text: string, selectStart = start + text.length, selectEnd = selectStart) {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    if (!document.execCommand("insertText", false, text)) {
+      toast.error("This browser could not insert text. You can type Markdown directly.");
+      return;
+    }
+    handleChangeContent(ta.value);
+    ta.setSelectionRange(selectStart, selectEnd);
+  }
+
   function insertAtCursor(before: string, after: string, placeholder: string) {
     const ta = textareaRef.current;
     if (!ta) return;
-    const { selectionStart: s, selectionEnd: e } = ta;
-    const selected = content.slice(s, e) || placeholder;
-    const next = content.slice(0, s) + before + selected + after + content.slice(e);
-    setContent(next);
-    dirty.current = true;
-    setSaveState("unsaved");
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(s + before.length, s + before.length + selected.length);
-    });
+    const { selectionStart: start, selectionEnd: end } = ta;
+    const selected = content.slice(start, end) || placeholder;
+    replaceSelection(start, end, before + selected + after, start + before.length, start + before.length + selected.length);
   }
 
   const toolbar = [
@@ -466,157 +774,367 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   ];
 
   function handleTab(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Tab") {
+    // Keep Shift+Tab available to leave the editor with the keyboard.
+    if (e.key === "Tab" && !e.shiftKey) {
       e.preventDefault();
-      const ta = e.currentTarget;
-      const s = ta.selectionStart;
-      const next = content.slice(0, s) + "  " + content.slice(ta.selectionEnd);
-      setContent(next);
-      dirty.current = true;
-      setSaveState("unsaved");
-      requestAnimationFrame(() => {
-        ta.selectionStart = ta.selectionEnd = s + 2;
-      });
+      replaceSelection(e.currentTarget.selectionStart, e.currentTarget.selectionEnd, "  ");
     }
   }
 
   function handleKeys(e: React.KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
       e.preventDefault();
-      dirty.current = true;
-      persist();
+      void persist().catch(() => {});
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === "n") {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
       e.preventDefault();
       newNote();
     }
   }
 
+  const showWrite = view === "write";
   const showEdit = view === "edit" || view === "split";
   const showPreview = view === "preview" || view === "split";
+
+  // Single-scroll source pane: the textarea grows with the content instead of
+  // showing its own scrollbar.
+  useEffect(() => {
+    if (!showEdit) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "0px";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [content, view, showEdit, showProps, editorKey, note?.id]);
+
+  /** Collapsible "Properties" row shown above both editors. */
+  function propsToggleJSX() {
+    return (
+      <button
+        type="button"
+        onClick={() => setPropsAndRemember(!showProps)}
+        aria-expanded={showProps}
+        aria-label={showProps ? "Hide properties" : "Show properties"}
+        className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground transition outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+      >
+        <IconChevron size={12} className={cn("transition-transform", showProps && "rotate-90")} />
+        Properties{propKeys.length > 0 && ` (${propKeys.length})`}
+      </button>
+    );
+  }
+
+  /** Shared typed-properties editor shown above both the source and rich editors. */
+  function renderPropertyEditor() {
+    return (propKeys.length > 0 || addingProp) ? (
+      <div key={`${note?.id ?? "new"}-props`} className="mb-3 rounded-lg border border-border bg-muted/40 px-3 py-2" data-testid="properties">
+        {propKeys.map((key) => {
+          const type = propType(key);
+          const def = defFor(key);
+          const value = fm.props[key];
+          const text = Array.isArray(value) ? value.join(", ") : String(value ?? "");
+          return (
+            <div key={key} className="flex items-center gap-2 border-b border-border/60 py-1 last:border-0">
+              <label className="w-24 shrink-0 truncate text-xs font-medium text-muted-foreground" title={`${key} · ${type}`}>{key}</label>
+              {type === "checkbox" ? (
+                <input
+                  type="checkbox"
+                  checked={Boolean(value)}
+                  onChange={(e) => setPropCheck(key, e.target.checked)}
+                  aria-label={`Property ${key}`}
+                  className="size-4 cursor-pointer accent-[var(--primary)]"
+                />
+              ) : type === "select" && def?.options?.length ? (
+                <Select
+                  items={{ "": "—", ...Object.fromEntries(def.options.map((o) => [o, o])) }}
+                  value={text}
+                  onValueChange={(v) => { if (v !== null) setPropText(key, v); }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    aria-label={`Property ${key}`}
+                    className="h-6! w-auto! min-w-32 gap-1.5 rounded-md border-transparent bg-transparent px-2! py-0! text-[13px] shadow-none! hover:bg-accent"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">—</SelectItem>
+                    {def.options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <PropTextEditor
+                  initial={text}
+                  type={type === "number" ? "number" : type === "date" ? "date" : "text"}
+                  placeholder={type === "list" || type === "tags" ? "comma, separated" : "—"}
+                  ariaLabel={`Property ${key}`}
+                  onCommit={(raw) => setPropText(key, raw)}
+                />
+              )}
+              <span className="w-14 shrink-0 text-right text-[10px] uppercase tracking-wide text-muted-foreground/70">{type}</span>
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition hover:text-destructive hover:opacity-100"
+                onClick={() => removeProp(key)}
+                aria-label={`Remove property ${key}`}
+              >
+                <IconX size={12} />
+              </button>
+            </div>
+          );
+        })}
+        {addingProp ? (
+          <div className="flex flex-wrap items-center gap-2 py-1">
+            <input
+              autoFocus
+              className="w-24 shrink-0 rounded border border-border bg-transparent px-1.5 py-0.5 text-xs outline-none"
+              value={newPropKey}
+              placeholder="name"
+              aria-label="New property name"
+              list="chibako-prop-suggestions"
+              onChange={(e) => handleNewPropKey(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); addProp(); }
+                if (e.key === "Escape") cancelAddProp();
+              }}
+            />
+            <datalist id="chibako-prop-suggestions">
+              {propDefs.map((d) => <option key={d.name} value={d.name} />)}
+            </datalist>
+            <Select
+              items={Object.fromEntries(PROPERTY_TYPES.map((t) => [t, t]))}
+              value={newPropType}
+              onValueChange={(v) => { if (v !== null) setNewPropType(v as PropertyType); }}
+            >
+              <SelectTrigger
+                size="sm"
+                aria-label="New property type"
+                className="h-6! w-32! gap-1.5 rounded-md border-transparent bg-transparent px-2! py-0! text-xs shadow-none! hover:bg-accent"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROPERTY_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {newPropType === "select" && (
+              <input
+                className="min-w-0 flex-1 rounded border border-border bg-transparent px-1.5 py-0.5 text-xs outline-none"
+                value={newPropOptions}
+                placeholder="allowed values, comma separated"
+                aria-label="Allowed values"
+                onChange={(e) => setNewPropOptions(e.target.value)}
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={addProp}
+            >
+              Add
+            </Button>
+            <button
+              type="button"
+              className="rounded p-1 text-muted-foreground transition hover:text-foreground"
+              onClick={cancelAddProp}
+              aria-label="Cancel adding property"
+            >
+              <IconX size={13} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mt-1 flex items-center gap-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+            onClick={() => setAddingProp(true)}
+          >
+            <IconPlus size={12} /> Add property
+          </button>
+        )}
+      </div>
+    ) : (
+      <button
+        type="button"
+        className="mb-3 flex items-center gap-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+        onClick={() => setAddingProp(true)}
+      >
+        <IconPlus size={12} /> Add property
+      </button>
+    );
+  }
 
   return (
     <div className="flex h-full" onKeyDown={handleKeys}>
       <div className="flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <div className="flex items-center gap-2 border-b border-border px-6 pb-3 pt-4">
-          <div className="min-w-0 flex-1">
+        <div className="flex flex-col gap-0.5 border-b border-border px-4 py-2.5">
+          {/* context row: where am I · what is this · document actions */}
+          <div className="flex items-center gap-2">
+            <nav aria-label="Location" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={goHome}
+                title="Go to home index"
+                className="flex shrink-0 items-center gap-1 rounded px-0.5 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <IconHome size={12} />
+                Home
+              </button>
+              {crumbs.map((seg, i) => {
+                const path = crumbs.slice(0, i + 1).join("/");
+                const indexNote = indexNoteFor(path);
+                return (
+                  <span key={path} className="flex min-w-0 items-center gap-1">
+                    <span aria-hidden className="shrink-0 select-none opacity-50">/</span>
+                    {indexNote ? (
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/app/note/${indexNote.id}`)}
+                        title={`Open “${indexNote.title}”`}
+                        className="max-w-44 truncate rounded px-0.5 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                      >
+                        {seg}
+                      </button>
+                    ) : (
+                      <span className="max-w-44 truncate">{seg}</span>
+                    )}
+                  </span>
+                );
+              })}
+            </nav>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Select
+                items={{ note: "note", wiki: "wiki", index: "index" }}
+                value={kind}
+                onValueChange={(value) => {
+                  if (value !== null) handleChangeKind(value as NoteKind);
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  aria-label="Note kind"
+                  className="h-6! w-auto! gap-1.5 rounded-full border-transparent bg-muted px-2.5! py-0! text-[11px] font-medium text-foreground shadow-none! [&_svg]:size-3! hover:bg-accent dark:bg-muted dark:hover:bg-accent"
+                >
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: KIND_COLOR[kind] }} />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="note">note</SelectItem>
+                  <SelectItem value="wiki">wiki</SelectItem>
+                  <SelectItem value="index">index</SelectItem>
+                </SelectContent>
+              </Select>
+              <div aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+              {note && (
+                <IconTip
+                  label={bookmark ? "Remove bookmark" : "Bookmark note"}
+                  onClick={() => { if (bookmark) void removeBookmark(); else openBookmarkDialog(); }}
+                  active={!!bookmark}
+                >
+                  <IconBookmark size={15} filled={!!bookmark} className={bookmark ? "text-warning" : ""} />
+                </IconTip>
+              )}
+              {note && (
+                <IconTip label={pinned ? "Unpin from sidebar" : "Pin to sidebar"} onClick={togglePinned} active={pinned}>
+                  <IconPin size={15} className={pinned ? "text-primary" : ""} />
+                </IconTip>
+              )}
+              {note && (
+                <IconTip label="Toggle connections panel" onClick={() => setShowLinks((v) => !v)} active={showLinks}>
+                  <IconLink size={15} className={showLinks ? "text-primary" : ""} />
+                </IconTip>
+              )}
+              {note && (
+                <IconTip label="Move to Trash" onClick={handleDelete} destructive>
+                  <IconTrash size={15} />
+                </IconTip>
+              )}
+            </div>
+          </div>
+          {/* title row */}
+          <div className="flex items-center gap-2">
             <input
-              className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
+              className="w-full min-w-0 flex-1 bg-transparent font-heading text-xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
               value={title}
               placeholder="Untitled"
               onChange={(e) => handleChangeTitle(e.target.value)}
               aria-label="Note title"
             />
-            <div className="mt-1 flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Folder</span>
-              <input
-                className="w-40 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs text-muted-foreground outline-none transition hover:border-border focus:border-primary/50"
-                value={folder}
-                placeholder="folder"
-                list="chibako-folders"
-                onChange={(e) => handleChangeFolder(e.target.value)}
-                aria-label="Folder"
-              />
-              <datalist id="chibako-folders">
-                {folders.map((f) => (
-                  <option key={f} value={f} />
-                ))}
-              </datalist>
-              <select
-                className="rounded border border-transparent bg-transparent px-1 py-0.5 text-xs text-muted-foreground outline-none hover:border-border"
-                value={kind}
-                onChange={(e) => handleChangeKind(e.target.value as NoteKind)}
-                aria-label="Kind"
-              >
-                <option value="note">note</option>
-                <option value="wiki">wiki</option>
-                <option value="index">index</option>
-              </select>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className={`mr-1 text-xs ${saveState === "saved" ? "text-muted-foreground" : saveState === "error" ? "text-red-500" : "text-muted-foreground"}`}>
+            <span className={cn("shrink-0 text-xs", saveState === "error" ? "text-destructive" : "text-muted-foreground")}>
               {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : saveState === "error" ? "Save failed" : "Unsaved"}
             </span>
             {note && (
-              <span className="mr-1 hidden text-xs text-muted-foreground lg:inline" title="Word count">
+              <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline" title="Word count">
                 {wordCount} word{wordCount === 1 ? "" : "s"} · edited {relTime(note.updated_at)}
               </span>
             )}
-            {note && (
-              <IconTip label={pinned ? "Unpin from sidebar" : "Pin to sidebar"} onClick={togglePinned} active={pinned}>
-                <IconPin size={15} className={pinned ? "text-primary" : ""} />
-              </IconTip>
-            )}
-            {note && (
-              <IconTip label="Toggle connections panel" onClick={() => setShowLinks((v) => !v)}>
-                <IconLink size={15} />
-              </IconTip>
-            )}
-            <IconTip label="Toggle theme" onClick={toggle}>
-              {theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />}
-            </IconTip>
-            {note && (
-              <IconTip label="Move to Trash" onClick={handleDelete} className="btn btn-danger">
-                <IconTrash size={15} />
-              </IconTip>
-            )}
-            <button className="btn btn-primary" onClick={newNote}>
-              <IconPlus size={15} /> New
-            </button>
           </div>
         </div>
 
         {/* view toggle + toolbar */}
         {duplicateTitle && (
-          <p className="mx-6 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+          <p className="mx-6 mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs text-warning">
             Another note already uses this title — [[links]] to “{title.trim()}” resolve to the first match.
           </p>
         )}
-        <div className="flex items-center justify-between gap-2 px-6 py-2">
-          <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-            {(["edit", "split", "preview"] as ViewMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setViewAndRemember(m)}
-                className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium capitalize transition ${
-                  view === m ? "bg-muted text-foreground" : "text-muted-foreground hover:text-muted-foreground"
-                }`}
-              >
-                {m === "edit" ? <IconPencil size={12} /> : m === "split" ? <IconFile size={12} /> : <IconEye size={12} />}
-                {m}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+          <ToggleGroup value={[view]} onValueChange={values => {
+            const value = values[0];
+            if (value === "write" || value === "edit" || value === "split" || value === "preview") setViewAndRemember(value);
+          }} aria-label="Editor view">
+            <ToggleGroupItem value="write">Write</ToggleGroupItem>
+            <ToggleGroupItem value="edit">Edit</ToggleGroupItem>
+            <ToggleGroupItem value="split">Split</ToggleGroupItem>
+            <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
+          </ToggleGroup>
           {showEdit && (
-            <div className="flex items-center gap-0.5">
+            <div className="flex flex-wrap items-center gap-0.5">
               {toolbar.map((t) => (
-                <button
+                <Button
                   key={t.label}
-                  className="btn !px-2 !py-1 text-xs"
+                  variant="ghost"
+                  size="sm"
                   title={t.kbd ? `${t.title} (${modKey}${t.kbd})` : t.title}
+                  onMouseDown={e => e.preventDefault()}
                   onClick={t.run}
                 >
                   {t.label}
-                </button>
+                </Button>
               ))}
-              <button className="btn !px-2 !py-1 text-xs" title={`Keyboard shortcuts (${modKey}/)`} onClick={() => setShowShortcuts(true)}>
+              <Button variant="ghost" size="sm" title={`Keyboard shortcuts (${modKey}/)`} onClick={() => window.dispatchEvent(new Event("chibako:open-shortcuts"))}>
                 ?
-              </button>
+              </Button>
             </div>
           )}
         </div>
 
         {/* body */}
         <div className="flex min-h-0 flex-1">
+          {showWrite && (
+            <div className="w-full overflow-y-auto px-6 py-2">
+              {propsToggleJSX()}
+              {showProps && renderPropertyEditor()}
+              <RichTextEditor
+                key={`${note?.id ?? "new"}:${editorKey}`}
+                initialMarkdown={fm.body}
+                noteId={note?.id ?? "new"}
+                selfTitle={title}
+                allNotes={allNotes}
+                onBodyChange={handleWriteBody}
+                onNavigate={navigateTo}
+                onViewShortcut={setViewAndRemember}
+              />
+            </div>
+          )}
           {showEdit && (
             <div
               ref={editWrapRef}
               onScroll={() => setSuggest(null)}
-              className={`${showPreview ? "w-1/2 border-r border-border" : "w-full"} relative overflow-y-auto px-6 py-2`}
+              className={cn("relative overflow-y-auto px-6 py-2", showPreview ? "w-1/2 border-r border-border" : "w-full")}
             >
+              {propsToggleJSX()}
+              {showProps && renderPropertyEditor()}
               <textarea
+                key={editorKey}
                 ref={textareaRef}
                 className="editor min-h-full"
                 value={content}
@@ -649,9 +1167,10 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
                       key={s.id}
                       role="option"
                       aria-selected={i === suggestIdx}
-                      className={`block w-full rounded-lg px-3 py-1.5 text-left transition ${
-                        i === suggestIdx ? "bg-muted" : ""
-                      }`}
+                      className={cn(
+                        "block w-full rounded-lg px-3 py-1.5 text-left transition",
+                        i === suggestIdx && "bg-muted"
+                      )}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         insertSuggestion(s.title);
@@ -670,8 +1189,24 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
           )}
           {showPreview && (
             <div className={`${showEdit ? "w-1/2" : "w-full"} overflow-y-auto px-8 py-4`}>
-              {content.trim() ? (
-                <MarkdownPreview content={content} onNavigate={navigateTo} />
+              {propKeys.length > 0 && (
+                <div className="mb-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-[13px]">
+                  {propKeys.map((key) => {
+                    const value = fm.props[key];
+                    const text = typeof value === "boolean"
+                      ? (value ? "✓" : "—")
+                      : Array.isArray(value) ? value.join(", ") : String(value ?? "");
+                    return (
+                      <div key={key} className="contents">
+                        <span className="font-medium text-muted-foreground">{key}</span>
+                        <span className="truncate">{text || "—"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {fm.body.trim() ? (
+                <MarkdownPreview content={fm.body} onNavigate={navigateTo} />
               ) : (
                 <p className="text-sm text-muted-foreground">Preview is empty.</p>
               )}
@@ -682,18 +1217,18 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
 
       {/* right links panel */}
       {note && showLinks && (
-        <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-sidebar md:flex">
+        <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-sidebar lg:flex">
           <div className="flex items-center justify-between px-4 py-3">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Connections</h3>
-            <button className="btn !px-1.5 !py-1" onClick={() => setShowLinks(false)}>
+            <Button variant="ghost" size="icon-sm" aria-label="Close connections" onClick={() => setShowLinks(false)}>
               <IconX size={13} />
-            </button>
+            </Button>
           </div>
-          <div className="flex-1 space-y-4 px-3 pb-6">
+          <div className="flex flex-1 flex-col gap-4 px-3 pb-6">
             <div>
               <h4 className="px-1 text-xs font-medium text-muted-foreground">Backlinks ({links?.backlinks.length ?? 0})</h4>
               {links?.backlinks.length ? (
-                <ul className="mt-1 space-y-0.5">
+                <ul className="mt-1 flex flex-col gap-0.5">
                   {links.backlinks.map((b) => (
                     <li key={b.id}>
                       <button
@@ -712,13 +1247,14 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
             </div>
             <div>
               <h4 className="px-1 text-xs font-medium text-muted-foreground">Linked to ({links?.outlinks.length ?? 0})</h4>              {links?.outlinks.length ? (
-                <ul className="mt-1 space-y-0.5">
+                <ul className="mt-1 flex flex-col gap-0.5">
                   {links.outlinks.map((o) => (
                     <li key={o.target}>
                       <button
-                        className={`w-full rounded-md px-2 py-1.5 text-left text-[13px] transition hover:bg-muted ${
+                        className={cn(
+                          "w-full rounded-md px-2 py-1.5 text-left text-[13px] transition hover:bg-muted",
                           o.resolved ? "text-primary" : "text-muted-foreground italic"
-                        }`}
+                        )}
                         onClick={() => navigateTo(o.target)}
                       >
                         {o.target}
@@ -733,7 +1269,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
             {mentions.length > 0 && (
               <div>
                 <h4 className="px-1 text-xs font-medium text-muted-foreground">Mentioned in ({mentions.length})</h4>
-                <ul className="mt-1 space-y-0.5">
+                <ul className="mt-1 flex flex-col gap-0.5">
                   {mentions.map((m) => (
                     <li key={m.id} className="rounded-md px-2 py-1.5 transition hover:bg-muted">
                       <button
@@ -767,16 +1303,15 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
             <DialogDescription>This note doesn’t exist yet. Create it now?</DialogDescription>
           </DialogHeader>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="chibako-new-folder">
-              Folder
-            </label>
-            <input
-              id="chibako-new-folder"
-              className="input"
-              value={createFolder}
-              onChange={(e) => setCreateFolder(e.target.value)}
-              placeholder="folder"
-            />
+            <Field>
+              <FieldLabel htmlFor="chibako-new-folder">Folder</FieldLabel>
+              <Input
+                id="chibako-new-folder"
+                value={createFolder}
+                onChange={(e) => setCreateFolder(e.target.value)}
+                placeholder="folder"
+              />
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateModal(null)}>
@@ -788,35 +1323,63 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* keyboard shortcuts help */}
-      <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
+      {/* bookmark dialog */}
+      <Dialog open={bookmarkOpen} onOpenChange={setBookmarkOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Keyboard shortcuts</DialogTitle>
-            <DialogDescription>Undo and redo are the editor’s built-in history.</DialogDescription>
-          </DialogHeader>
-          <ul className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1.5 text-[13px]">
-            {[
-              ["B", "Bold"], ["I", "Italic"], ["⇧X", "Strikethrough"],
-              ["J", "Inline code"], ["⇧J", "Code block"],
-              ["⇧T", "Checklist"], ["⇧B", "Bullet list"],
-              ["⇧L", "Link"], ["⇧K", "Wikilink"],
-              ["1 / 2 / 3", "Edit / split / preview"],
-              ["S", "Save now"], ["N", "New note"], ["K", "Command palette"],
-              ["/", "This help"], ["Z / ⇧Z", "Undo / redo"],
-            ].map(([keys, label]) => (
-              <li key={label} className="contents">
-                <span className="flex gap-1">
-                  {keys.split(" / ").map((k) => (
-                    <span key={k} className="kbd">{modKey}{k}</span>
-                  ))}
-                </span>
-                <span className="text-muted-foreground">{label}</span>
-              </li>
-            ))}
-          </ul>
+          <form onSubmit={submitBookmark} className="flex flex-col gap-4">
+            <DialogHeader>
+              <DialogTitle>{bookmark ? "Edit bookmark" : "Bookmark note"}</DialogTitle>
+              <DialogDescription>
+                {bookmark ? "Choose a group to organize this bookmark." : "Pick a group — or leave it in the default Bookmarks list."}
+              </DialogDescription>
+            </DialogHeader>
+            <Field>
+              <FieldLabel htmlFor="chibako-bm-group">Group</FieldLabel>
+              <Select
+                items={{ "": "No group", ...Object.fromEntries(bmGroups.map((g) => [g, g])), [NEW_GROUP_VALUE]: "New group…" }}
+                value={bmGroup}
+                onValueChange={(v) => { if (v !== null) setBmGroup(v); }}
+              >
+                <SelectTrigger size="sm" aria-label="Bookmark group" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No group</SelectItem>
+                  {bmGroups.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                  <SelectSeparator />
+                  <SelectItem value={NEW_GROUP_VALUE}>New group…</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            {bmGroup === NEW_GROUP_VALUE && (
+              <Field>
+                <FieldLabel htmlFor="chibako-bm-newgroup">New group name</FieldLabel>
+                <Input
+                  id="chibako-bm-newgroup"
+                  value={bmNewGroup}
+                  onChange={(e) => setBmNewGroup(e.target.value)}
+                  placeholder="e.g. Projects"
+                  maxLength={60}
+                  autoFocus
+                />
+              </Field>
+            )}
+            <DialogFooter className="flex items-center justify-between">
+              {bookmark ? (
+                <Button type="button" variant="outline" onClick={removeBookmark}>Remove bookmark</Button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-2">
+                <Button variant="outline" type="button" onClick={() => setBookmarkOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={bmBusy}>{bookmark ? "Save" : "Bookmark"}</Button>
+              </div>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
+
+      {/* keyboard shortcuts live in the TopBar (⌘/ or the keyboard icon) */}
     </div>
   );
 }

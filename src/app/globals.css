@@ -5,74 +5,84 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --accent: oklch(0.97 0 0);
-  --border: oklch(0.922 0 0);
+  --background: oklch(0.9803 0.0054 117.9216);
+  --foreground: oklch(0.3132 0.0134 145.2462);
+  --card: #edebe0;
+  --card-foreground: oklch(0.3132 0.0134 145.2462);
+  --popover: oklch(0.9803 0.0054 117.9216);
+  --popover-foreground: oklch(0.3132 0.0134 145.2462);
+  --primary: oklch(0.7007 0.056 142.4697);
+  --primary-foreground: oklch(0.9803 0.0054 117.9216);
+  --secondary: oklch(0.8763 0.0161 139.4393);
+  --secondary-foreground: oklch(0.3132 0.0134 145.2462);
+  --muted: oklch(0.9588 0.0045 134.85);
+  --muted-foreground: oklch(0.5439 0.0136 145.3844);
+  --accent: oklch(0.9245 0.0113 141.2617);
+  --accent-foreground: oklch(0.3132 0.0134 145.2462);
+  --destructive: oklch(0.6407 0.0638 18.9712);
+  --destructive-foreground: oklch(1 0 0);
   --mark: oklch(0.92 0.08 215);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.52 0.105 223.128);
-  --primary-foreground: oklch(0.984 0.019 200.873);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.879 0.169 91.605);
-  --chart-2: oklch(0.769 0.188 70.08);
-  --chart-3: oklch(0.666 0.179 58.318);
-  --chart-4: oklch(0.555 0.163 48.998);
-  --chart-5: oklch(0.473 0.137 46.201);
+  --success: oklch(0.58 0.12 155);
+  --warning: oklch(0.68 0.12 75);
+  --graph-wiki: var(--success);
+  --graph-index: var(--warning);
+  --border: oklch(0.9199 0.0103 131.3641);
+  --input: oklch(0.9199 0.0103 131.3641);
+  --ring: oklch(0.7007 0.056 142.4697);
+  --chart-1: oklch(0.7007 0.056 142.4697);
+  --chart-2: oklch(0.779 0.0459 142.0682);
+  --chart-3: oklch(0.8567 0.0346 141.1928);
+  --chart-4: oklch(0.8763 0.0161 139.4393);
+  --chart-5: oklch(0.9245 0.0113 141.2617);
   --radius: 0.45rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.609 0.126 221.723);
-  --sidebar-primary-foreground: oklch(0.984 0.019 200.873);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --sidebar: oklch(0.9612 0.0069 124.4484);
+  --sidebar-foreground: oklch(0.3804 0.017 145.2309);
+  --sidebar-primary: oklch(0.7007 0.056 142.4697);
+  --sidebar-primary-foreground: oklch(0.9803 0.0054 117.9216);
+  --sidebar-accent: oklch(0.9245 0.0113 141.2617);
+  --sidebar-accent-foreground: oklch(0.3132 0.0134 145.2462);
+  --sidebar-border: oklch(0.9199 0.0103 131.3641);
+  --sidebar-ring: oklch(0.7007 0.056 142.4697);
 }
 
 .dark {
-  --border: oklch(1 0 0 / 10%);
+  --background: oklch(0.2235 0.0049 145.4099);
+  --foreground: #edebe0;
+  --card: oklch(0.2658 0.0047 145.4425);
+  --card-foreground: #edebe0;
+  --popover: oklch(0.2235 0.0049 145.4099);
+  --popover-foreground: #edebe0;
+  --primary: oklch(0.7007 0.056 142.4697);
+  --primary-foreground: oklch(0.2235 0.0049 145.4099);
+  --secondary: oklch(0.3132 0.0134 145.2462);
+  --secondary-foreground: #edebe0;
+  --muted: oklch(0.2658 0.0047 145.4425);
+  --muted-foreground: oklch(0.7077 0.0128 145.4386);
+  --accent: oklch(0.3498 0.0174 145.1921);
+  --accent-foreground: #edebe0;
+  --destructive: oklch(0.4546 0.0773 20.5333);
+  --destructive-foreground: #edebe0;
   --mark: oklch(0.3 0.05 215);
-  --background: #000;
-  --foreground: #fff;
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.715 0.143 215.221);
-  --primary-foreground: oklch(0.15 0.03 215);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.879 0.169 91.605);
-  --chart-2: oklch(0.769 0.188 70.08);
-  --chart-3: oklch(0.666 0.179 58.318);
-  --chart-4: oklch(0.555 0.163 48.998);
-  --chart-5: oklch(0.473 0.137 46.201);
-  --sidebar: #000;
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.715 0.143 215.221);
-  --sidebar-primary-foreground: oklch(0.302 0.056 229.695);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-  --accent: oklch(0.269 0 0);
+  --success: oklch(0.74 0.13 155);
+  --warning: oklch(0.82 0.13 80);
+  --graph-wiki: var(--success);
+  --graph-index: var(--warning);
+  --border: oklch(0.3132 0.0134 145.2462);
+  --input: oklch(0.3132 0.0134 145.2462);
+  --ring: oklch(0.7007 0.056 142.4697);
+  --chart-1: oklch(0.7007 0.056 142.4697);
+  --chart-2: oklch(0.6 0.0617 142.5149);
+  --chart-3: oklch(0.4957 0.0604 142.2862);
+  --chart-4: oklch(0.414 0.0457 142.5131);
+  --chart-5: oklch(0.3401 0.0373 141.8832);
+  --sidebar: oklch(0.2016 0.005 145.3868);
+  --sidebar-foreground: oklch(0.8419 0.0105 145.4814);
+  --sidebar-primary: oklch(0.7007 0.056 142.4697);
+  --sidebar-primary-foreground: oklch(0.2235 0.0049 145.4099);
+  --sidebar-accent: oklch(0.3132 0.0134 145.2462);
+  --sidebar-accent-foreground: #edebe0;
+  --sidebar-border: oklch(0.3132 0.0134 145.2462);
+  --sidebar-ring: oklch(0.7007 0.056 142.4697);
 }
 
 html, body {
@@ -185,48 +195,35 @@ textarea {
 }
 .editor::placeholder { color: var(--muted-foreground); }
 
-/* ---- UI primitives ---- */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.7rem;
-  border-radius: var(--radius);
-  font-size: 0.84rem;
-  font-weight: 550;
+/* ---- rich (WYSIWYG) editor surface ---- */
+.wt-editor .ProseMirror { outline: none; min-height: 45vh; }
+/* Sticky toolbar: the write pane scrolls as one block; the toolbar pins while the doc moves. */
+.wt-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: 0 -1.5rem;
+  padding: 0.25rem 1.5rem 0.5rem;
+  background: color-mix(in oklch, var(--background) 90%, transparent);
+  backdrop-filter: blur(8px);
+}
+.wt-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
   color: var(--muted-foreground);
-  transition: background 0.12s ease, color 0.12s ease;
-  white-space: nowrap;
 }
-.btn:hover { background: var(--muted); color: var(--foreground); }
-.btn-primary {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-.btn-primary:hover { background: color-mix(in oklch, var(--primary) 90%, transparent); color: var(--primary-foreground); }
-.btn-danger:hover { background: color-mix(in oklch, var(--destructive) 12%, transparent); color: var(--destructive); }
+.wt-editor ul[data-type="taskList"] { list-style: none; padding-left: 0.25em; }
+.wt-editor ul[data-type="taskList"] li[data-type="taskItem"] { display: flex; align-items: flex-start; gap: 0.5em; }
+.wt-editor li[data-type="taskItem"] > label { flex: none; margin-top: 0.35em; cursor: pointer; }
+.wt-editor li[data-type="taskItem"] input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--primary); }
+.wt-editor li[data-type="taskItem"] > div { flex: 1 1 auto; min-width: 0; }
+.wt-editor li[data-type="taskItem"] > div p { margin: 0.15em 0; }
+.wt-editor li[data-type="taskItem"][data-checked="true"] > div { text-decoration: line-through; opacity: 0.65; }
+.wt-editor .wiki-link { cursor: pointer; user-select: none; }
 
-.input {
-  background: var(--popover);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.45rem 0.75rem;
-  font-size: 0.9rem;
-  color: var(--foreground);
-  outline: none;
-  width: 100%;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
-}
-.input:focus { border-color: color-mix(in oklch, var(--primary) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 15%, transparent); }
-.input::placeholder { color: var(--muted-foreground); }
-
-.card {
-  background: var(--popover);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem;
-}
-
+/* ---- UI primitives ---- */
 .tree-item {
   display: flex;
   align-items: center;
@@ -240,17 +237,6 @@ textarea {
 }
 .tree-item:hover { background: var(--muted); color: var(--foreground); }
 .tree-item.active { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 550; }
-
-.kbd {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.72rem;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-  padding: 0.05rem 0.35rem;
-  color: var(--muted-foreground);
-  background: var(--popover);
-}
 
 mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
 
@@ -277,6 +263,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-graph-wiki: var(--graph-wiki);
+  --color-graph-index: var(--graph-index);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -327,8 +318,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   color: var(--muted-foreground);
   white-space: nowrap;
 }
-:where(button, a, input, select, textarea):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.editor:focus-visible { outline-offset: -2px; }
+:where(button, a):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .fade-in { animation: none; } }
 @media (pointer: coarse) {
   button, [data-slot="button"], .tree-item { min-height: 44px; }

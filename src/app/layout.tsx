@@ -12,6 +12,15 @@ const sourceSans3 = Source_Sans_3({subsets:['latin'],variable:'--font-source-san
 export const metadata: Metadata = {
   title: { default: "Chibako", template: "%s · Chibako" },
   description: "Self-hosted Obsidian-like second brain with AI agent access.",
+  icons: {
+    icon: [
+      { url: "/favicon_io/favicon.ico" },
+      { url: "/favicon_io/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon_io/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+    ],
+    apple: "/favicon_io/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

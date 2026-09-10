@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconBot, IconGraph, IconGear, IconMenu, IconMoon, IconPlus, IconSearch, IconSun } from "@/components/icons";
+import { IconBot, IconGear, IconGraph, IconKeyboard, IconMenu, IconMoon, IconPlus, IconSearch, IconSun } from "@/components/icons";
 import { useTheme } from "@/components/ThemeProvider";
 import { IconTip } from "@/components/IconTip";
+import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupInput, InputGroupAddon, InputGroupText } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
@@ -12,13 +13,14 @@ import type { SearchResult } from "@/lib/notes";
 
 export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const router = useRouter();
-  const { theme, toggle } = useTheme();
+  const { toggle } = useTheme();
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [active, setActive] = useState(0);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const abort = useRef<AbortController | null>(null);
@@ -62,6 +64,22 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean;
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+      }
+    };
+    const onOpenShortcuts = () => setShortcutsOpen(true);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("chibako:open-shortcuts", onOpenShortcuts);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("chibako:open-shortcuts", onOpenShortcuts);
+    };
   }, []);
 
   function go(path: string) {
@@ -145,7 +163,8 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean;
           <IconGraph size={15} />
         </IconTip>
         <IconTip label="Toggle theme" onClick={toggle}>
-          {theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />}
+          <IconSun size={15} className="dark:hidden" />
+          <IconMoon size={15} className="hidden dark:block" />
         </IconTip>
         <IconTip label="Settings" onClick={() => router.push("/app/settings")}>
           <IconGear size={15} />
@@ -153,7 +172,12 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean;
         <IconTip label="Agent access" onClick={() => router.push("/app/agent")}>
           <IconBot size={15} />
         </IconTip>
+        <IconTip label="Keyboard shortcuts (⌘/)" onClick={() => setShortcutsOpen(true)}>
+          <IconKeyboard size={15} />
+        </IconTip>
       </div>
+
+      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </header>
   );
 }

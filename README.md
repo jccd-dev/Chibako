@@ -22,12 +22,20 @@ Designed to run on a single small VPS (1 vCPU / 4 GB is plenty).
 - **Agent access**
   - **REST API** — scoped, revocable API keys; every operation is an HTTP endpoint
   - **MCP server** — one stdio server with `list_notes`, `search_notes`,
-    `read_note`, `get_links`, `create_note`, `update_note`, `ingest_note`
-    (token-efficient bundle), `delete_note` (trash), `restore_note`,
-    `purge_note`, `get_graph`, `get_knowledge_schema`, `get_stats`
+    `recall` (token-budgeted semantic recall), `read_note`, `get_links`,
+    `create_note`, `update_note`, `ingest_note` (token-efficient bundle),
+    `delete_note` (trash), `restore_note`, `purge_note`, `get_graph`,
+    `get_knowledge_schema`, `get_stats`, plus `memory_save` / `list_observations`
+    / `delete_observation` (observation log) and `index_embeddings` /
+    `embedding_status`
 - **Token efficiency by design** — notes are raw Markdown (no JSON block trees),
-  list/links calls return titles and ids only, and `ingest_note` packs
-  note + links + schema into a single round trip
+  list/links calls return titles and ids only, `ingest_note` packs
+  note + links + schema into a single round trip, and `recall` returns only
+  ranked titles + trimmed snippets capped at a token budget (never full bodies)
+- **Optional semantic recall** — set `CHIBAKO_EMBEDDING_PROVIDER` +
+  `CHIBAKO_EMBEDDING_API_KEY` (any OpenAI-compatible `/v1/embeddings` endpoint)
+  to enable vector search fused with BM25 via RRF. Disabled by default, zero
+  network calls when off.
 - **Single admin auth** — password login + DB-backed sessions; one-time setup
 - **One file to back up** — the whole vault is `data/brain.db` (SQLite)
 

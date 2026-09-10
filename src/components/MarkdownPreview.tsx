@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { defaultSchema } from "rehype-sanitize";
-import { WIKILINK_RE } from "@/lib/markdown";
+import { WIKILINK_RE, stripFrontmatter } from "@/lib/markdown";
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -43,7 +43,8 @@ interface MarkdownPreviewProps {
 }
 
 export function MarkdownPreview({ content, onNavigate, className }: MarkdownPreviewProps) {
-  const processed = useMemo(() => preprocess(content), [content]);
+  // Frontmatter is metadata, not prose — never render it in reading view.
+  const processed = useMemo(() => preprocess(stripFrontmatter(content)), [content]);
 
   const components = useMemo(
     () => ({

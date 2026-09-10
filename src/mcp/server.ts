@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { getDb, DATA_DIR, now } from "../lib/db";
+import { getPropertyDefs } from "../lib/properties";
 import {
   listNotes,
   searchNotes,
@@ -16,7 +17,17 @@ import {
   restoreNote,
   purgeNote,
   graphData,
+  filterByProperties,
+  type PropertyFilter,
 } from "../lib/notes";
+import {
+  recall,
+  saveObservation,
+  listObservations,
+  deleteObservation,
+  indexEmbeddings,
+  getEmbeddingStatus,
+} from "../lib/recall";
 
 // ---------- auth ----------
 
@@ -63,30 +74,111 @@ const str = z.string();
 
 const idOrTitle = { id: str.optional(), title: str.optional() };
 
+/** Frontmatter-safe property value: scalar, string list, or null (delete key). */
+const propValue = z.union([str, z.number(), z.boolean(), z.array(str), z.null()]);
+const propPatch = z.record(str, propValue);
+
+function propFilters(args: { prop_key?: string; prop_value?: string }): PropertyFilter[] {
+  if (args.prop_key && args.prop_value) return [{ key: args.prop_key, value: args.prop_value }];
+  return [];
+}
+
 // ---------- tools ----------
 
 const server = new McpServer({ name: "chibako", version: "0.1.0" });
 
 server.registerTool("list_notes", {
   title: "List notes",
-  description: "List all notes. Returns only ids, titles, folders and kinds — a tiny payload, ideal for building an index. Optionally filter by folder or kind (note|wiki|index).",
-  inputSchema: z.object({ folder: str.optional(), kind: str.optional() }),
-}, (args: { folder?: string; kind?: string }) => {
+  description: "List all notes. Returns only ids, titles, folders and kinds — a tiny payload, ideal for building an index. Optionally filter by folder, kind (note|wiki|index), or a property (prop_key + prop_value, substring match; tags match any item).",
+  inputSchema: z.object({ folder: str.optional(), kind: str.optional(), prop_key: str.optional(), prop_value: str.optional() }),
+}, (args: { folder?: string; kind?: string; prop_key?: string; prop_value?: string }) => {
   if (!authorize("notes:read")) return deny();
   let notes = listNotes();
   if (args.folder) notes = notes.filter((n) => n.folder.startsWith(args.folder!));
   if (args.kind) notes = notes.filter((n) => n.kind === args.kind);
-  return ok({ count: notes.length, notes });
+  notes = filterByProperties(notes, propFilters(args));
+  return ok({ count: notes.length, notes: notes.map((n) => ({ ...n, properties: Object.keys(n.properties).length ? n.properties : undefined })) });
 });
 
 server.registerTool("search_notes", {
   title: "Search notes",
-  description: "Full-text search across all note titles and content. Returns matching notes with a snippet. Use before read_note to locate the right note cheaply.",
-  inputSchema: z.object({ query: str }),
-}, (args: { query: string }) => {
+  description: "Full-text search across all note titles and content. Returns matching notes with a snippet. Use before read_note to locate the right note cheaply. Optionally narrow by a property (prop_key + prop_value).",
+  inputSchema: z.object({ query: str, prop_key: str.optional(), prop_value: str.optional() }),
+}, (args: { query: string; prop_key?: string; prop_value?: string }) => {
   if (!authorizeAny(["notes:read", "search:read"])) return deny();
-  const results = searchNotes(args.query);
+  const results = searchNotes(args.query, propFilters(args));
   return ok({ count: results.length, results: results.map((r) => ({ id: r.id, title: r.title, folder: r.folder, snippet: r.snippet })) });
+});
+
+server.registerTool("recall", {
+  title: "Recall relevant context (token-budgeted)",
+  description: "Semantic recall, the recommended way to load context. Always BM25-ranked; when embeddings are enabled (CHIBAKO_EMBEDDING_*) it fuses vector similarity too. Returns only ranked titles + trimmed snippets, capped at a token budget — never full note bodies. Use this instead of search_notes when you want context, not a full dump.",
+  inputSchema: z.object({ query: str, limit: z.number().int().min(1).max(50).optional(), budget: z.number().int().min(100).max(20000).optional() }),
+}, async (args: { query: string; limit?: number; budget?: number }) => {
+  if (!authorizeAny(["notes:read", "search:read"])) return deny();
+  try {
+    const items = await recall({ query: args.query, limit: args.limit, budget: args.budget });
+    return ok({ count: items.length, results: items });
+  } catch (e) {
+    return fail(`recall failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+});
+
+server.registerTool("memory_save", {
+  title: "Save an observation/decision",
+  description: "Persist an explicit observation, decision, or pattern into the vault's observation log. Attach note_id (a note id) when it relates to a specific note. The log is searchable context for future sessions. Use this when you learned something worth remembering that isn't a full note.",
+  inputSchema: z.object({ content: str, note_id: str.optional(), source: str.optional() }),
+}, (args: { content: string; note_id?: string; source?: string }) => {
+  if (!authorize("notes:write")) return deny();
+  try {
+    const obs = saveObservation({ content: args.content, note_id: args.note_id, source: args.source });
+    return ok({ id: obs.id, note_id: obs.note_id, created_at: obs.created_at, saved: true });
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+});
+
+server.registerTool("list_observations", {
+  title: "List observations",
+  description: "List recent entries from the observation log (decisions/patterns saved via memory_save), newest first. Optionally limit count.",
+  inputSchema: z.object({ limit: z.number().int().min(1).max(500).optional() }),
+}, (args: { limit?: number }) => {
+  if (!authorize("notes:read")) return deny();
+  const list = listObservations(args.limit ?? 50);
+  return ok({ count: list.length, observations: list });
+});
+
+server.registerTool("delete_observation", {
+  title: "Delete an observation",
+  description: "Remove one entry from the observation log by id.",
+  inputSchema: z.object({ id: str }),
+}, (args: { id: string }) => {
+  if (!authorize("notes:write")) return deny();
+  if (!deleteObservation(args.id)) return fail("observation not found");
+  return ok({ deleted: args.id });
+});
+
+server.registerTool("index_embeddings", {
+  title: "Index note embeddings",
+  description: "Build/refresh the vector embeddings index for semantic recall. Requires embeddings to be enabled via CHIBAKO_EMBEDDING_* env vars; otherwise this is a no-op. Call after enabling embeddings to backfill existing notes.",
+  inputSchema: z.object({}),
+}, async () => {
+  if (!authorizeAny(["notes:write", "schema:write"])) return deny();
+  try {
+    const res = await indexEmbeddings();
+    return ok(res);
+  } catch (e) {
+    return fail(`embedding indexing failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+});
+
+server.registerTool("embedding_status", {
+  title: "Embedding status",
+  description: "Check whether semantic embeddings are enabled and how many notes are indexed.",
+  inputSchema: z.object({}),
+}, () => {
+  if (!authorize("notes:read")) return deny();
+  return ok(getEmbeddingStatus());
 });
 
 server.registerTool("read_note", {
@@ -97,7 +189,7 @@ server.registerTool("read_note", {
   if (!authorize("notes:read")) return deny();
   const note = args.id ? getNote(args.id) : args.title ? getNoteByTitle(args.title) : null;
   if (!note) return fail("note not found");
-  return ok({ id: note.id, title: note.title, folder: note.folder, kind: note.kind, updated_at: note.updated_at, content: note.content });
+  return ok({ id: note.id, title: note.title, folder: note.folder, kind: note.kind, updated_at: note.updated_at, properties: note.properties, content: note.content });
 });
 
 server.registerTool("get_links", {
@@ -115,25 +207,47 @@ server.registerTool("get_links", {
 
 server.registerTool("create_note", {
   title: "Create note",
-  description: "Create a new note. Title defaults to the first # heading if omitted. Content is plain Markdown; use [[Note Title]] to link to other notes. kind: note|wiki|index.",
-  inputSchema: z.object({ title: str.optional(), folder: str.optional(), content: str, kind: str.optional() }),
-}, (args: { title?: string; folder?: string; content: string; kind?: string }) => {
+  description: "Create a new note. Title defaults to the first # heading if omitted. Content is plain Markdown; use [[Note Title]] to link to other notes. kind: note|wiki|index. properties: optional frontmatter values (e.g. { status: \"draft\", tags: [\"a\", \"b\"] }) — check get_property_defs for the vault's typed dictionary.",
+  inputSchema: z.object({ title: str.optional(), folder: str.optional(), content: str, kind: str.optional(), properties: propPatch.optional() }),
+}, (args: { title?: string; folder?: string; content: string; kind?: string; properties?: Record<string, string | number | boolean | string[] | null> }) => {
   if (!authorize("notes:write")) return deny();
   const kind = args.kind === "wiki" || args.kind === "index" ? args.kind : "note";
-  const note = createNote({ title: args.title, folder: args.folder, content: args.content, kind });
-  return ok({ id: note.id, title: note.title, folder: note.folder, created: true });
+  const note = createNote({ title: args.title, folder: args.folder, content: args.content, kind, properties: args.properties });
+  return ok({ id: note.id, title: note.title, folder: note.folder, properties: note.properties, created: true });
 });
 
 server.registerTool("update_note", {
   title: "Update note",
-  description: "Update a note by id. Pass only the fields to change (title, folder, content, kind). Renaming a title automatically re-points all [[backlinks]]. Returns the updated note.",
-  inputSchema: z.object({ id: str, title: str.optional(), folder: str.optional(), content: str.optional(), kind: str.optional() }),
-}, (args: { id: string; title?: string; folder?: string; content?: string; kind?: string }) => {
+  description: "Update a note by id. Pass only the fields to change (title, folder, content, kind, properties). Renaming a title automatically re-points all [[backlinks]]. properties merges into the existing frontmatter (null removes a key). Returns the updated note.",
+  inputSchema: z.object({ id: str, title: str.optional(), folder: str.optional(), content: str.optional(), kind: str.optional(), properties: propPatch.optional() }),
+}, (args: { id: string; title?: string; folder?: string; content?: string; kind?: string; properties?: Record<string, string | number | boolean | string[] | null> }) => {
   if (!authorize("notes:write")) return deny();
   const kind = args.kind === "wiki" || args.kind === "index" ? args.kind : undefined;
-  const updated = updateNote(args.id, { title: args.title, folder: args.folder, content: args.content, kind });
+  const updated = updateNote(args.id, { title: args.title, folder: args.folder, content: args.content, kind, properties: args.properties });
   if (!updated) return fail("note not found");
-  return ok({ id: updated.id, title: updated.title, folder: updated.folder, updated_at: updated.updated_at, saved: true });
+  return ok({ id: updated.id, title: updated.title, folder: updated.folder, properties: updated.properties, updated_at: updated.updated_at, saved: true });
+});
+
+server.registerTool("set_properties", {
+  title: "Set note properties",
+  description: "Set frontmatter properties on one note by id or title, merging with existing values (null removes a key). Typed definitions live in get_property_defs — prefer those keys and values for consistency.",
+  inputSchema: z.object({ ...idOrTitle, properties: propPatch }),
+}, (args: { id?: string; title?: string; properties: Record<string, string | number | boolean | string[] | null> }) => {
+  if (!authorize("notes:write")) return deny();
+  const note = args.id ? getNote(args.id) : args.title ? getNoteByTitle(args.title) : null;
+  if (!note) return fail("note not found");
+  const updated = updateNote(note.id, { properties: args.properties });
+  if (!updated) return fail("note not found");
+  return ok({ id: updated.id, title: updated.title, properties: updated.properties, saved: true });
+});
+
+server.registerTool("get_property_defs", {
+  title: "Get property definitions",
+  description: "The vault's typed property dictionary (name, type, allowed options). Read this once to learn which properties (e.g. status, tags, category) notes carry and which values are canonical.",
+  inputSchema: z.object({}),
+}, () => {
+  if (!authorizeAny(["schema:read", "notes:read"])) return deny();
+  return ok({ properties: getPropertyDefs() });
 });
 
 server.registerTool("delete_note", {
@@ -207,7 +321,7 @@ server.registerTool("ingest_note", {
   const back = getBacklinks(note.title).map((b) => ({ id: b.id, title: b.title }));
   const schema = getDb().prepare(`SELECT value FROM settings WHERE key = 'knowledge_schema'`).get() as { value: string } | undefined;
   return ok({
-    note: { id: note.id, title: note.title, folder: note.folder, kind: note.kind, updated_at: note.updated_at, content: note.content },
+    note: { id: note.id, title: note.title, folder: note.folder, kind: note.kind, updated_at: note.updated_at, properties: note.properties, content: note.content },
     outlinks: out,
     backlinks: back,
     schema: schema?.value ?? "(no schema configured)",

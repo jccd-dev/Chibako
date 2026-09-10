@@ -14,6 +14,15 @@ compiled wiki layer that is AI-authored.
 - Use folders sparingly; titles are the primary identity of a note.
 - Note titles are unique and stable. Renaming a title re-points backlinks.
 
+## Properties
+- Notes carry typed properties as YAML frontmatter (Obsidian-compatible).
+- Check the property dictionary first (get_property_defs / GET /api/properties)
+  and reuse its names and values — consistency beats inventing new keys.
+- Typical keys: status (draft/active/done/archived), category, tags (a list).
+- Set properties with update_note/set_properties ({"properties": {...}}); pass
+  null as a value to remove a key. Filter with prop_key/prop_value on
+  list_notes and search_notes, or ?prop.<key>=<value> on the REST API.
+
 ## How to answer questions
 - Read the note the user asks about, then follow [[links]] and backlinks.
 - If a question is a recurring one, answer from compiled wiki notes when they

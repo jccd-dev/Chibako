@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function SetupForm() {
   const router = useRouter();
@@ -32,19 +36,25 @@ export function SetupForm() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>}
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">Admin password</label>
-        <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" autoFocus required />
-      </div>
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">Confirm password</label>
-        <input className="input" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat password" required />
-      </div>
-      <button className="btn btn-primary w-full justify-center py-2" disabled={busy} type="submit">
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="setup-password">Admin password</FieldLabel>
+          <Input id="setup-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" autoFocus required />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="setup-confirm">Confirm password</FieldLabel>
+          <Input id="setup-confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat password" required />
+        </Field>
+      </FieldGroup>
+      <Button className="w-full" disabled={busy} type="submit">
         {busy ? "Setting up…" : "Create account"}
-      </button>
+      </Button>
     </form>
   );
 }

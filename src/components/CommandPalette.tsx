@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
+import { cn } from "@/lib/utils";
 import { IconBot, IconFile, IconGear, IconGraph, IconHome, IconPlus } from "@/components/icons";
 
 interface Action {
@@ -135,44 +138,38 @@ export function CommandPalette() {
     }
   }
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 p-4 pt-[12vh]"
-      onClick={close}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
-    >
-      <div
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-popover shadow-2xl fade-in"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <input
+    <Dialog open={open} onOpenChange={value => value ? setOpen(true) : close()}>
+      <DialogContent showCloseButton={false} className="sm:max-w-lg">
+        <DialogTitle className="sr-only">Command palette</DialogTitle>
+        <Input
           ref={inputRef}
-          className="w-full border-b border-border bg-transparent px-4 py-3 text-[15px] outline-none placeholder:text-muted-foreground"
           placeholder="Type a command or search notes…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKey}
           role="combobox"
-          aria-expanded
+          aria-expanded={open}
+          aria-controls="command-results"
+          aria-activedescendant={flat[idx] ? `command-${flat[idx].key}` : undefined}
           aria-autocomplete="list"
           aria-label="Command palette"
         />
-        <div className="max-h-80 overflow-y-auto p-1.5" role="listbox">
+        <div className="max-h-80 overflow-y-auto p-1.5" role="listbox" id="command-results">
           {flat.length === 0 && (
             <p className="px-3 py-4 text-sm text-muted-foreground">No matches. Press ↵ to create “{q}”.</p>
           )}
           {flat.map((item, i) => (
             <button
               key={item.key}
+              id={`command-${item.key}`}
+              tabIndex={-1}
               role="option"
               aria-selected={i === idx}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition ${
-                i === idx ? "bg-muted" : ""
-              }`}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition",
+                i === idx && "bg-muted"
+              )}
               onMouseEnter={() => setIdx(i)}
               onClick={() => item.run()}
             >
@@ -199,7 +196,7 @@ export function CommandPalette() {
         <p className="border-t border-border px-4 py-1.5 text-[11px] text-muted-foreground">
           ↑↓ navigate · ↵ run · esc close
         </p>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

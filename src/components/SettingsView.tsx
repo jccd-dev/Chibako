@@ -4,7 +4,19 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { IconCheck, IconCopy, IconKey, IconTrash, IconX } from "@/components/icons";
+import { IconCheck, IconKey, IconTrash, IconX } from "@/components/icons";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { IconPlus } from "@/components/icons";
+import type { PropertyDef, PropertyType } from "@/lib/property-types";
+import { PROPERTY_TYPES } from "@/lib/property-types";
 
 const ALL_SCOPES = [
   "notes:read",
@@ -26,9 +38,11 @@ interface ApiKey {
 
 export function SettingsView() {
   const router = useRouter();
-  const [tab, setTab] = useState<"schema" | "keys" | "password">("schema");
+  const [tab, setTab] = useState<"schema" | "properties" | "keys" | "password">("schema");
   const [schema, setSchema] = useState("");
   const [schemaSaved, setSchemaSaved] = useState(false);
+  const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
+  const [propsSaved, setPropsSaved] = useState(false);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyScopes, setNewKeyScopes] = useState<string[]>(["notes:read", "search:read", "schema:read"]);
@@ -40,8 +54,41 @@ export function SettingsView() {
 
   useEffect(() => {
     fetch("/api/schema").then((r) => r.json()).then((d) => setSchema(d.schema)).catch(() => {});
+    fetch("/api/properties").then((r) => r.json()).then((d) => setPropDefs(d.properties ?? [])).catch(() => {});
     loadKeys();
   }, []);
+
+  function updatePropDef(index: number, patch: Partial<PropertyDef>) {
+    setPropDefs((defs) => defs.map((d, i) => {
+      const next = i === index ? { ...d, ...patch } : d;
+      if (next.type !== "select") delete next.options;
+      return next;
+    }));
+  }
+
+  function addPropDef() {
+    setPropDefs((defs) => {
+      let name = "property";
+      for (let i = 2; defs.some((d) => d.name === name); i++) name = `property${i}`;
+      return [...defs, { name, type: "string" as PropertyType }];
+    });
+  }
+
+  async function savePropDefs() {
+    const res = await fetch("/api/properties", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ properties: propDefs }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setPropDefs(data.properties ?? propDefs);
+      setPropsSaved(true);
+      setTimeout(() => setPropsSaved(false), 2000);
+    } else {
+      toast.error(data.error || "Could not save properties.");
+    }
+  }
 
   async function loadKeys() {
     const res = await fetch("/api/keys");
@@ -107,143 +154,182 @@ export function SettingsView() {
     if (res.ok) setPw({ current: "", next: "" });
   }
 
-  const tabs = [
-    { id: "schema" as const, label: "Knowledge schema (AGENTS.md)" },
-    { id: "keys" as const, label: "API keys" },
-    { id: "password" as const, label: "Password" },
-  ];
-
   return (
     <div className="mx-auto max-w-3xl overflow-y-auto px-6 py-6">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-      <div className="mt-4 flex gap-1 rounded-lg border border-border p-1">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-              tab === t.id ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="mt-4">
+        <TabsList className="w-full">
+          <TabsTrigger value="schema">Knowledge schema (AGENTS.md)</TabsTrigger>
+          <TabsTrigger value="properties">Properties</TabsTrigger>
+          <TabsTrigger value="keys">API keys</TabsTrigger>
+          <TabsTrigger value="password">Password</TabsTrigger>
+        </TabsList>
 
-      {tab === "schema" && (
-        <div className="mt-5 space-y-3 fade-in">
-          <p className="text-sm text-muted-foreground">
-            This is the <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">AGENTS.md</code>-format instructions served to your AI agent. It defines how your agent should read, link, and compile notes — the &ldquo;second brain&rdquo; contract. Edits apply immediately to any agent that fetches it via REST or MCP.
-          </p>
-          <textarea className="input h-[26rem] font-mono !text-[13px] leading-relaxed" value={schema} onChange={(e) => setSchema(e.target.value)} spellCheck={false} />
-          <div className="flex items-center gap-2">
-            <button className="btn btn-primary" onClick={saveSchema} disabled={schemaSaved}>
-              {schemaSaved ? <><IconCheck size={14} /> Saved</> : "Save schema"}
-            </button>
-            <button className="btn" onClick={() => setRestoreConfirm(true)}>
-              Restore default
-            </button>
-            <span className="ml-auto text-xs text-muted-foreground">
-              {schema.length.toLocaleString()} chars
-            </span>
-          </div>
-        </div>
-      )}
-
-      {tab === "keys" && (
-        <div className="mt-5 space-y-5 fade-in">
-          <div className="card">
-            <h3 className="flex items-center gap-2 text-sm font-semibold"><IconKey size={15} /> New agent key</h3>
-            <div className="mt-3 space-y-3">
-              <input className="input" placeholder="Label, e.g. Hermes" value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} />
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Scopes</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {ALL_SCOPES.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() =>
-                        setNewKeyScopes((prev) =>
-                          prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
-                        )
-                      }
-                      className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                        newKeyScopes.includes(s)
-                          ? "border-primary bg-primary/12 text-primary"
-                          : "border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button className="btn btn-primary" onClick={createKey}>Generate key</button>
+        <TabsContent value="schema" className="fade-in">
+          <div className="flex flex-col gap-3 pt-3">
+            <p className="text-sm text-muted-foreground">
+              This is the <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">AGENTS.md</code>-format instructions served to your AI agent. It defines how your agent should read, link, and compile notes — the &ldquo;second brain&rdquo; contract. Edits apply immediately to any agent that fetches it via REST or MCP.
+            </p>
+            <Textarea className="h-[26rem] font-mono !text-[13px] leading-relaxed" value={schema} onChange={(e) => setSchema(e.target.value)} spellCheck={false} />
+            <div className="flex items-center gap-2">
+              <Button onClick={saveSchema} disabled={schemaSaved}>
+                {schemaSaved ? <><IconCheck size={14} data-icon="inline-start" /> Saved</> : "Save schema"}
+              </Button>
+              <Button variant="outline" onClick={() => setRestoreConfirm(true)}>
+                Restore default
+              </Button>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {schema.length.toLocaleString()} chars
+              </span>
             </div>
           </div>
+        </TabsContent>
 
-          {revealed && (
-            <div className="card border-primary/50">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h4 className="text-sm font-semibold text-primary">Key created — copy it now</h4>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {revealed.name} · <span className="font-semibold text-red-500">It won't be shown again.</span>
-                  </p>
-                  <code className="mt-2 block select-all break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs">{revealed.key}</code>
-                </div>
-                <button className="btn" onClick={() => setRevealed(null)}><IconX size={14} /></button>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <h3 className="text-sm font-semibold">Existing keys ({keys.length})</h3>
-            {keys.length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">No keys yet.</p>
+        <TabsContent value="properties" className="fade-in">
+          <div className="flex flex-col gap-3 pt-3">
+            <p className="text-sm text-muted-foreground">
+              Define the properties every note can carry (stored as YAML frontmatter, Obsidian-compatible). Typed, consistent
+              properties are what keep a vault searchable — the note editor renders them as inputs, and AI agents read this
+              dictionary to set and filter by them.
+            </p>
+            {propDefs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No properties defined yet.</p>
             ) : (
-              <ul className="mt-2 space-y-2">
-                {keys.map((k) => (
-                  <li key={k.id} className="card flex items-center gap-3 !py-2.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{k.name || "Unnamed"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {k.scopes.join(", ")} · created {new Date(k.created_at * 1000).toLocaleDateString()}
-                        {k.last_used_at ? ` · last used ${new Date(k.last_used_at * 1000).toLocaleDateString()}` : " · never used"}
-                      </p>
-                    </div>
-                    <button className="btn btn-danger" onClick={() => setRevokeTarget(k.id)}><IconTrash size={14} /></button>
+              <ul className="flex flex-col gap-2">
+                {propDefs.map((def, i) => (
+                  <li key={i} className="flex items-end gap-2 rounded-lg bg-card p-3 ring-1 ring-foreground/10">
+                    <Field className="w-44">
+                      <FieldLabel>Name</FieldLabel>
+                      <Input value={def.name} onChange={(e) => updatePropDef(i, { name: e.target.value })} aria-label="Property name" maxLength={64} />
+                    </Field>
+                    <Field className="w-36">
+                      <FieldLabel>Type</FieldLabel>
+                      <Select
+                        items={Object.fromEntries(PROPERTY_TYPES.map((t) => [t, t]))}
+                        value={def.type}
+                        onValueChange={(v) => { if (v !== null) updatePropDef(i, { type: v as PropertyType }); }}
+                      >
+                        <SelectTrigger aria-label={`Type of ${def.name}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {PROPERTY_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    {def.type === "select" && (
+                      <Field className="min-w-0 flex-1">
+                        <FieldLabel>Allowed values</FieldLabel>
+                        <Input
+                          value={(def.options ?? []).join(", ")}
+                          placeholder="comma, separated, values"
+                          onChange={(e) => updatePropDef(i, { options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                          aria-label={`Options for ${def.name}`}
+                        />
+                      </Field>
+                    )}
+                    <Button variant="ghost" size="icon" aria-label={`Remove ${def.name}`} className="mb-0.5" onClick={() => setPropDefs((defs) => defs.filter((_, j) => j !== i))}>
+                      <IconTrash size={14} />
+                    </Button>
                   </li>
                 ))}
               </ul>
             )}
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={addPropDef}>
+                <IconPlus size={14} data-icon="inline-start" /> Add property
+              </Button>
+              <Button onClick={savePropDefs} disabled={propsSaved}>
+                {propsSaved ? <><IconCheck size={14} data-icon="inline-start" /> Saved</> : "Save properties"}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        </TabsContent>
 
-      {tab === "password" && (
-        <form className="mt-5 max-w-sm space-y-3 fade-in" onSubmit={changePassword}>
-          {pwMsg && (
-            <p className={`rounded-lg border px-3 py-2 text-sm ${pwMsg.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600" : "border-red-500/30 bg-red-500/10 text-red-600"}`}>
-              {pwMsg.text}
-            </p>
-          )}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Current password</label>
-            <input className="input" type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required />
+        <TabsContent value="keys" className="fade-in">
+          <div className="flex flex-col gap-5 pt-3">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><IconKey size={15} /> New agent key</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <Input placeholder="Label, e.g. Hermes" value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} aria-label="Key label" />
+                <Field>
+                  <FieldLabel>Scopes</FieldLabel>
+                  <ToggleGroup multiple variant="outline" size="sm" className="flex-wrap" value={newKeyScopes}
+                    onValueChange={(values) => setNewKeyScopes(values as string[])} aria-label="Key scopes">
+                    {ALL_SCOPES.map((s) => (
+                      <ToggleGroupItem key={s} value={s}>{s}</ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </Field>
+                <div><Button onClick={createKey}>Generate key</Button></div>
+              </CardContent>
+            </Card>
+
+            {revealed && (
+              <Card className="ring-primary/50">
+                <CardContent className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="text-primary">Key created — copy it now</CardTitle>
+                    <CardDescription className="mt-0.5">
+                      {revealed.name} · <span className="font-semibold text-destructive">It won't be shown again.</span>
+                    </CardDescription>
+                    <code className="mt-2 block select-all break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs">{revealed.key}</code>
+                  </div>
+                  <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onClick={() => setRevealed(null)}><IconX size={14} /></Button>
+                </CardContent>
+              </Card>
+            )}
+
+            <div>
+              <h3 className="text-sm font-semibold">Existing keys ({keys.length})</h3>
+              {keys.length === 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">No keys yet.</p>
+              ) : (
+                <ul className="mt-2 flex flex-col gap-2">
+                  {keys.map((k) => (
+                    <li key={k.id} className="flex items-center gap-3 rounded-lg bg-card py-2 pl-4 pr-2 ring-1 ring-foreground/10">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{k.name || "Unnamed"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {k.scopes.join(", ")} · created {new Date(k.created_at * 1000).toLocaleDateString()}
+                          {k.last_used_at ? ` · last used ${new Date(k.last_used_at * 1000).toLocaleDateString()}` : " · never used"}
+                        </p>
+                      </div>
+                      <Button variant="destructive" size="icon-sm" aria-label={`Revoke ${k.name || "Unnamed"}`} onClick={() => setRevokeTarget(k.id)}><IconTrash size={14} /></Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">New password</label>
-            <input className="input" type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} placeholder="At least 8 characters" required />
-          </div>
-          <button className="btn btn-primary" type="submit">Update password</button>
-        </form>
-      )}
+        </TabsContent>
+
+        <TabsContent value="password" className="fade-in">
+          <form className="flex max-w-sm flex-col gap-3 pt-3" onSubmit={changePassword}>
+            {pwMsg && (
+              <Alert variant={pwMsg.ok ? "default" : "destructive"} className={pwMsg.ok ? "border-success/30 bg-success/10 text-success" : undefined}>
+                <AlertDescription>{pwMsg.text}</AlertDescription>
+              </Alert>
+            )}
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="pw-current">Current password</FieldLabel>
+                <Input id="pw-current" type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="pw-next">New password</FieldLabel>
+                <Input id="pw-next" type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} placeholder="At least 8 characters" required />
+              </Field>
+            </FieldGroup>
+            <div><Button type="submit">Update password</Button></div>
+          </form>
+        </TabsContent>
+      </Tabs>
 
       <div className="mt-8 border-t border-border pt-4">
-        <button className="btn" onClick={() => { fetch("/api/logout", { method: "POST" }); router.push("/login"); }}>
+        <Button variant="ghost" onClick={() => { fetch("/api/logout", { method: "POST" }); router.push("/login"); }}>
           Sign out
-        </button>
+        </Button>
       </div>
       <ConfirmDialog
         open={revokeTarget !== null}

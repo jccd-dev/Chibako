@@ -12,6 +12,7 @@ export function IconTip({
   className,
   children,
   active,
+  destructive,
 }: {
   label: string;
   kbd?: string;
@@ -19,12 +20,13 @@ export function IconTip({
   className?: string;
   children: ReactNode;
   active?: boolean;
+  destructive?: boolean;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button variant={className?.includes("btn-danger") ? "destructive" : "ghost"} size="icon" type="button" onClick={onClick} aria-label={label} aria-pressed={active}>
+          <Button variant={destructive ? "destructive" : "ghost"} size="icon" type="button" onClick={onClick} aria-label={label} aria-pressed={active}>
             {children}
           </Button>
         }

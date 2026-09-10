@@ -1,15 +1,22 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon, IconLoader } from "@tabler/icons-react"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  // next-themes resolves the stored theme during the first client render, which
+  // would diverge from the server's "system". Gate on mount so the SSR markup
+  // and the hydration render always match; the real theme applies after mount.
+  const [mounted, setMounted] = useState(false)
+  const { resolvedTheme } = useTheme()
+  useEffect(() => setMounted(true), [])
+  const theme: ToasterProps["theme"] = mounted ? (resolvedTheme === "light" ? "light" : "dark") : "system"
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={theme}
       className="toaster group"
       icons={{
         success: (

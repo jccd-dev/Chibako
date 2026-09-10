@@ -12,6 +12,8 @@ import {
 } from "d3-force";
 import { select } from "d3-selection";
 import type { NoteSummary } from "@/lib/notes";
+import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface GraphNode extends SimulationNodeDatum {
   id: string;
@@ -32,8 +34,8 @@ interface GraphData {
 
 const KIND_COLOR: Record<string, string> = {
   note: "var(--primary)",
-  wiki: "#10b981",
-  index: "#f59e0b",
+  wiki: "var(--graph-wiki)",
+  index: "var(--graph-index)",
 };
 
 export function GraphView() {
@@ -201,25 +203,36 @@ export function GraphView() {
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
-        <select
-          className="rounded-lg border border-border bg-popover px-2 py-1.5 text-xs outline-none"
+        <Select
+          items={{ "": "All folders", ...Object.fromEntries(folders.map((f) => [f, f])) }}
           value={folder}
-          onChange={(e) => setFolder(e.target.value)}
-          aria-label="Filter by folder"
+          onValueChange={(value) => {
+            if (value !== null) setFolder(value);
+          }}
         >
-          <option value="">All folders</option>
-          {folders.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            size="sm"
+            aria-label="Filter by folder"
+            className="h-auto! rounded-lg border-border bg-popover px-2.5! py-1.5! text-xs text-muted-foreground shadow-none! hover:text-foreground dark:bg-popover dark:hover:bg-popover"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All folders</SelectItem>
+            {folders.map((f) => (
+              <SelectItem key={f} value={f}>
+                {f}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <button
-          className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
+          className={cn(
+            "rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
             orphansOnly
               ? "border-primary bg-primary/12 text-primary"
               : "border-border bg-popover text-muted-foreground"
-          }`}
+          )}
           onClick={() => setOrphansOnly((v) => !v)}
           title="Highlight notes with no links"
           aria-pressed={orphansOnly}

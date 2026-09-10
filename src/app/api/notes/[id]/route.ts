@@ -19,6 +19,7 @@ export const PATCH = withAuth("notes:write", async (req: NextRequest, _scopes, c
     content: typeof body.content === "string" ? body.content : undefined,
     kind: body.kind === "note" || body.kind === "wiki" || body.kind === "index" ? body.kind : undefined,
     is_pinned: body.is_pinned === 1 || body.is_pinned === 0 ? body.is_pinned : undefined,
+    properties: body.properties && typeof body.properties === "object" && !Array.isArray(body.properties) ? body.properties : undefined,
   });
   if (!updated) return Response.json({ error: "Not found" }, { status: 404 });
   return Response.json({ note: updated });

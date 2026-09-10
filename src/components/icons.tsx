@@ -3,9 +3,10 @@ import type { ReactNode } from "react";
 interface IconProps {
   size?: number;
   className?: string;
+  filled?: boolean;
 }
 
-function Svg({ size = 16, className, children, filled = false }: IconProps & { children: ReactNode; filled?: boolean }) {
+function Svg({ size = 16, className, children, filled = false }: IconProps & { children: ReactNode }) {
   return (
     <svg
       width={size}
@@ -95,4 +96,10 @@ export const IconKey = (p: IconProps) => (
 );
 export const IconExternal = (p: IconProps) => (
   <Svg {...p}><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></Svg>
+);
+export const IconBookmark = (p: IconProps) => (
+  <Svg {...p}><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></Svg>
+);
+export const IconKeyboard = (p: IconProps) => (
+  <Svg {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h0" /><path d="M10 10h0" /><path d="M14 10h0" /><path d="M18 10h0" /><path d="M6 14h0" /><path d="M18 14h0" /><path d="M9 14h6" /></Svg>
 );

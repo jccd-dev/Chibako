@@ -12,8 +12,8 @@ export default async function GraphPage() {
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-primary" /> note</span>
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> wiki</span>
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> index</span>
+          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-graph-wiki" /> wiki</span>
+          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-graph-index" /> index</span>
         </div>
       </div>
       <div className="min-h-0 flex-1">

@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function LoginForm() {
   const router = useRouter();
@@ -29,15 +33,21 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>}
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">Password</label>
-        <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your admin password" autoFocus required />
-      </div>
-      <button className="btn btn-primary w-full justify-center py-2" disabled={busy} type="submit">
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="login-password">Password</FieldLabel>
+          <Input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your admin password" autoFocus required />
+        </Field>
+      </FieldGroup>
+      <Button className="w-full" disabled={busy} type="submit">
         {busy ? "Signing in…" : "Sign in"}
-      </button>
+      </Button>
     </form>
   );
 }

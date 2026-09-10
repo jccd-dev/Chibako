@@ -72,6 +72,44 @@ const MIGRATIONS: string[] = [
     created_at  INTEGER NOT NULL
   );
   `,
+  `
+  -- Optional dense embeddings for semantic recall. Populated only when an
+  -- embedding provider is configured (CHIBAKO_EMBEDDING_* env). id maps to
+  -- notes.id; the vector is stored as a JSON number array (384-dim small / 1536 etc).
+  CREATE TABLE IF NOT EXISTS note_embeddings (
+    note_id     TEXT PRIMARY KEY,
+    model       TEXT NOT NULL,
+    vector      TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+  `,
+  `
+  -- Explicit memory observations recorded by agents (narrow version of the
+  -- "fill itself" hook idea: agents call memory_save to persist decisions and
+  -- patterns; auto-capture hooks are post-MVP).
+  CREATE TABLE IF NOT EXISTS observations (
+    id          TEXT PRIMARY KEY,
+    note_id     TEXT,
+    content     TEXT NOT NULL,
+    source      TEXT NOT NULL DEFAULT 'agent',
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_observations_note ON observations (note_id);
+  CREATE INDEX IF NOT EXISTS idx_observations_created ON observations (created_at);
+  `,
+  `
+  -- Obsidian-style bookmarks: notes with a custom display label, optional
+  -- group and a manual sort order (group_name avoids the reserved word GROUP).
+  CREATE TABLE IF NOT EXISTS bookmarks (
+    id         TEXT PRIMARY KEY,
+    note_id    TEXT NOT NULL,
+    label      TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL DEFAULT '',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_bookmarks_note ON bookmarks (note_id);
+  `,
 ];
 
 export function getDb(): Database.Database {
@@ -91,6 +129,10 @@ export function getDb(): Database.Database {
     const names = new Set(cols.map((c) => c.name));
     if (!names.has("deleted_at")) db.exec(`ALTER TABLE notes ADD COLUMN deleted_at INTEGER`);
     if (!names.has("is_pinned")) db.exec(`ALTER TABLE notes ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0`);
+    // Materialized property cache (JSON). The raw YAML frontmatter embedded in
+    // content remains the source of truth; this column exists for cheap
+    // WHERE-based filtering and list payloads, and is re-synced on every write.
+    if (!names.has("properties")) db.exec(`ALTER TABLE notes ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'`);
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

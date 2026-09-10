@@ -1,7 +1,17 @@
 import { getDb, now, uid } from "./db";
-import { extractWikiLinks, resolveWikiTarget, WIKILINK_RE } from "./markdown";
+import {
+  applyFrontmatter,
+  extractWikiLinks,
+  parseFrontmatter,
+  resolveWikiTarget,
+  stripFrontmatter,
+  WIKILINK_RE,
+  type NoteProperties,
+  type PropValue,
+} from "./markdown";
 
 export type NoteKind = "note" | "wiki" | "index";
+export type { NoteProperties, PropValue };
 
 export interface Note {
   id: string;
@@ -13,6 +23,7 @@ export interface Note {
   updated_at: number;
   deleted_at: number | null;
   is_pinned: number;
+  properties: NoteProperties;
 }
 
 export interface NoteSummary {
@@ -25,6 +36,8 @@ export interface NoteSummary {
   /** Soft-delete timestamp (trash). Null = visible. */
   deleted_at: number | null;
   is_pinned: number;
+  /** Property cache (parsed from the properties JSON column). */
+  properties: NoteProperties;
 }
 
 export interface NoteLink {
@@ -34,10 +47,33 @@ export interface NoteLink {
   target_id: string | null;
 }
 
-const SUM = `id, title, folder, kind, created_at, updated_at, deleted_at, is_pinned`;
+const SUM = `id, title, folder, kind, created_at, updated_at, deleted_at, is_pinned, properties`;
+
+function parsePropsColumn(raw: unknown): NoteProperties {
+  if (typeof raw !== "string" || !raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as NoteProperties) : {};
+  } catch {
+    return {};
+  }
+}
+
+function toSummary(row: Record<string, unknown>): NoteSummary {
+  const { properties, ...rest } = row;
+  return { ...rest, properties: parsePropsColumn(properties) } as unknown as NoteSummary;
+}
+
+/** Single-note read: frontmatter in content is the source of truth. */
+function toNote(row: Record<string, unknown> | undefined): Note | null {
+  if (!row) return null;
+  const note = row as unknown as Note;
+  note.properties = parseFrontmatter(note.content).props;
+  return note;
+}
 
 export function listNotes(): NoteSummary[] {
-  return getDb().prepare(`SELECT ${SUM} FROM notes WHERE deleted_at IS NULL ORDER BY folder, title`).all() as NoteSummary[];
+  return (getDb().prepare(`SELECT ${SUM} FROM notes WHERE deleted_at IS NULL ORDER BY folder, title`).all() as Array<Record<string, unknown>>).map(toSummary);
 }
 
 /** Trashed notes, newest first. Lazily purges items older than 30 days. */
@@ -47,30 +83,33 @@ export function listTrash(): NoteSummary[] {
     .prepare(`SELECT id FROM notes WHERE deleted_at IS NOT NULL AND deleted_at < ?`)
     .all(now() - 30 * 24 * 3600) as Array<{ id: string }>;
   for (const s of stale) purgeNote(s.id);
-  return db.prepare(`SELECT ${SUM} FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`).all() as NoteSummary[];
+  return (db.prepare(`SELECT ${SUM} FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`).all() as Array<Record<string, unknown>>).map(toSummary);
 }
 
 export function getNote(id: string, includeDeleted = false): Note | null {
-  const row = getDb().prepare(`SELECT * FROM notes WHERE id = ?`).get(id) as Note | null;
+  const row = getDb().prepare(`SELECT * FROM notes WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
   if (!row) return null;
   if (!includeDeleted && row.deleted_at) return null;
-  return row;
+  return toNote(row);
 }
 
 export function getNoteByTitle(title: string): Note | null {
-  return getDb()
-    .prepare(`SELECT * FROM notes WHERE title = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`)
-    .get(title) as Note | null;
+  return toNote(
+    getDb().prepare(`SELECT * FROM notes WHERE title = ? COLLATE NOCASE AND deleted_at IS NULL LIMIT 1`).get(title) as Record<string, unknown> | undefined
+  );
 }
 
 export function getNoteByPath(folder: string, title: string): Note | null {
-  return getDb().prepare(`SELECT * FROM notes WHERE folder = ? AND title = ? AND deleted_at IS NULL LIMIT 1`).get(folder, title) as Note | null;
+  return toNote(
+    getDb().prepare(`SELECT * FROM notes WHERE folder = ? AND title = ? AND deleted_at IS NULL LIMIT 1`).get(folder, title) as Record<string, unknown> | undefined
+  );
 }
 
 export function suggestTitle(content: string, fallback = "Untitled"): string {
-  const m = content.match(/^#\s+(.+)$/m);
+  const body = stripFrontmatter(content);
+  const m = body.match(/^#\s+(.+)$/m);
   if (m) return m[1].trim().slice(0, 120);
-  const first = content.split("\n").find((l) => l.trim().length > 0);
+  const first = body.split("\n").find((l) => l.trim().length > 0);
   if (first) return first.trim().replace(/[#*\-`>]/g, "").slice(0, 120).trim();
   return fallback;
 }
@@ -80,6 +119,8 @@ export interface CreateNoteInput {
   folder?: string;
   content?: string;
   kind?: NoteKind;
+  /** Written into the frontmatter block. */
+  properties?: Record<string, PropValue | null>;
 }
 
 export function createNote(input: CreateNoteInput): Note {
@@ -89,16 +130,18 @@ export function createNote(input: CreateNoteInput): Note {
 function createNoteRecord(input: CreateNoteInput): Note {
   const db = getDb();
   const id = uid();
-  const title = input.title?.trim() || suggestTitle(input.content ?? "") || "Untitled";
+  const content = input.properties ? applyFrontmatter(input.content ?? "", input.properties) : input.content ?? "";
+  const title = input.title?.trim() || suggestTitle(content) || "Untitled";
   const folder = normalizeFolder(input.folder ?? "");
   ensureFolder(folder);
   const kind = input.kind ?? "note";
   const ts = now();
-  db.prepare(`INSERT INTO notes (id, title, folder, content, kind, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`).run(
-    id, title, folder, input.content ?? "", kind, ts, ts
+  const props = parseFrontmatter(content).props;
+  db.prepare(`INSERT INTO notes (id, title, folder, content, kind, properties, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`).run(
+    id, title, folder, content, kind, JSON.stringify(props), ts, ts
   );
-  db.prepare(`INSERT INTO notes_fts (id, title, content, folder) VALUES (?,?,?,?)`).run(id, title, input.content ?? "", folder);
-  reindexLinks(id, input.content ?? "");
+  db.prepare(`INSERT INTO notes_fts (id, title, content, folder) VALUES (?,?,?,?)`).run(id, title, stripFrontmatter(content), folder);
+  reindexLinks(id, content);
   resolveLinksForTitle(title, id);
   return getNote(id)!;
 }
@@ -109,6 +152,8 @@ export interface UpdateNoteInput {
   content?: string;
   kind?: NoteKind;
   is_pinned?: number;
+  /** Merged into the frontmatter block. `null` values remove keys. */
+  properties?: Record<string, PropValue | null> | null;
 }
 
 export function updateNote(id: string, input: UpdateNoteInput): Note | null {
@@ -128,16 +173,19 @@ function updateNoteRecord(id: string, input: UpdateNoteInput): Note | null {
   }
   const before = renamed ? listNotes() : [];
   ensureFolder(folder);
-  const content = input.content ?? existing.content;
+  let content = input.content ?? existing.content;
+  if (input.properties && Object.keys(input.properties).length > 0) {
+    content = applyFrontmatter(content, input.properties);
+  }
   const kind = input.kind ?? existing.kind;
   const pinned = input.is_pinned ?? existing.is_pinned;
   const ts = now();
 
-  db.prepare(`UPDATE notes SET title = ?, folder = ?, content = ?, kind = ?, is_pinned = ?, updated_at = ? WHERE id = ?`).run(
-    title, folder, content, kind, pinned ? 1 : 0, ts, id
+  db.prepare(`UPDATE notes SET title = ?, folder = ?, content = ?, kind = ?, is_pinned = ?, properties = ?, updated_at = ? WHERE id = ?`).run(
+    title, folder, content, kind, pinned ? 1 : 0, JSON.stringify(parseFrontmatter(content).props), ts, id
   );
   db.prepare(`DELETE FROM notes_fts WHERE id = ?`).run(id);
-  db.prepare(`INSERT INTO notes_fts (id, title, content, folder) VALUES (?,?,?,?)`).run(id, title, content, folder);
+  db.prepare(`INSERT INTO notes_fts (id, title, content, folder) VALUES (?,?,?,?)`).run(id, title, stripFrontmatter(content), folder);
 
   reindexLinks(id, content);
   if (renamed) rewriteReferences(before, new Map([[id, { title, folder }]]));
@@ -161,7 +209,7 @@ export function restoreNote(id: string): Note | null {
   return getNote(id);
 }
 
-/** Permanent delete (trash purge). Removes note + links + FTS rows. */
+/** Permanent delete (trash purge). Removes note + links + FTS rows + bookmarks. */
 export function purgeNote(id: string): boolean {
   const db = getDb();
   const existing = getNote(id, true);
@@ -170,10 +218,11 @@ export function purgeNote(id: string): boolean {
   db.prepare(`DELETE FROM links WHERE source_id = ?`).run(id);
   db.prepare(`DELETE FROM links WHERE target_id = ?`).run(id);
   db.prepare(`DELETE FROM notes_fts WHERE id = ?`).run(id);
+  db.prepare(`DELETE FROM bookmarks WHERE note_id = ?`).run(id);
   return true;
 }
 
-/** Rebuild a note's outbound [[links]] table rows. */
+/** Rebuild a note's outbound [[links]] table rows (frontmatter is not scanned). */
 export function reindexLinks(id: string, content: string): void {
   const db = getDb();
   const note = getNote(id);
@@ -182,7 +231,7 @@ export function reindexLinks(id: string, content: string): void {
   const resolver = (t: string) => resolveWikiTarget(t, all);
   db.prepare(`DELETE FROM links WHERE source_id = ?`).run(id);
   const insert = db.prepare(`INSERT OR REPLACE INTO links (source_id, target_title, target_id) VALUES (?,?,?)`);
-  for (const target of extractWikiLinks(content)) {
+  for (const target of extractWikiLinks(stripFrontmatter(content))) {
     const resolved = resolver(target);
     insert.run(id, target, resolved?.id ?? null);
   }
@@ -206,7 +255,7 @@ function rewriteReferences(before: NoteSummary[], changed: Map<string, { title: 
     });
     if (content !== note.content) {
       db.prepare("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?").run(content, now(), note.id);
-      db.prepare("UPDATE notes_fts SET content = ? WHERE id = ?").run(content, note.id);
+      db.prepare("UPDATE notes_fts SET content = ? WHERE id = ?").run(stripFrontmatter(content), note.id);
     }
   }
   reindexAll();
@@ -248,7 +297,7 @@ export function getBacklinks(title: string): Array<{ id: string; title: string; 
     .map((r) => {
       const n = getNote(r.source_id);
       if (!n) return null;
-      return { id: n.id, title: n.title, folder: n.folder, snippet: snippetAround(n.content, r.target_title) };
+      return { id: n.id, title: n.title, folder: n.folder, snippet: snippetAround(stripFrontmatter(n.content), r.target_title) };
     })
     .filter(Boolean) as Array<{ id: string; title: string; folder: string; snippet: string }>;
 }
@@ -272,10 +321,32 @@ export interface SearchResult extends NoteSummary {
   score: number;
 }
 
-export function searchNotes(query: string): SearchResult[] {
-  if (!query.trim()) return [];
+/** Does a note's property match? Scalars compare as strings; arrays match if any item matches. */
+function matchProperty(props: NoteProperties, key: string, value: string): boolean {
+  const prop = props[key];
+  if (prop === undefined) return false;
+  const values = Array.isArray(prop) ? prop : [prop];
+  const needle = value.toLowerCase();
+  return values.some((v) => String(v).toLowerCase().includes(needle));
+}
+
+export interface PropertyFilter {
+  key: string;
+  value: string;
+}
+
+export function filterByProperties<T extends NoteSummary>(notes: T[], filters: PropertyFilter[]): T[] {
+  return filters.length ? notes.filter((n) => filters.every((f) => matchProperty(n.properties, f.key, f.value))) : notes;
+}
+
+export function searchNotes(query: string, propertyFilters: PropertyFilter[] = []): SearchResult[] {
+  if (!query.trim() && !propertyFilters.length) return [];
   const db = getDb();
   const clean = query.trim().replace(/[^A-Za-z0-9_\-\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af ]/g, " ").slice(0, 60);
+  if (!clean && propertyFilters.length) {
+    // Property-only filter: skip FTS and scan the property cache directly.
+    return filterByProperties(listNotes(), propertyFilters).map((n) => ({ ...n, snippet: "", score: 0 }));
+  }
   if (!clean) return [];
   const q = clean.split(/\s+/).map((t) => `${t}*`).join(" AND ");
   const rows = db
@@ -293,7 +364,8 @@ export function searchNotes(query: string): SearchResult[] {
       if (!summary) return null;
       return { ...summary, snippet: r.snippet, score: r.score };
     })
-    .filter(Boolean) as SearchResult[];
+    .filter(Boolean)
+    .filter((r) => propertyFilters.every((f) => matchProperty(r!.properties, f.key, f.value))) as SearchResult[];
 }
 
 /** Notes that mention this note's title in plain text without a [[wikilink]]. */
@@ -314,29 +386,33 @@ export function unlinkedMentions(id: string): UnlinkedMention[] {
     if (n.id === id) continue;
     const full = getNote(n.id);
     if (!full) continue;
-    if (full.content.toLowerCase().indexOf(title.toLowerCase()) === -1) continue;
+    const body = stripFrontmatter(full.content);
+    if (body.toLowerCase().indexOf(title.toLowerCase()) === -1) continue;
     const linked = db
       .prepare(`SELECT 1 AS x FROM links WHERE source_id = ? AND target_title = ? COLLATE NOCASE`)
       .get(n.id, title) as { x: number } | undefined;
     if (linked) continue;
-    out.push({ id: n.id, title: n.title, folder: n.folder, snippet: snippetAround(full.content, title) });
+    out.push({ id: n.id, title: n.title, folder: n.folder, snippet: snippetAround(body, title) });
     if (out.length >= 20) break;
   }
   return out;
 }
 
-/** Replace the first plain-text mention of `title` in the source note with a [[wikilink]]. */
+/** Replace the first plain-text mention of `title` in the source note with a [[wikilink]] (frontmatter is skipped). */
 export function linkMention(sourceId: string, title: string): boolean {
   const src = getNote(sourceId);
   if (!src || !title.trim()) return false;
   const t = title.trim();
-  const idx = src.content.toLowerCase().indexOf(t.toLowerCase());
+  const body = stripFrontmatter(src.content);
+  const idx = body.toLowerCase().indexOf(t.toLowerCase());
   if (idx === -1) return false;
   // skip occurrences already inside a [[...]] span
-  const open = src.content.lastIndexOf("[[", idx);
-  const close = src.content.indexOf("]]", idx);
+  const open = body.lastIndexOf("[[", idx);
+  const close = body.indexOf("]]", idx);
   if (open !== -1 && close !== -1 && open < idx && idx + t.length <= close) return false;
-  updateNote(sourceId, { content: `${src.content.slice(0, idx)}[[${t}]]${src.content.slice(idx + t.length)}` });
+  const offset = src.content.length - body.length;
+  const at = offset + idx;
+  updateNote(sourceId, { content: `${src.content.slice(0, at)}[[${t}]]${src.content.slice(at + t.length)}` });
   return true;
 }
 
@@ -404,6 +480,45 @@ export function moveFolder(from: string, to: string): string {
     return to;
   })();
 }
+
+/**
+ * Delete a folder and all its subfolders. Notes inside are NOT trashed —
+ * they move up to the parent folder, preserving the remaining hierarchy.
+ * e.g. deleting "Projects/Work" moves "Projects/Work/A" to "Projects/A".
+ */
+export function deleteFolder(from: string): string {
+  from = normalizeFolder(from);
+  if (!from) throw new NoteInputError("The vault root cannot be deleted.");
+  const db = getDb();
+  return db.transaction(() => {
+    const paths = folderTree();
+    if (!paths.includes(from)) throw new NoteInputError("Folder not found.", 404);
+    const parent = parentOf(from);
+    const inside = (path: string) => path === from || path.startsWith(`${from}/`);
+    const destination = (path: string) => normalizeFolder(parent + path.slice(from.length));
+    const removed = paths.filter(inside);
+    const before = listNotes();
+    const changed = new Map<string, { title: string; folder: string }>();
+    // Include trash so restoring a note keeps it in the promoted folder.
+    const rows = db.prepare("SELECT id, title, folder FROM notes").all() as Array<{ id: string; title: string; folder: string }>;
+    for (const note of rows.filter(n => inside(n.folder))) {
+      const folder = destination(note.folder);
+      db.prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?").run(folder, now(), note.id);
+      db.prepare("UPDATE notes_fts SET folder = ? WHERE id = ?").run(folder, note.id);
+      changed.set(note.id, { title: note.title, folder });
+    }
+    for (const old of removed) db.prepare("DELETE FROM folders WHERE path = ?").run(old);
+    // Recreate only the destination folders that actually received notes;
+    // empty subfolders are dropped entirely.
+    const used = new Set<string>();
+    for (const note of rows.filter(n => inside(n.folder))) used.add(destination(note.folder));
+    for (const path of used) if (path) ensureFolder(path);
+    rewriteReferences(before, changed);
+    return parent;
+  })();
+}
+
+const parentOf = (path: string): string => path.split("/").slice(0, -1).join("/");
 
 /** All nodes + edges for the graph view. */
 export function graphData(): { nodes: NoteSummary[]; links: Array<{ source: string; target: string }> } {
@@ -477,9 +592,9 @@ export function ensureIndexNote(): void {
   });
 }
 
-/** Strip markdown for plaintext agent reads (keeps tokens low). */
+/** Strip frontmatter + markdown for plaintext agent reads (keeps tokens low). */
 export function toPlainText(markdown: string): string {
-  return markdown
+  return stripFrontmatter(markdown)
     .replace(WIKILINK_RE, (_m, inner) => {
       const [target] = inner.split("|");
       return `[[${target.trim()}]]`;
