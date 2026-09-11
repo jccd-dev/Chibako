@@ -15,6 +15,20 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
+# ---- production dependencies ----
+# Install runtime deps only, so build tooling (e.g. the esbuild Go binary) never
+# reaches the shipped image. Native modules still compile here.
+FROM node:22-slim AS prod-deps
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 # ---- runtime stage ----
 FROM node:22-slim AS runtime
 WORKDIR /app
@@ -31,8 +45,8 @@ RUN apt-get update \
 COPY --from=build /app/package.json ./
 # Next standalone server (self-contained, includes its own traced deps)
 COPY --from=build /app/.next/standalone ./
-# Full node_modules on top so native modules (better-sqlite3) are guaranteed present
-COPY --from=build /app/node_modules ./node_modules
+# Production-only node_modules so native modules (better-sqlite3) are guaranteed present
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 # Bundled MCP server for agent access (dist/mcp/server.mjs)
