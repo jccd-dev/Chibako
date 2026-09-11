@@ -401,7 +401,6 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   }
 
 
-  const home = notes.find(n => n.kind === "index");
 
   const searchView = (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -493,7 +492,6 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const fileTree = (
     <>
       <nav aria-label="Files and folders" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {home && <Link href={`/app/note/${home.id}`} className="tree-item"><IconHome size={14} />Home</Link>}
         {bookmarks.length > 0 && (
           <details open className="mb-1">
             <summary className="tree-item"><IconBookmark size={14} />Bookmarks</summary>

@@ -242,6 +242,60 @@ curl -X POST https://your-domain.com/api/notes \
 
 See `/app/agent` in the UI for the full tool list and examples.
 
+### Install the memory skill
+
+The [Chibako Memory skill](skills/chibako-memory/SKILL.md) teaches compatible
+agents to fetch your Knowledge Schema, recall relevant notes, inspect recent
+observations, and save durable knowledge when authorized. Configure Chibako MCP
+first using the instructions above. With a scoped API key, use `schema:read`
+and `notes:read`; add `notes:write` if you want the agent to save knowledge.
+The skill does not install Chibako, configure MCP, or copy your vault.
+
+Install from this public repository using the [skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add jccd-dev/Chibako --skill chibako-memory
+```
+
+For Codex across all projects:
+
+```bash
+npx skills add jccd-dev/Chibako --skill chibako-memory --agent codex --global
+```
+
+Restart or reload your agent's skills after installation. In Codex, invoke it
+with `$chibako-memory`, for example: "Use $chibako-memory to recall our
+authentication decisions before reviewing this change."
+
+Installation makes the skill available for selection; it is not a startup hook
+and does not guarantee execution in every chat. To require retrieval on each
+task, add this to your agent's persistent instructions (for example, a project
+`AGENTS.md`, or user-level instructions for all projects):
+
+```markdown
+Use the chibako-memory skill at the start of every task. Retrieve relevant
+context before working. Treat questions as read-only; save memory only when
+I request it or have explicitly authorized ongoing memory updates.
+```
+
+If you want routine saving too, explicitly add:
+
+```markdown
+After implementation tasks, you may save confirmed, reusable project decisions
+and lessons to Chibako. Skip secrets, raw transcripts, and temporary details.
+```
+
+**Settings → Knowledge schema** controls the vault's organization rules. The
+skill fetches those rules; changes apply on the next fetch. Memory survives a
+new chat when its MCP connection accesses the same vault. `recall` searches
+notes, while `list_observations` retrieves recent observations separately.
+
+Contributors can check discovery before publishing without installing anything:
+
+```bash
+npx skills add ./skills --list
+```
+
 ## 🔌 REST API reference
 
 | Method | Path | Scope | Description |

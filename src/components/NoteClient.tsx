@@ -1019,7 +1019,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     <div className="flex h-full" onKeyDown={handleKeys}>
       <div className="flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <div className="flex flex-col gap-0.5 border-b border-border px-4 py-2">
+        <div className="flex flex-col gap-0.5 px-4 py-2">
           {/* context row: where am I · what is this · document actions */}
           <div className="flex items-center gap-2">
             <nav aria-label="Location" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-xs text-muted-foreground">
@@ -1121,7 +1121,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
           </p>
         )}
 
-        <div className="mx-auto flex w-[calc(100%-3rem)] max-w-[75ch] items-center gap-3 pb-3 pt-7">
+        <div className="sticky top-0 z-10 mx-auto flex w-[calc(100%-3rem)] max-w-[88ch] items-center gap-3 bg-background pb-3 pt-7">
           <input
             className="min-w-0 flex-1 bg-transparent font-heading text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
             value={title}
@@ -1135,7 +1135,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
         <div className={cn("flex min-h-0 flex-1", showEdit && showPreview && "flex-col md:flex-row")}>
           {showWrite && (
             <div className="w-full overflow-y-auto px-6 py-2">
-              <div className="mx-auto w-full max-w-[75ch]">
+              <div className="mx-auto w-full max-w-[88ch]">
                 {propsToggleJSX()}
                 {showProps && renderPropertyEditor()}
                 <RichTextEditor
@@ -1157,7 +1157,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
               onScroll={() => setSuggest(null)}
               className={cn("relative overflow-y-auto px-6 py-2", showPreview ? "h-1/2 w-full border-b border-border md:h-auto md:w-1/2 md:border-b-0 md:border-r" : "w-full")}
             >
-              <div className="mx-auto w-full max-w-[75ch]">
+              <div className="mx-auto w-full max-w-[88ch]">
                 {propsToggleJSX()}
                 {showProps && renderPropertyEditor()}
                 <textarea
@@ -1217,7 +1217,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
           )}
           {showPreview && (
             <div className={cn("overflow-y-auto px-6 py-4", showEdit ? "h-1/2 w-full md:h-auto md:w-1/2" : "w-full")}>
-              <div className="mx-auto w-full max-w-[75ch]">
+              <div className="mx-auto w-full max-w-[88ch]">
                 {propKeys.length > 0 && (
                 <div className="mb-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-[13px]">
                   {propKeys.map((key) => {
@@ -1255,8 +1255,8 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
       </div>
 
       {/* right links panel */}
-      {note && showLinks && wideLinks && <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-border bg-sidebar">{connectionsPanel()}</aside>}
-      {note && !wideLinks && <Sheet open={showLinks} onOpenChange={setShowLinks}><SheetContent side="right" className="w-72 p-0" showCloseButton={false}><SheetTitle className="sr-only">Connections</SheetTitle>{connectionsPanel()}</SheetContent></Sheet>}
+      {note && showLinks && wideLinks && <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-border bg-background">{connectionsPanel()}</aside>}
+      {note && !wideLinks && <Sheet open={showLinks} onOpenChange={setShowLinks}><SheetContent side="right" className="w-72 bg-background p-0" showCloseButton={false}><SheetTitle className="sr-only">Connections</SheetTitle>{connectionsPanel()}</SheetContent></Sheet>}
 
       {/* create missing note dialog */}
       <Dialog open={createModal !== null} onOpenChange={(o) => !o && setCreateModal(null)}>
