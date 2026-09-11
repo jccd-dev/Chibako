@@ -17,6 +17,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# gosu lets the entrypoint fix bind-mount ownership as root, then drop to `node`.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends gosu \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app/package.json ./
 # Next standalone server (self-contained, includes its own traced deps)
 COPY --from=build /app/.next/standalone ./
@@ -27,12 +32,15 @@ COPY --from=build /app/public ./public
 # Bundled MCP server for agent access (dist/mcp/server.mjs)
 COPY --from=build /app/dist ./dist
 
-RUN mkdir -p /app/data && chown -R node:node /app/data
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh \
+  && mkdir -p /app/data && chown -R node:node /app/data
 
-USER node
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD node -e "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+# entrypoint runs as root: chowns DATA_DIR, drops to `node`, execs the CMD.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "server.js"]

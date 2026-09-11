@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { withAuthAny } from "@/lib/api";
-import { recall, getEmbeddingStatus, indexEmbeddings } from "@/lib/recall";
+import { recall } from "@/lib/recall";
+import { reindexEmbeddings, embeddingStatus } from "@/lib/embedding-index";
 
 export const GET = withAuthAny(["notes:read", "search:read"], async (req: NextRequest) => {
   const q = req.nextUrl.searchParams.get("q") ?? "";
@@ -16,8 +17,8 @@ export const GET = withAuthAny(["notes:read", "search:read"], async (req: NextRe
 
 export const POST = withAuthAny(["notes:write", "schema:write"], async () => {
   try {
-    const res = await indexEmbeddings();
-    return Response.json({ ...res, status: getEmbeddingStatus() });
+    const res = await reindexEmbeddings();
+    return Response.json({ ...res, status: embeddingStatus() });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "embedding indexing failed" }, { status: 500 });
   }

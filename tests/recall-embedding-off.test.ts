@@ -10,11 +10,12 @@ test('recall without embeddings never calls network and is deterministic', async
   process.env.CHIBAKO_EMBEDDING_PROVIDER = '';
   process.env.CHIBAKO_EMBEDDING_API_KEY = '';
   const { createNote } = await import('../src/lib/notes');
-  const { recall, getEmbeddingStatus } = await import('../src/lib/recall');
+  const { recall } = await import('../src/lib/recall');
+  const { embeddingStatus } = await import('../src/lib/embedding-index');
   const { getDb } = await import('../src/lib/db');
   try {
     createNote({ title: 'Auth middleware', content: 'token validation happens here with jose' });
-    const status = getEmbeddingStatus();
+    const status = embeddingStatus();
     assert.equal(status.enabled, false);
     assert.equal(status.provider, 'disabled');
     const results = await recall({ query: 'auth token validation' });

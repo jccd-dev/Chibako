@@ -1,0 +1,17 @@
+node_modules
+.next
+out
+dist
+data
+.git
+.github
+PRD
+*.md
+.env
+.env.local
+.env*.local
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+*.tsbuildinfo
+.DS_Store

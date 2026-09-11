@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Chibako Obsidian-style layout directions</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: oklch(0.2235 0.0049 145.4099);
+      --panel: oklch(0.2016 0.005 145.3868);
+      --raised: oklch(0.2658 0.0047 145.4425);
+      --hover: oklch(0.3132 0.0134 145.2462);
+      --border: oklch(0.3132 0.0134 145.2462);
+      --text: #edebe0;
+      --muted: oklch(0.7077 0.0128 145.4386);
+      --primary: oklch(0.7007 0.056 142.4697);
+      --warning: oklch(0.82 0.13 80);
+      --radius: .45rem;
+      font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; background: #151615; color: var(--text); }
+    button { color: inherit; font: inherit; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+    .page { min-height: 100dvh; display: grid; grid-template-rows: auto 1fr; }
+    .picker {
+      display: flex; align-items: center; gap: 8px; min-height: 54px; padding: 8px 14px;
+      border-bottom: 1px solid #303230; background: #111211; position: sticky; top: 0; z-index: 10;
+    }
+    .picker strong { margin-right: 8px; font-family: "Figtree", ui-sans-serif, system-ui; font-size: 14px; }
+    .picker button {
+      border: 1px solid #363936; border-radius: 7px; background: transparent; padding: 7px 11px;
+      color: #a9ada9; cursor: pointer;
+    }
+    .picker button:hover, .picker button:focus-visible { background: #242624; color: #f0f0ec; outline: none; }
+    .picker button[aria-pressed="true"] { border-color: color-mix(in oklch, var(--primary) 58%, var(--border)); background: color-mix(in oklch, var(--primary) 15%, transparent); color: var(--text); }
+    .picker .spacer { flex: 1; }
+    .picker .note { color: #777c77; font-size: 12px; }
+
+    .stage { min-width: 0; padding: 18px; display: grid; place-items: center; overflow: auto; }
+    .mock {
+      display: none; width: min(100%, 1500px); height: min(860px, calc(100dvh - 90px)); min-height: 640px;
+      overflow: hidden; border: 1px solid #383b38; border-radius: 10px; background: var(--bg);
+      box-shadow: 0 24px 70px rgb(0 0 0 / .28);
+    }
+    .mock.active { display: grid; }
+
+    .topbar {
+      height: 43px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+      border-bottom: 1px solid var(--border); background: var(--bg);
+    }
+    .brand { font: 600 13px/1 "Figtree", ui-sans-serif, system-ui; letter-spacing: -.01em; }
+    .search { width: min(390px, 42vw); margin-inline: auto; border: 1px solid var(--border); background: var(--raised); border-radius: 7px; padding: 5px 9px; color: var(--muted); font-size: 12px; }
+    .action, .icon-button {
+      min-height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); padding: 4px 7px;
+    }
+    .action:hover, .icon-button:hover { background: var(--hover); color: var(--text); }
+    .primary-action { color: var(--text); background: color-mix(in oklch, var(--primary) 24%, transparent); }
+
+    .sidebar { min-width: 0; background: var(--panel); border-right: 1px solid var(--border); overflow: hidden; display: grid; grid-template-rows: auto 1fr auto; }
+    .sidebar-tools { display: flex; align-items: center; gap: 3px; padding: 8px; border-bottom: 1px solid var(--border); }
+    .sidebar-body { overflow: auto; padding: 8px; }
+    .section-label { margin: 14px 7px 5px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+    .tree { display: grid; gap: 1px; }
+    .tree-row { min-height: 27px; display: flex; align-items: center; gap: 7px; border-radius: 5px; padding: 4px 7px; color: #b8bbb7; font-size: 13px; white-space: nowrap; }
+    .tree-row:hover { background: var(--hover); }
+    .tree-row.active { background: color-mix(in oklch, var(--primary) 16%, transparent); color: var(--text); }
+    .tree-row .chev { width: 9px; color: #777c77; }
+    .tree-row .file { width: 10px; height: 13px; border: 1px solid currentColor; border-radius: 2px; opacity: .65; }
+    .tree-row .folder { width: 12px; height: 9px; border: 1px solid currentColor; border-radius: 2px; opacity: .65; }
+    .indent-1 { padding-left: 20px; }
+    .indent-2 { padding-left: 36px; }
+    .row-meta { margin-left: auto; color: #737873; font-size: 10px; }
+    .vault { padding: 9px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+
+    .workspace { min-width: 0; display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; background: var(--bg); }
+    .document-head { padding: 10px clamp(18px, 4vw, 58px) 9px; border-bottom: 1px solid var(--border); }
+    .crumb-row, .title-row, .modebar, .statusbar { display: flex; align-items: center; min-width: 0; }
+    .crumb-row { gap: 6px; color: var(--muted); font-size: 11px; }
+    .crumb-row .doc-actions { margin-left: auto; display: flex; gap: 3px; }
+    .title-row { gap: 10px; margin-top: 5px; }
+    .title { font: 620 clamp(19px, 2vw, 24px)/1.25 "Figtree", ui-sans-serif, system-ui; letter-spacing: -.02em; }
+    .save { margin-left: auto; font-size: 11px; color: var(--muted); }
+    .modebar { min-height: 39px; padding: 5px clamp(18px, 4vw, 58px); gap: 4px; border-bottom: 1px solid var(--border); }
+    .mode { padding: 4px 8px; border-radius: 5px; color: var(--muted); font-size: 12px; }
+    .mode.active { color: var(--text); background: var(--hover); }
+    .formatting { margin-left: auto; display: flex; gap: 2px; }
+    .formatting span { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 5px; color: var(--muted); font-size: 12px; }
+    .document-scroll { overflow: auto; }
+    .document { width: min(100% - 36px, 74ch); margin: 0 auto; padding: 42px 0 90px; }
+    .document h1 { margin: 0 0 22px; font: 630 28px/1.25 "Figtree", ui-sans-serif, system-ui; letter-spacing: -.02em; }
+    .document h2 { margin: 28px 0 12px; font: 600 19px/1.35 "Figtree", ui-sans-serif, system-ui; }
+    .document p, .document li { color: #cfd0cb; font-size: 15px; line-height: 1.72; }
+    .document p { margin: 0 0 18px; }
+    .document ul { padding-left: 20px; }
+    .wikilink { color: var(--primary); text-decoration: underline dotted; text-underline-offset: 3px; }
+    .statusbar { height: 28px; padding: 0 12px; gap: 14px; border-top: 1px solid var(--border); color: #777c77; font-size: 10.5px; }
+    .statusbar .right { margin-left: auto; display: flex; gap: 14px; }
+
+    .connections { min-width: 0; border-left: 1px solid var(--border); background: var(--panel); overflow: auto; padding: 12px; }
+    .connections-head { display: flex; align-items: center; margin-bottom: 14px; color: var(--muted); font-size: 11px; font-weight: 600; }
+    .connections-head button { margin-left: auto; }
+    .connection-group { margin-bottom: 22px; }
+    .connection-group h3 { margin: 0 0 7px; color: #8d928d; font-size: 11px; font-weight: 600; }
+    .connection-row { display: grid; gap: 1px; border-radius: 5px; padding: 6px 7px; font-size: 12px; }
+    .connection-row:hover { background: var(--hover); }
+    .connection-row strong { font-weight: 550; color: var(--primary); }
+    .connection-row span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+
+    /* A: closest to current architecture, with clearer hierarchy. */
+    #classic { grid-template-columns: 240px minmax(420px, 1fr) 288px; grid-template-rows: 43px 1fr; }
+    #classic .topbar { grid-column: 1 / -1; }
+
+    /* B: writing-first with collapsed secondary navigation and optional inspector. */
+    #focus { grid-template-columns: 54px minmax(0, 1fr); grid-template-rows: 43px 1fr; }
+    #focus .topbar { grid-column: 1 / -1; }
+    #focus .rail { grid-row: 2; border-right: 1px solid var(--border); background: var(--panel); padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    #focus .rail button { width: 36px; height: 36px; }
+    #focus .rail .bottom { margin-top: auto; }
+    #focus .workspace { grid-row: 2; }
+    #focus .focus-chips { display: flex; gap: 6px; margin-left: auto; }
+    #focus .focus-chip { border: 1px solid var(--border); padding: 3px 7px; border-radius: 6px; color: var(--muted); font-size: 11px; }
+    #focus .document { width: min(100% - 44px, 78ch); padding-top: 64px; }
+
+    /* C: navigation-heavy vault view while retaining the same central note. */
+    #dense { grid-template-columns: 278px minmax(400px, 1fr) 250px; grid-template-rows: 43px 1fr; }
+    #dense .topbar { grid-column: 1 / -1; }
+    #dense .sidebar { grid-template-columns: 43px 1fr; grid-template-rows: 1fr auto; }
+    #dense .activity { grid-row: 1 / -1; border-right: 1px solid var(--border); padding: 7px 5px; display: flex; flex-direction: column; gap: 5px; }
+    #dense .activity button { width: 32px; height: 32px; padding: 3px; }
+    #dense .sidebar-main { display: grid; grid-template-rows: auto 1fr; min-width: 0; overflow: hidden; }
+    #dense .sidebar-body { padding-inline: 6px; }
+    #dense .tree-row { min-height: 25px; font-size: 12.5px; }
+    #dense .document { width: min(100% - 34px, 70ch); padding-top: 34px; }
+    #dense .properties { margin: 0 0 28px; display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    #dense .properties span:nth-child(odd) { color: var(--muted); }
+
+    .mobile-note { display: none; }
+    @media (max-width: 900px) {
+      .picker { flex-wrap: wrap; }
+      .picker strong, .picker .note { width: 100%; }
+      .stage { padding: 10px; }
+      .mock { height: calc(100dvh - 126px); min-height: 560px; }
+      #classic, #dense { grid-template-columns: minmax(0, 1fr); grid-template-rows: 43px 1fr; }
+      #classic .sidebar, #classic .connections, #dense .sidebar, #dense .connections { display: none; }
+      #classic .topbar, #dense .topbar { grid-column: 1; }
+      .topbar .brand, .topbar .secondary-action { display: none; }
+      .search { margin-left: 0; flex: 1; width: auto; }
+      .document-head, .modebar { padding-inline: 14px; }
+      .document { width: min(100% - 28px, 74ch); padding-top: 28px; }
+      .formatting span:nth-child(n+5) { display: none; }
+      .mobile-note { display: inline; color: var(--muted); font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <nav class="picker" aria-label="Layout directions">
+      <strong>Chibako layout studies</strong>
+      <button type="button" data-target="classic" aria-pressed="true">A. Classic three-pane</button>
+      <button type="button" data-target="focus" aria-pressed="false">B. Focus-first</button>
+      <button type="button" data-target="dense" aria-pressed="false">C. Dense vault</button>
+      <span class="spacer"></span>
+      <span class="note">Static layout only. Existing theme preserved.</span>
+    </nav>
+
+    <section class="stage">
+      <article class="mock active" id="classic" aria-label="Classic three-pane layout">
+        <header class="topbar">
+          <button class="icon-button" aria-label="Toggle sidebar">Menu</button>
+          <span class="brand">Chibako</span>
+          <div class="search">Search notes or run a command</div>
+          <button class="action primary-action">New note</button>
+          <button class="action secondary-action">Graph</button>
+          <button class="action secondary-action">More</button>
+        </header>
+        <aside class="sidebar">
+          <div class="sidebar-tools"><button class="action">Files</button><button class="action">Search</button><button class="action">Add</button></div>
+          <div class="sidebar-body">
+            <div class="section-label">Files</div>
+            <div class="tree">
+              <div class="tree-row"><span class="chev">v</span><span class="folder"></span>Projects</div>
+              <div class="tree-row indent-1"><span class="chev">v</span><span class="folder"></span>Chibako</div>
+              <div class="tree-row active indent-2"><span class="file"></span>Interface direction</div>
+              <div class="tree-row indent-2"><span class="file"></span>Architecture</div>
+              <div class="tree-row indent-2"><span class="file"></span>Release notes</div>
+              <div class="tree-row"><span class="chev">&gt;</span><span class="folder"></span>Research</div>
+              <div class="tree-row"><span class="chev">&gt;</span><span class="folder"></span>Archive</div>
+            </div>
+            <div class="section-label">Pinned</div>
+            <div class="tree"><div class="tree-row"><span class="file"></span>Home</div><div class="tree-row"><span class="file"></span>Current priorities</div></div>
+            <div class="section-label">Recent</div>
+            <div class="tree"><div class="tree-row"><span class="file"></span>API keys <span class="row-meta">2m</span></div><div class="tree-row"><span class="file"></span>Agent guide <span class="row-meta">1h</span></div></div>
+          </div>
+          <div class="vault">Private vault</div>
+        </aside>
+        <section class="workspace">
+          <header class="document-head">
+            <div class="crumb-row"><span>Home</span><span>/</span><span>Projects</span><span>/</span><span>Chibako</span><div class="doc-actions"><button class="action">Kind: note</button><button class="action">More</button></div></div>
+            <div class="title-row"><div class="title">Interface direction</div><span class="save">Saved</span></div>
+          </header>
+          <div class="modebar"><span class="mode active">Write</span><span class="mode">Markdown</span><span class="mode">Split</span><span class="mode">Read</span><div class="formatting"><span>B</span><span>I</span><span>H</span><span>Link</span><span>List</span><span>Code</span></div></div>
+          <div class="document-scroll"><article class="document"><h1>A quieter workspace for connected thought</h1><p>Chibako keeps notes, links, and agent access in one private vault. The interface should give writing priority without hiding the structure around it.</p><h2>Working principle</h2><p>The document stays centered between two quiet utility panes. Navigation answers where the note lives. Connections explain how it relates to the vault.</p><ul><li>Files remain the primary hierarchy.</li><li>Secondary actions move out of the writing path.</li><li><span class="wikilink">Wikilinks</span> retain their existing visual language.</li></ul></article></div>
+          <footer class="statusbar"><span>Markdown</span><span class="mobile-note">Panels available from toolbar</span><div class="right"><span>Saved</span><span>72 words</span><span>Edited now</span></div></footer>
+        </section>
+        <aside class="connections"><div class="connections-head">Connections <button class="icon-button">Close</button></div><section class="connection-group"><h3>Backlinks 2</h3><div class="connection-row"><strong>Design system</strong><span>Links to this interface direction...</span></div><div class="connection-row"><strong>Current priorities</strong><span>Review workspace hierarchy...</span></div></section><section class="connection-group"><h3>Linked to 3</h3><div class="connection-row"><strong>Workspace shell</strong></div><div class="connection-row"><strong>Editor modes</strong></div><div class="connection-row"><strong>Accessibility</strong></div></section><section class="connection-group"><h3>Mentions 1</h3><div class="connection-row"><strong>Release notes</strong><span>Upcoming navigation work...</span></div></section></aside>
+      </article>
+
+      <article class="mock" id="focus" aria-label="Focus-first layout">
+        <header class="topbar"><button class="icon-button">Menu</button><span class="brand">Chibako</span><div class="search">Search notes or run a command</div><button class="action primary-action">New note</button><button class="action secondary-action">More</button></header>
+        <aside class="rail"><button class="icon-button" aria-label="Files"><span aria-hidden>F</span><span class="sr-only">Files</span></button><button class="icon-button" aria-label="Find"><span aria-hidden>S</span><span class="sr-only">Find</span></button><button class="icon-button" aria-label="Graph"><span aria-hidden>G</span><span class="sr-only">Graph</span></button><button class="icon-button bottom" aria-label="Help"><span aria-hidden>?</span><span class="sr-only">Help</span></button></aside>
+        <section class="workspace">
+          <header class="document-head"><div class="crumb-row"><span>Projects / Chibako</span><div class="focus-chips"><span class="focus-chip">Open files</span><span class="focus-chip">Open connections</span></div></div><div class="title-row"><div class="title">Interface direction</div><span class="save">Saved</span></div></header>
+          <div class="modebar"><span class="mode active">Write</span><span class="mode">Markdown</span><span class="mode">Split</span><span class="mode">Read</span><div class="formatting"><span>B</span><span>I</span><span>H</span><span>Link</span><span>List</span><span>Code</span></div></div>
+          <div class="document-scroll"><article class="document"><h1>The note owns the workspace</h1><p>Files and connections stay one action away. The central canvas gains more room for long-form writing while every existing destination remains available.</p><h2>Best fit</h2><p>This direction suits focused writing sessions and smaller laptop displays. It reduces persistent context, so users open side panels when they need them.</p><ul><li>Maximum document space.</li><li>Lowest visual noise.</li><li>More panel switching during research.</li></ul></article></div>
+          <footer class="statusbar"><span>Write</span><div class="right"><span>Saved</span><span>68 words</span><span>Connections 6</span></div></footer>
+        </section>
+      </article>
+
+      <article class="mock" id="dense" aria-label="Dense vault layout">
+        <header class="topbar"><button class="icon-button">Menu</button><span class="brand">Chibako</span><div class="search">Search notes or run a command</div><button class="action primary-action">New note</button><button class="action secondary-action">More</button></header>
+        <aside class="sidebar">
+          <nav class="activity"><button class="icon-button" aria-label="Files"><span aria-hidden>F</span><span class="sr-only">Files</span></button><button class="icon-button" aria-label="Find"><span aria-hidden>S</span><span class="sr-only">Find</span></button><button class="icon-button" aria-label="Pins"><span aria-hidden>P</span><span class="sr-only">Pins</span></button><button class="icon-button" aria-label="Graph"><span aria-hidden>G</span><span class="sr-only">Graph</span></button><button class="icon-button" aria-label="Settings" style="margin-top:auto"><span aria-hidden>?</span><span class="sr-only">Settings</span></button></nav>
+          <div class="sidebar-main"><div class="sidebar-tools"><button class="action">Vault files</button><button class="action" style="margin-left:auto">Add</button></div><div class="sidebar-body"><div class="tree"><div class="tree-row"><span class="chev">v</span><span class="folder"></span>Projects</div><div class="tree-row indent-1"><span class="chev">v</span><span class="folder"></span>Chibako</div><div class="tree-row active indent-2"><span class="file"></span>Interface direction</div><div class="tree-row indent-2"><span class="file"></span>Architecture</div><div class="tree-row indent-2"><span class="file"></span>Product principles</div><div class="tree-row indent-2"><span class="file"></span>Release notes</div><div class="tree-row indent-1"><span class="chev">&gt;</span><span class="folder"></span>Client work</div><div class="tree-row"><span class="chev">v</span><span class="folder"></span>Research</div><div class="tree-row indent-1"><span class="file"></span>Knowledge graphs</div><div class="tree-row indent-1"><span class="file"></span>Local-first tools</div><div class="tree-row"><span class="chev">&gt;</span><span class="folder"></span>Archive</div></div><div class="section-label">Recent</div><div class="tree"><div class="tree-row"><span class="file"></span>API keys <span class="row-meta">2m</span></div><div class="tree-row"><span class="file"></span>Agent guide <span class="row-meta">1h</span></div></div></div></div>
+          <div class="vault">Private vault</div>
+        </aside>
+        <section class="workspace">
+          <header class="document-head"><div class="crumb-row"><span>Projects / Chibako / Interface direction</span><div class="doc-actions"><button class="action">Pin</button><button class="action">More</button></div></div><div class="title-row"><div class="title">Interface direction</div><span class="save">Saved</span></div></header>
+          <div class="modebar"><span class="mode active">Write</span><span class="mode">Markdown</span><span class="mode">Split</span><span class="mode">Read</span><div class="formatting"><span>B</span><span>I</span><span>H</span><span>Link</span></div></div>
+          <div class="document-scroll"><article class="document"><div class="properties"><span>Kind</span><strong>note</strong><span>Folder</span><strong>Projects/Chibako</strong><span>Updated</span><strong>Just now</strong></div><h1>Structure stays visible</h1><p>This layout treats navigation and metadata as part of the working context. It fits users who move between many related notes throughout the day.</p><h2>Best fit</h2><p>Dense vault navigation makes large note collections faster to scan. The tradeoff is less room for the document and more persistent chrome.</p><ul><li>Strongest information hierarchy.</li><li>Fastest cross-note navigation.</li><li>Highest visual density.</li></ul></article></div>
+          <footer class="statusbar"><span>note</span><span>Projects/Chibako</span><div class="right"><span>Saved</span><span>64 words</span></div></footer>
+        </section>
+        <aside class="connections"><div class="connections-head">Connections <button class="icon-button">Close</button></div><section class="connection-group"><h3>Backlinks 2</h3><div class="connection-row"><strong>Design system</strong><span>Links to this direction...</span></div><div class="connection-row"><strong>Current priorities</strong><span>Review hierarchy...</span></div></section><section class="connection-group"><h3>Linked to 3</h3><div class="connection-row"><strong>Workspace shell</strong></div><div class="connection-row"><strong>Editor modes</strong></div><div class="connection-row"><strong>Accessibility</strong></div></section></aside>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const buttons = [...document.querySelectorAll('[data-target]')];
+    const mocks = [...document.querySelectorAll('.mock')];
+    for (const button of buttons) {
+      button.addEventListener('click', () => {
+        for (const item of buttons) item.setAttribute('aria-pressed', String(item === button));
+        for (const mock of mocks) mock.classList.toggle('active', mock.id === button.dataset.target);
+      });
+    }
+  </script>
+</body>
+</html>

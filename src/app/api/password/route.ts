@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
 import { getDb } from "@/lib/db";
-import { verifyPassword, hashPassword } from "@/lib/auth";
+import { verifyPassword, hashPassword, destroyOtherSessions, getCookieToken } from "@/lib/auth";
 
 export const POST = withAuth("*", async (req) => {
   const body = await req.json().catch(() => ({}));
@@ -15,5 +15,6 @@ export const POST = withAuth("*", async (req) => {
     return NextResponse.json({ error: "Current password is incorrect." }, { status: 401 });
   }
   db.prepare(`UPDATE settings SET value = ? WHERE key = 'password_hash'`).run(hashPassword(next));
+  destroyOtherSessions(await getCookieToken());
   return NextResponse.json({ ok: true });
 });

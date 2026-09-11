@@ -1,64 +1,191 @@
-# Chibako
+<div align="center">
 
-A self-hosted, Obsidian-like second brain. Markdown notes connected by
-`[[wikilinks]]`, automatic backlinks, a linked graph view — and a
-token-efficient REST + MCP layer so your own AI agent (Hermes, Claude, Cursor,
-anything that speaks MCP) can read and write your notes directly.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+  <img src="https://i.imgur.com/eGegh2T.png" alt="Chibako — the Knowledge Box" width="480">
+</picture>
 
-Designed to run on a single small VPS (1 vCPU / 4 GB is plenty).
+### A self-hosted, Obsidian-like second brain
 
-Chibako is **open source** under the MIT license — see [LICENSE](LICENSE). This
-repository is public, so never commit secrets or environment-specific values.
+Plain Markdown notes connected by `[[wikilinks]]` — with automatic backlinks, a
+force-directed graph view, and a first-class **REST + MCP** layer so your own AI
+agent can read and write your vault without blowing token budgets.
 
-## Features
+**Open source (MIT)** · self-hosted · runs on a single small VPS · one SQLite file to back up
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-black?logo=nextdotjs&logoColor=white)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)](https://sqlite.org)
+[![MCP](https://img.shields.io/badge/MCP-native-7C3AED)](https://modelcontextprotocol.io)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing)
+
+</div>
+
+---
+
+## Contents
+
+- [The story](#-the-story)
+- [The name](#-the-name)
+- [Why Chibako?](#-why-chibako)
+- [How it compares](#-how-it-compares)
+- [Features](#-features)
+- [Quick start (local dev)](#-quick-start-local-dev)
+- [Deploy to your VPS](#-deploy-to-your-vps-docker-compose--nginx)
+- [Connect your AI agent](#-connect-your-ai-agent)
+- [REST API reference](#-rest-api-reference)
+- [Backup](#-backup)
+- [Data model](#-data-model)
+- [Project layout](#-project-layout)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
+## 📖 The story
+
+Chibako started as a personal project: a place for my own notes that could live
+on my VPS, and that I could also use as long-term memory — a "second brain" —
+for the AI agents I build (Hermes and anything else that speaks MCP).
+
+I wanted the *feel* of Obsidian: plain Markdown, `[[wikilinks]]`, backlinks, a
+graph of how ideas connect. Obsidian and Logseq are wonderful **on the desktop**,
+and they're great as agent-controlled memory too. The problem is what happens
+when the vault should live on a remote server instead. Obsidian ships no
+official web app at all. Logseq *does* have an official web app and a Docker
+image, but they only serve the static app — your notes stay on the local machine
+and are opened through the browser's File System Access API, so the server never
+actually holds the vault. In both cases, "self-hosted web notes" is not the
+default experience.
+
+The usual workaround is a synced vault folder plus a mesh VPN like Tailscale so
+a desktop app can reach the server. That works, but it's a poor experience:
+install the desktop app on every device, keep sync healthy, and hope nothing
+drifts.
+
+**Chibako closes that gap.** It is a web app you self-host, so your notes are a
+browser tab away from anywhere — *and* it speaks to AI agents natively through a
+REST API and an MCP server. It's inspired by Obsidian and Logseq, but built
+remote-first and agent-first.
+
+## 🇯🇵 The name
+
+**Chibako** comes from the Japanese parts:
+
+- **Chi (知)** — the root for wisdom, intellect, and knowledge (as in *chishiki*,
+  知識, "knowledge").
+- **Bako (箱 / ばこ)** — "box" or "container." This is *hako* (箱), which shifts
+  to *bako* under a phonetic change when combined.
+
+Read together, **Chibako ≈ "Knowledge Box" / "Wisdom Box"** — a container for
+what you know, that both you and your agents can reach.
+
+## ⚡ Why Chibako?
+
+Most note apps are **local-first** and treat the server as an afterthought.
+Chibako is **server-first** and treats your agent as a first-class user.
+
+- **A real web UI on your own server.** Log in from any browser, on any device.
+  No desktop app, no sync folder, no Tailscale dance.
+- **One file to back up.** The entire vault — notes, links, search index, keys,
+  sessions — is `data/brain.db` (SQLite, WAL mode). Back it up with a single
+  `VACUUM INTO` command.
+- **Runs on a tiny VPS.** 1 vCPU / 4 GB is plenty. No external services, no
+  separate database, no vector DB required.
+- **Agent-native by construction.** Scoped, revocable API keys; a REST API that
+  mirrors every UI action; and an MCP stdio server with 20+ tools.
+- **Token-efficient by design.** Notes are raw Markdown (no JSON block trees),
+  list/links calls return titles and ids only, `ingest_note` packs a note +
+  links + schema into one round trip, and `recall` returns ranked titles +
+  trimmed snippets bounded by a token budget — never full bodies.
+- **Markdown stays portable.** Your notes are plain text you can read, diff,
+  and move. The database is an index, not a lock-in.
+
+## ⚖️ How it compares
+
+Chibako sits next to Obsidian and Logseq rather than replacing them outright.
+The difference is *where it runs* and *who it serves first*.
+
+| | Obsidian | Logseq | **Chibako** |
+|---|---|---|---|
+| Note model | Markdown + wikilinks | Outliner / blocks, Markdown | Markdown + wikilinks |
+| Primary app | Desktop + mobile (local-first) | Desktop + mobile; web app reads local files | **Self-hosted web UI (server-first)** |
+| Official web app | None (Obsidian Publish is a read-only site) | Yes — but notes stay local via File System Access API | **Yes — notes live on your server** |
+| Reach a remote server | Sync folder + desktop app (Obsidian Sync or VPN/Tailscale) | Sync folder + desktop app, or self-host the static web app | **Open a URL on your VPS from any browser** |
+| Agent access | Community MCP servers / plugins; no built-in agent API | Community MCP servers / plugins; no built-in agent API | **Built-in REST API + MCP server, scoped keys** |
+| Token efficiency for LLMs | Whole note files | Block-tree serialization | **Raw Markdown; titles+ids lists; token-budgeted `recall`** |
+| Storage | Vault folder of files | Files / graph DB | **One `brain.db` (SQLite)** |
+| Self-hosting | Desktop-first | Desktop-first (server serves static app only) | **Docker + nginx on one VPS** |
+| License | Proprietary, free to use (closed source) | Open source (AGPL-3.0) | **Open source (MIT)** |
+
+> Comparison reflects each project's public documentation at the time of
+> writing and may change. Chibako is an independent project, not affiliated
+> with or endorsed by Obsidian or Logseq. Verify specifics before relying on
+> them.
+
+The honest summary: if you want a sprawling plugin ecosystem and a polished
+native desktop app, Obsidian and Logseq are excellent. If you want your notes
+**reachable over the web from a server you control** and **directly usable as AI
+agent memory**, that's the gap Chibako was built to fill.
+
+## ✨ Features
 
 - **Obsidian-style notes** — plain Markdown, `[[wikilink]]` syntax, backlinks
   computed automatically, folders, note kinds (`note` / `wiki` / `index`)
-- **Live editor** — edit / preview / split modes, autosave, toolbar, `⌘S`
+- **Live editor** — edit / split / preview / **write (WYSIWYG)** modes,
+  autosave, toolbar, `⌘S`
 - **Command palette** (`⌘K`) — search, jump, create notes; global `⌘N`
-- **`[[` autocomplete** with duplicate-title warnings
+- **`[[` autocomplete** with duplicate-title warnings and a missing-link
+  "create note" modal
+- **Backlinks, outlinks, and unlinked mentions** — one click converts a mention
+  into a link
+- **Typed properties** — YAML frontmatter with a vault-wide, editable dictionary
+- **Bookmarks** — label, group, and drag-reorder
 - **Trash** — soft delete, restore, 30-day auto-purge, Undo toast
-- **Graph view** — force-directed map of your vault; click a node to open it
-- **Full-text search** with snippets
+- **Graph view** — force-directed map of your vault; zoom/pan, click to open,
+  folder filter, orphan highlighting
+- **Full-text search** with `<mark>`-highlighted snippets
 - **Knowledge schema** — an `AGENTS.md`-format file (editable in Settings) that
   tells your agent how to run the raw → wiki → outputs "second brain" loop
 - **Agent access**
   - **REST API** — scoped, revocable API keys; every operation is an HTTP endpoint
   - **MCP server** — one stdio server with `list_notes`, `search_notes`,
-    `recall` (token-budgeted semantic recall), `read_note`, `get_links`,
-    `create_note`, `update_note`, `ingest_note` (token-efficient bundle),
-    `delete_note` (trash), `restore_note`, `purge_note`, `get_graph`,
-    `get_knowledge_schema`, `get_stats`, plus `memory_save` / `list_observations`
-    / `delete_observation` (observation log) and `index_embeddings` /
-    `embedding_status`
-- **Token efficiency by design** — notes are raw Markdown (no JSON block trees),
-  list/links calls return titles and ids only, `ingest_note` packs
-  note + links + schema into a single round trip, and `recall` returns only
-  ranked titles + trimmed snippets capped at a token budget (never full bodies)
+    `recall` (token-budgeted retrieval), `read_note`, `get_links`, `create_note`,
+    `update_note`, `ingest_note` (token-efficient bundle), `delete_note` (trash),
+    `restore_note`, `purge_note`, `get_graph`, `get_knowledge_schema`,
+    `get_stats`, plus `memory_save` / `list_observations` / `delete_observation`
+    (observation log) and `index_embeddings` / `embedding_status`
+- **Token efficiency by design** — raw Markdown bodies, id-only list/links
+  payloads, single-call `ingest_note`, and `recall` snippets capped at a token
+  budget
 - **Optional semantic recall** — set `CHIBAKO_EMBEDDING_PROVIDER` +
   `CHIBAKO_EMBEDDING_API_KEY` (any OpenAI-compatible `/v1/embeddings` endpoint)
-  to enable vector search fused with BM25 via RRF. Embeddings refresh
-  automatically when notes change, and can be repaired from **Settings →
-  Recall** (Reindex now). Disabled by default, zero network calls when off.
+  to fuse vector search with BM25 via RRF. Embeddings refresh on note changes
+  and can be repaired from **Settings → Recall**. Disabled by default, zero
+  network calls when off.
 - **Single admin auth** — password login + DB-backed sessions; one-time setup
-- **One file to back up** — the whole vault is `data/brain.db` (SQLite)
+- **Light / dark theme**, keyboard-driven UI, responsive mobile drawer
+- **One file to back up** — the whole vault is `data/brain.db`
 
-## Quick start (local dev)
+## 🚀 Quick start (local dev)
 
 ```bash
 npm install
 npm run dev        # http://localhost:3000 → run the one-time setup
 ```
 
-## Deploy to your VPS (Docker Compose + nginx)
+## 🚢 Deploy to your VPS (Docker Compose + nginx)
 
 The repo ships a `Dockerfile`, `docker-compose.yml`, and an `nginx/nginx.conf`
 reverse-proxy template (the VPS runs nginx, so there's no Caddy involved).
 
-1. Copy the repo to your VPS (or build from here):
+1. Clone the repo on your VPS:
 
    ```bash
-   git clone <your-repo> /opt/chibako && cd /opt/chibako
+   git clone https://github.com/jccd-dev/Chibako.git /opt/chibako
+   cd /opt/chibako
    docker compose up -d --build
    ```
 
@@ -76,7 +203,7 @@ reverse-proxy template (the VPS runs nginx, so there's no Caddy involved).
 
 3. Open `https://your-domain.com`, complete the one-time setup, and you're in.
 
-## Connecting your AI agent
+## 🤖 Connect your AI agent
 
 Two ways, both scoped by an API key you create in **Settings → API keys**.
 
@@ -115,7 +242,7 @@ curl -X POST https://your-domain.com/api/notes \
 
 See `/app/agent` in the UI for the full tool list and examples.
 
-## REST API reference
+## 🔌 REST API reference
 
 | Method | Path | Scope | Description |
 |---|---|---|---|
@@ -138,7 +265,7 @@ See `/app/agent` in the UI for the full tool list and examples.
 
 Auth: `Authorization: Bearer <key>`, or the web session cookie.
 
-## Backup
+## 💾 Backup
 
 Backing up is copying one file (and its WAL):
 
@@ -149,17 +276,22 @@ sqlite3 data/brain.db "VACUUM INTO 'brain-backup.db'"
 Then copy `brain-backup.db` off the VPS. That's the entire vault — notes,
 links, search index, keys, sessions.
 
-## Data model
+## 🗄️ Data model
 
-- `notes` — `id`, `title`, `folder`, `content` (markdown), `kind`, timestamps
+- `notes` — `id`, `title`, `folder`, `content` (markdown), `kind`, cached
+  `properties`, timestamps
+- `folders` — folder paths
 - `links` — materialized wikilinks: `(source_id, target_title, target_id)`
 - `notes_fts` — FTS5 index (titles + content), `id UNINDEXED`
 - `sessions` — login tokens
 - `api_keys` — SHA-256-hashed, scoped keys
-- `settings` — key/value (password hash, knowledge schema)
+- `bookmarks` — labeled, grouped, ordered note shortcuts
+- `note_embeddings` — optional per-note vectors (freshness by input hash)
+- `observations` — agent observation log (`memory_save`)
+- `settings` — key/value (password hash, knowledge schema, property dictionary)
 - `ingest_log` — reserved for the raw → wiki ingest loop
 
-## Project layout
+## 🗂️ Project layout
 
 ```
 src/app/          pages + API route handlers
@@ -167,10 +299,59 @@ src/lib/          db, auth, notes engine, markdown/wikilinks, api wrapper
 src/components/   sidebar, editor, preview, graph, settings, agent guide
 src/mcp/server.ts MCP stdio server (bundled to dist/mcp/server.mjs)
 nginx/            reverse-proxy template for the VPS
+PRD/              product specs: vision, architecture, roadmap, status
+docs/adr/         architecture decision records
 ```
 
-See `AGENTS.md` for developer conventions.
+See `AGENTS.md` for developer conventions and `CONTEXT.md` for the domain
+glossary.
 
-## License
+## 🗺️ Roadmap
+
+Chibako is under active development. These are the directions on the table —
+see `PRD/05-roadmap.md` for the maintained, prioritised list.
+
+**Near-term**
+
+- **Vault export / import** — JSON or zip-of-Markdown, so migration isn't just
+  "copy `brain.db`."
+- **Attachments and inline images** — file uploads plus reconciling how
+  embedded images survive preview sanitization (text-only Markdown today).
+- **Deeper hardening** — login/setup rate limiting, closing the `keys:write`
+  self-escalation path, stronger password hashing, and automated tests for
+  auth, scope enforcement, trash, and search.
+- **Verified deploy path** — a real `docker compose up` smoke test on
+  `node:22-slim` and a documented nginx + TLS runbook.
+
+**Later / exploring**
+
+- **Fully local semantic search** — move the optional recall vectors into
+  `sqlite-vec` inside the existing `brain.db`, so semantic retrieval needs no
+  remote embedding service and still stays one file to back up.
+- **Mobile and graph polish** — a responsiveness pass and richer graph
+  filtering by folder/kind.
+- **Multi-user workspaces** — per-user accounts, invites, and permissions
+  (single-admin auth today). Deferred until the personal brain is rock solid.
+
+**Explicitly out of scope**
+
+- Real-time multiplayer editing, a whiteboard, and native mobile apps.
+- A separate vector database service (Pinecone/Qdrant/pgvector) — retrieval
+  stays inside `brain.db`.
+
+## 🤝 Contributing
+
+Chibako is open source and this repository is public. Contributions,
+bug reports, and ideas are welcome.
+
+1. Fork the repo and create a branch.
+2. `npm install`, then `npm run dev` (and `npm test` for the suite).
+3. Keep changes focused, match existing conventions (`AGENTS.md`), and open a
+   pull request.
+
+Please don't commit secrets or environment-specific values — production deploy
+and host configuration live in a separate private repo.
+
+## 📄 License
 
 Chibako is open source software licensed under the [MIT License](LICENSE).

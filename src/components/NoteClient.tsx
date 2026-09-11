@@ -22,9 +22,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconTip } from "@/components/IconTip";
-import { IconBookmark, IconCheck, IconChevron, IconHome, IconLink, IconPin, IconPlus, IconTrash, IconX } from "@/components/icons";
+import { IconBookmark, IconCheck, IconChevron, IconHome, IconPin, IconPlus, IconTrash, IconX } from "@/components/icons";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
+import { IconDotsVertical } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 
 type ViewMode = "write" | "edit" | "split" | "preview";
@@ -143,7 +146,18 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   const [saveState, setSaveState] = useState<SaveState>(initial ? "saved" : "unsaved");
   const [links, setLinks] = useState<LinkInfo | null>(null);
   const [mentions, setMentions] = useState<Array<{ id: string; title: string; folder: string; snippet: string }>>([]);
-  const [showLinks, setShowLinks] = useState(true);
+  const [showLinks, setShowLinks] = useState(false);
+  const [wideLinks, setWideLinks] = useState(true);
+  // TopBar owns the dedicated connections toggle in the theme icon group;
+  // these events bridge the button and this panel's state across components.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("chibako:links-open", { detail: showLinks }));
+  }, [showLinks]);
+  useEffect(() => {
+    const toggle = () => setShowLinks((v) => !v);
+    window.addEventListener("chibako:toggle-links", toggle);
+    return () => window.removeEventListener("chibako:toggle-links", toggle);
+  }, []);
   const [createModal, setCreateModal] = useState<string | null>(null);
   const [createFolder, setCreateFolder] = useState("");
   const [addingProp, setAddingProp] = useState(false);
@@ -796,6 +810,17 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   const showEdit = view === "edit" || view === "split";
   const showPreview = view === "preview" || view === "split";
 
+  useEffect(() => {
+    const media = matchMedia("(min-width: 1024px)");
+    const update = () => {
+      setWideLinks(media.matches);
+      setShowLinks(media.matches);
+    };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
   // Single-scroll source pane: the textarea grows with the content instead of
   // showing its own scrollbar.
   useEffect(() => {
@@ -962,11 +987,39 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     );
   }
 
+  function connectionsPanel() {
+    if (!note) return null;
+    return <>
+      <div className="flex items-center justify-between px-4 py-3">
+        <h3 className="text-xs font-semibold text-muted-foreground">Connections</h3>
+        <Button variant="ghost" size="icon-sm" aria-label="Close connections" onClick={() => setShowLinks(false)}><IconX size={13} /></Button>
+      </div>
+      <div className="flex flex-1 flex-col gap-4 px-3 pb-6">
+        <div>
+          <h4 className="px-1 text-xs font-medium text-muted-foreground">Backlinks ({links?.backlinks.length ?? 0})</h4>
+          {links?.backlinks.length ? <ul className="mt-1 flex flex-col gap-0.5">
+            {links.backlinks.map((b) => <li key={b.id}><button className="w-full rounded-md px-2 py-1.5 text-left transition hover:bg-muted" onClick={() => router.push(`/app/note/${b.id}`)}><span className="block text-[13px] font-medium text-primary">{b.title}</span><span className="block truncate text-xs text-muted-foreground">{b.snippet}</span></button></li>)}
+          </ul> : <p className="mt-1 px-2 text-xs text-muted-foreground">Nothing links here yet. Add <code>[[{note.title}]]</code> elsewhere.</p>}
+        </div>
+        <div>
+          <h4 className="px-1 text-xs font-medium text-muted-foreground">Linked to ({links?.outlinks.length ?? 0})</h4>
+          {links?.outlinks.length ? <ul className="mt-1 flex flex-col gap-0.5">
+            {links.outlinks.map((o) => <li key={o.target}><button className={cn("w-full rounded-md px-2 py-1.5 text-left text-[13px] transition hover:bg-muted", o.resolved ? "text-primary" : "text-muted-foreground italic")} onClick={() => navigateTo(o.target)}>{o.target}</button></li>)}
+          </ul> : <p className="mt-1 px-2 text-xs text-muted-foreground">No outgoing links.</p>}
+        </div>
+        {mentions.length > 0 && <div>
+          <h4 className="px-1 text-xs font-medium text-muted-foreground">Mentioned in ({mentions.length})</h4>
+          <ul className="mt-1 flex flex-col gap-0.5">{mentions.map((m) => <li key={m.id} className="rounded-md px-2 py-1.5 transition hover:bg-muted"><button className="block w-full text-left" onClick={() => router.push(`/app/note/${m.id}`)} title="Open note"><span className="block text-[13px] font-medium">{m.title}</span><span className="block truncate text-xs text-muted-foreground">{m.snippet}</span></button><button className="mt-0.5 text-[11px] font-medium text-primary hover:underline" onClick={() => linkMentionFrom(m.id)}>Link first mention</button></li>)}</ul>
+        </div>}
+      </div>
+    </>;
+  }
+
   return (
     <div className="flex h-full" onKeyDown={handleKeys}>
       <div className="flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <div className="flex flex-col gap-0.5 border-b border-border px-4 py-2.5">
+        <div className="flex flex-col gap-0.5 border-b border-border px-4 py-2">
           {/* context row: where am I · what is this · document actions */}
           <div className="flex items-center gap-2">
             <nav aria-label="Location" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-xs text-muted-foreground">
@@ -989,7 +1042,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
                       <button
                         type="button"
                         onClick={() => router.push(`/app/note/${indexNote.id}`)}
-                        title={`Open “${indexNote.title}”`}
+                        title={`Open "${indexNote.title}"`}
                         className="max-w-44 truncate rounded px-0.5 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                       >
                         {seg}
@@ -1001,139 +1054,113 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
                 );
               })}
             </nav>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <Select
-                items={{ note: "note", wiki: "wiki", index: "index" }}
-                value={kind}
-                onValueChange={(value) => {
-                  if (value !== null) handleChangeKind(value as NoteKind);
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  aria-label="Note kind"
-                  className="h-6! w-auto! gap-1.5 rounded-full border-transparent bg-muted px-2.5! py-0! text-[11px] font-medium text-foreground shadow-none! [&_svg]:size-3! hover:bg-accent dark:bg-muted dark:hover:bg-accent"
-                >
-                  <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: KIND_COLOR[kind] }} />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="note">note</SelectItem>
-                  <SelectItem value="wiki">wiki</SelectItem>
-                  <SelectItem value="index">index</SelectItem>
-                </SelectContent>
-              </Select>
-              <div aria-hidden className="mx-0.5 h-4 w-px bg-border" />
-              {note && (
-                <IconTip
-                  label={bookmark ? "Remove bookmark" : "Bookmark note"}
-                  onClick={() => { if (bookmark) void removeBookmark(); else openBookmarkDialog(); }}
-                  active={!!bookmark}
-                >
-                  <IconBookmark size={15} filled={!!bookmark} className={bookmark ? "text-warning" : ""} />
-                </IconTip>
-              )}
-              {note && (
-                <IconTip label={pinned ? "Unpin from sidebar" : "Pin to sidebar"} onClick={togglePinned} active={pinned}>
-                  <IconPin size={15} className={pinned ? "text-primary" : ""} />
-                </IconTip>
-              )}
-              {note && (
-                <IconTip label="Toggle connections panel" onClick={() => setShowLinks((v) => !v)} active={showLinks}>
-                  <IconLink size={15} className={showLinks ? "text-primary" : ""} />
-                </IconTip>
-              )}
-              {note && (
-                <IconTip label="Move to Trash" onClick={handleDelete} destructive>
-                  <IconTrash size={15} />
-                </IconTip>
-              )}
-            </div>
-          </div>
-          {/* title row */}
-          <div className="flex items-center gap-2">
-            <input
-              className="w-full min-w-0 flex-1 bg-transparent font-heading text-xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
-              value={title}
-              placeholder="Untitled"
-              onChange={(e) => handleChangeTitle(e.target.value)}
-              aria-label="Note title"
-            />
-            <span className={cn("shrink-0 text-xs", saveState === "error" ? "text-destructive" : "text-muted-foreground")}>
-              {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : saveState === "error" ? "Save failed" : "Unsaved"}
-            </span>
-            {note && (
-              <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline" title="Word count">
-                {wordCount} word{wordCount === 1 ? "" : "s"} · edited {relTime(note.updated_at)}
-              </span>
-            )}
+            {/* Vertical-dot actions dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="shrink-0" aria-label="Note actions" />}>
+                <IconDotsVertical size={16} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                {/* View mode */}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">View</DropdownMenuLabel>
+                  {(["write", "edit", "split", "preview"] as const).map((v) => (
+                    <DropdownMenuItem key={v} onClick={() => setViewAndRemember(v)}>
+                      <span className={cn("flex w-full items-center justify-between", view === v && "font-medium")}>
+                        {{ write: "Write", edit: "Markdown", split: "Split", preview: "Read" }[v]}
+                        {view === v && <span className="text-primary">✓</span>}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                {/* Kind */}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Kind</DropdownMenuLabel>
+                  {(["note", "wiki", "index"] as const).map((k) => (
+                    <DropdownMenuItem key={k} onClick={() => handleChangeKind(k)}>
+                      <span className={cn("flex w-full items-center gap-2", kind === k && "font-medium")}>
+                        <span className="size-1.5 shrink-0 rounded-full" style={{ background: KIND_COLOR[k] }} />
+                        {k}
+                        {kind === k && <span className="ml-auto text-primary">✓</span>}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                {note && <DropdownMenuSeparator />}
+                {/* Bookmark */}
+                {note && (
+                  <DropdownMenuItem onClick={() => { if (bookmark) void removeBookmark(); else openBookmarkDialog(); }}>
+                    <IconBookmark size={14} className={cn("mr-2", bookmark && "text-warning")} filled={!!bookmark} />
+                    {bookmark ? "Remove bookmark" : "Bookmark"}
+                  </DropdownMenuItem>
+                )}
+                {/* Pin */}
+                {note && (
+                  <DropdownMenuItem onClick={togglePinned}>
+                    <IconPin size={14} className={cn("mr-2", pinned && "text-primary")} />
+                    {pinned ? "Unpin" : "Pin to sidebar"}
+                  </DropdownMenuItem>
+                )}
+                {note && <DropdownMenuSeparator />}
+                {/* Delete */}
+                {note && (
+                  <DropdownMenuItem variant="destructive" onClick={handleDelete}>
+                    <IconTrash size={14} className="mr-2" />
+                    Move to Trash
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
-        {/* view toggle + toolbar */}
+        {/* duplicate title warning */}
         {duplicateTitle && (
           <p className="mx-6 mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-            Another note already uses this title — [[links]] to “{title.trim()}” resolve to the first match.
+            Another note already uses this title — [[links]] to &ldquo;{title.trim()}&rdquo; resolve to the first match.
           </p>
         )}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
-          <ToggleGroup value={[view]} onValueChange={values => {
-            const value = values[0];
-            if (value === "write" || value === "edit" || value === "split" || value === "preview") setViewAndRemember(value);
-          }} aria-label="Editor view">
-            <ToggleGroupItem value="write">Write</ToggleGroupItem>
-            <ToggleGroupItem value="edit">Edit</ToggleGroupItem>
-            <ToggleGroupItem value="split">Split</ToggleGroupItem>
-            <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
-          </ToggleGroup>
-          {showEdit && (
-            <div className="flex flex-wrap items-center gap-0.5">
-              {toolbar.map((t) => (
-                <Button
-                  key={t.label}
-                  variant="ghost"
-                  size="sm"
-                  title={t.kbd ? `${t.title} (${modKey}${t.kbd})` : t.title}
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={t.run}
-                >
-                  {t.label}
-                </Button>
-              ))}
-              <Button variant="ghost" size="sm" title={`Keyboard shortcuts (${modKey}/)`} onClick={() => window.dispatchEvent(new Event("chibako:open-shortcuts"))}>
-                ?
-              </Button>
-            </div>
-          )}
+
+        <div className="mx-auto flex w-[calc(100%-3rem)] max-w-[75ch] items-center gap-3 pb-3 pt-7">
+          <input
+            className="min-w-0 flex-1 bg-transparent font-heading text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
+            value={title}
+            placeholder="Untitled"
+            onChange={(e) => handleChangeTitle(e.target.value)}
+            aria-label="Note title"
+          />
         </div>
 
         {/* body */}
-        <div className="flex min-h-0 flex-1">
+        <div className={cn("flex min-h-0 flex-1", showEdit && showPreview && "flex-col md:flex-row")}>
           {showWrite && (
             <div className="w-full overflow-y-auto px-6 py-2">
-              {propsToggleJSX()}
-              {showProps && renderPropertyEditor()}
-              <RichTextEditor
-                key={`${note?.id ?? "new"}:${editorKey}`}
-                initialMarkdown={fm.body}
-                noteId={note?.id ?? "new"}
-                selfTitle={title}
-                allNotes={allNotes}
-                onBodyChange={handleWriteBody}
-                onNavigate={navigateTo}
-                onViewShortcut={setViewAndRemember}
-              />
+              <div className="mx-auto w-full max-w-[75ch]">
+                {propsToggleJSX()}
+                {showProps && renderPropertyEditor()}
+                <RichTextEditor
+                  key={`${note?.id ?? "new"}:${editorKey}`}
+                  initialMarkdown={fm.body}
+                  noteId={note?.id ?? "new"}
+                  selfTitle={title}
+                  allNotes={allNotes}
+                  onBodyChange={handleWriteBody}
+                  onNavigate={navigateTo}
+                  onViewShortcut={setViewAndRemember}
+                />
+              </div>
             </div>
           )}
           {showEdit && (
             <div
               ref={editWrapRef}
               onScroll={() => setSuggest(null)}
-              className={cn("relative overflow-y-auto px-6 py-2", showPreview ? "w-1/2 border-r border-border" : "w-full")}
+              className={cn("relative overflow-y-auto px-6 py-2", showPreview ? "h-1/2 w-full border-b border-border md:h-auto md:w-1/2 md:border-b-0 md:border-r" : "w-full")}
             >
-              {propsToggleJSX()}
-              {showProps && renderPropertyEditor()}
-              <textarea
+              <div className="mx-auto w-full max-w-[75ch]">
+                {propsToggleJSX()}
+                {showProps && renderPropertyEditor()}
+                <textarea
                 key={editorKey}
                 ref={textareaRef}
                 className="editor min-h-full"
@@ -1154,7 +1181,8 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
                 aria-expanded={Boolean(suggest)}
                 aria-autocomplete="list"
                 spellCheck={false}
-              />
+                />
+              </div>
               {suggest && suggestions.length > 0 && (
                 <div
                   role="listbox"
@@ -1188,8 +1216,9 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
             </div>
           )}
           {showPreview && (
-            <div className={`${showEdit ? "w-1/2" : "w-full"} overflow-y-auto px-8 py-4`}>
-              {propKeys.length > 0 && (
+            <div className={cn("overflow-y-auto px-6 py-4", showEdit ? "h-1/2 w-full md:h-auto md:w-1/2" : "w-full")}>
+              <div className="mx-auto w-full max-w-[75ch]">
+                {propKeys.length > 0 && (
                 <div className="mb-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-[13px]">
                   {propKeys.map((key) => {
                     const value = fm.props[key];
@@ -1205,95 +1234,29 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
                   })}
                 </div>
               )}
-              {fm.body.trim() ? (
-                <MarkdownPreview content={fm.body} onNavigate={navigateTo} />
-              ) : (
-                <p className="text-sm text-muted-foreground">Preview is empty.</p>
-              )}
+                {fm.body.trim() ? (
+                  <MarkdownPreview content={fm.body} onNavigate={navigateTo} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">Preview is empty.</p>
+                )}
+              </div>
             </div>
           )}
+        </div>
+        <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3 text-[11px] text-muted-foreground">
+          <span>{view === "edit" ? "Markdown" : view === "preview" ? "Read" : view[0].toUpperCase() + view.slice(1)}</span>
+          <span role="status" aria-live="polite" className={saveState === "error" ? "text-destructive" : undefined}>
+            {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : saveState === "error" ? "Save failed" : "Unsaved"}
+          </span>
+          {saveState === "error" && <button type="button" className="font-medium text-destructive hover:underline" onClick={() => void persist().catch(() => {})}>Retry</button>}
+          {note && <span className="ml-auto">{wordCount} word{wordCount === 1 ? "" : "s"}</span>}
+          {note && <span className="hidden sm:inline">Edited {relTime(note.updated_at)}</span>}
         </div>
       </div>
 
       {/* right links panel */}
-      {note && showLinks && (
-        <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-sidebar lg:flex">
-          <div className="flex items-center justify-between px-4 py-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Connections</h3>
-            <Button variant="ghost" size="icon-sm" aria-label="Close connections" onClick={() => setShowLinks(false)}>
-              <IconX size={13} />
-            </Button>
-          </div>
-          <div className="flex flex-1 flex-col gap-4 px-3 pb-6">
-            <div>
-              <h4 className="px-1 text-xs font-medium text-muted-foreground">Backlinks ({links?.backlinks.length ?? 0})</h4>
-              {links?.backlinks.length ? (
-                <ul className="mt-1 flex flex-col gap-0.5">
-                  {links.backlinks.map((b) => (
-                    <li key={b.id}>
-                      <button
-                        className="w-full rounded-md px-2 py-1.5 text-left transition hover:bg-muted"
-                        onClick={() => router.push(`/app/note/${b.id}`)}
-                      >
-                        <span className="block text-[13px] font-medium text-primary">{b.title}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{b.snippet}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-1 px-2 text-xs text-muted-foreground">Nothing links here yet. Add <code>[[{note.title}]]</code> elsewhere.</p>
-              )}
-            </div>
-            <div>
-              <h4 className="px-1 text-xs font-medium text-muted-foreground">Linked to ({links?.outlinks.length ?? 0})</h4>              {links?.outlinks.length ? (
-                <ul className="mt-1 flex flex-col gap-0.5">
-                  {links.outlinks.map((o) => (
-                    <li key={o.target}>
-                      <button
-                        className={cn(
-                          "w-full rounded-md px-2 py-1.5 text-left text-[13px] transition hover:bg-muted",
-                          o.resolved ? "text-primary" : "text-muted-foreground italic"
-                        )}
-                        onClick={() => navigateTo(o.target)}
-                      >
-                        {o.target}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-1 px-2 text-xs text-muted-foreground">No outgoing links.</p>
-              )}
-            </div>
-            {mentions.length > 0 && (
-              <div>
-                <h4 className="px-1 text-xs font-medium text-muted-foreground">Mentioned in ({mentions.length})</h4>
-                <ul className="mt-1 flex flex-col gap-0.5">
-                  {mentions.map((m) => (
-                    <li key={m.id} className="rounded-md px-2 py-1.5 transition hover:bg-muted">
-                      <button
-                        className="block w-full text-left"
-                        onClick={() => router.push(`/app/note/${m.id}`)}
-                        title="Open note"
-                      >
-                        <span className="block text-[13px] font-medium">{m.title}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{m.snippet}</span>
-                      </button>
-                      <button
-                        className="mt-0.5 text-[11px] font-medium text-primary hover:underline"
-                        onClick={() => linkMentionFrom(m.id)}
-                      >
-                        Link first mention →
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </aside>
-      )}
+      {note && showLinks && wideLinks && <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-border bg-sidebar">{connectionsPanel()}</aside>}
+      {note && !wideLinks && <Sheet open={showLinks} onOpenChange={setShowLinks}><SheetContent side="right" className="w-72 p-0" showCloseButton={false}><SheetTitle className="sr-only">Connections</SheetTitle>{connectionsPanel()}</SheetContent></Sheet>}
 
       {/* create missing note dialog */}
       <Dialog open={createModal !== null} onOpenChange={(o) => !o && setCreateModal(null)}>

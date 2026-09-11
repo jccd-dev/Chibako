@@ -58,6 +58,19 @@ export function destroySession(token: string): void {
   getDb().prepare(`DELETE FROM sessions WHERE token = ?`).run(token);
 }
 
+/**
+ * Invalidate every session except the given one. Called after a password
+ * change so other devices are logged out but the current session survives.
+ * With no current token, all sessions are cleared.
+ */
+export function destroyOtherSessions(keepToken: string | null): void {
+  if (keepToken) {
+    getDb().prepare(`DELETE FROM sessions WHERE token != ?`).run(keepToken);
+  } else {
+    getDb().prepare(`DELETE FROM sessions`).run();
+  }
+}
+
 export async function getCookieToken(): Promise<string | null> {
   const store = await cookies();
   return store.get(SESSION_COOKIE)?.value ?? null;

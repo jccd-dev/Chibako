@@ -12,6 +12,7 @@ data
 .env*.local
 .DS_Store
 npm-debug.log*
+*.tsbuildinfo
 
 # Project docs kept local (not pushed to GitHub)
 PRD/

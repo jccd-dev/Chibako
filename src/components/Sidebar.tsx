@@ -1,14 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { IconDotsVertical, IconFolderPlus, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
-import type { NoteSummary } from "@/lib/notes";
+import { IconDotsVertical, IconFolderPlus } from "@tabler/icons-react";
+import type { NoteSummary, SearchResult } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { cn } from "@/lib/utils";
-import { IconBookmark, IconChevron, IconFile, IconFolder, IconHome, IconPlus, IconTrash } from "@/components/icons";
+import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -25,23 +25,6 @@ const parentOf = (path: string) => path.split("/").slice(0, -1).join("/");
 const nameOf = (path: string) => path.split("/").at(-1)!;
 const join = (parent: string, name: string) => parent ? `${parent}/${name}` : name;
 
-/**
- * Filter matching for the sidebar box. Plain terms match title/folder text;
- * `key:value` terms match note properties (tags match any list item), e.g.
- * `report status:done tags:work`.
- */
-function matchesFilter(note: NoteSummary, textTokens: string[], propTokens: Array<{ key: string; value: string }>): boolean {
-  const hay = `${note.folder}/${note.title}`.toLowerCase();
-  for (const t of textTokens) if (!hay.includes(t)) return false;
-  for (const { key, value } of propTokens) {
-    const prop = note.properties?.[key];
-    if (prop === undefined) return false;
-    const values = Array.isArray(prop) ? prop : [prop];
-    if (!values.some((v) => String(v).toLowerCase().includes(value))) return false;
-  }
-  return true;
-}
-
 export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onExpand }: {
   collapsed: boolean; mobile: boolean; mobileOpen: boolean;
   onMobileOpenChange: (open: boolean) => void; onExpand: () => void;
@@ -57,7 +40,17 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const [dragBookmarkId, setDragBookmarkId] = useState<string | null>(null);
   const [dropBookmarkId, setDropBookmarkId] = useState<string | null>(null);
   const [closed, setClosed] = useState(new Set<string>());
-  const [filter, setFilter] = useState("");
+
+  // Search state
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchActive, setSearchActive] = useState(0);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchAbort = useRef<AbortController | null>(null);
+
   const [action, setAction] = useState<Action | null>(null);
   const [name, setName] = useState("");
   const [parent, setParent] = useState("");
@@ -80,6 +73,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       if (marks.ok) setBookmarks((await marks.json()).bookmarks);
     } catch { toast.error("Could not load notes. Try again."); }
   }, []);
+
   useEffect(() => {
     void load();
     const refresh = () => { void load(); };
@@ -90,7 +84,94 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       window.removeEventListener("chibako:notes-changed", refresh);
     };
   }, [load, pathname]);
+
   useEffect(() => { onMobileOpenChange(false); }, [pathname, onMobileOpenChange]);
+
+  // Live search effect
+  useEffect(() => {
+    searchAbort.current?.abort();
+    if (!searchQuery.trim()) {
+      setSearchBusy(false);
+      setSearchResults([]);
+      setSearchActive(0);
+      return;
+    }
+    setSearchBusy(true);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      searchAbort.current?.abort();
+      const ctrl = new AbortController();
+      searchAbort.current = ctrl;
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`, { signal: ctrl.signal });
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data.results);
+          setSearchActive(0);
+        }
+      } catch {
+        // aborted or error
+      } finally {
+        if (searchAbort.current === ctrl) setSearchBusy(false);
+      }
+    }, 180);
+    return () => {
+      clearTimeout(searchTimer.current);
+      searchAbort.current?.abort();
+    };
+  }, [searchQuery]);
+
+  // Focus search input when search mode is activated
+  useEffect(() => {
+    if (searchMode && (!collapsed || mobileOpen)) {
+      const t = setTimeout(() => searchInputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [searchMode, collapsed, mobileOpen]);
+
+  // Auto-scroll selected search result item into view
+  useEffect(() => {
+    if (searchMode && searchResults.length > 0) {
+      const el = document.getElementById(`search-result-${searchActive}`);
+      el?.scrollIntoView({ block: "nearest" });
+    }
+  }, [searchActive, searchMode, searchResults.length]);
+
+  function activateSearch() {
+    setSearchMode(true);
+    if (collapsed) {
+      onExpand();
+    }
+    if (mobile && !mobileOpen) {
+      onMobileOpenChange(true);
+    }
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent) {
+    if (searchResults.length === 0 && e.key !== "Escape") return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSearchActive((prev) => (searchResults.length ? (prev + 1) % searchResults.length : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSearchActive((prev) => (searchResults.length ? (prev - 1 + searchResults.length) % searchResults.length : 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const selected = searchResults[searchActive];
+      if (selected) {
+        router.push(`/app/note/${selected.id}`);
+        if (mobile) onMobileOpenChange(false);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if (searchQuery) {
+        setSearchQuery("");
+      } else {
+        setSearchMode(false);
+      }
+    }
+  }
 
   function start(mode: Action["mode"], item: Item) {
     setAction({ mode, item }); setName(mode === "create" ? "" : item.name);
@@ -147,8 +228,6 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; setDropTarget(path);
       },
       onDragLeave(e: DragEvent) {
-        // Moving across child elements fires dragleave; keep the highlight
-        // while the pointer is still inside the drop target.
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
       },
       async onDrop(e: DragEvent) {
@@ -181,7 +260,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   }
   function menu(item: Item) {
     return <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${item.name}`} disabled={busy} />}><IconDotsVertical /></DropdownMenuTrigger>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="sidebar-row-action" aria-label={`Actions for ${item.name}`} disabled={busy} />}><IconDotsVertical /></DropdownMenuTrigger>
       <DropdownMenuContent align="end">{actions(item)}</DropdownMenuContent>
     </DropdownMenu>;
   }
@@ -260,7 +339,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         if (fromIdx === -1 || targetIdx === -1) return;
         const [moved] = ordered.splice(fromIdx, 1);
         const target = ordered.find(x => x.id === b.id)!;
-        moved.group_name = target.group_name; // dropping across groups adopts the target's group
+        moved.group_name = target.group_name;
         ordered.splice(ordered.findIndex(x => x.id === b.id), 0, moved);
         try {
           const res = await fetch("/api/bookmarks", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: ordered }) });
@@ -289,7 +368,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   }
   function noteRow(note: NoteSummary) {
     const item: Item = { type: "note", id: note.id, name: note.title, parent: note.folder };
-    return <div key={note.id} className="flex items-center" {...dragProps(item)}>
+    return <div key={note.id} className="group/sidebar-row flex items-center" {...dragProps(item)}>
       <ContextMenu>
         <ContextMenuTrigger className="flex min-w-0 flex-1">
           <Link href={`/app/note/${note.id}`} aria-current={pathname === `/app/note/${note.id}` ? "page" : undefined}
@@ -305,7 +384,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     const item: Item = { type: "folder", id: path, name: nameOf(path), parent: parentOf(path) };
     const open = !closed.has(path);
     return <div key={path}>
-      <div className={cn("flex items-center rounded-md", dropTarget === path && "bg-accent ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
+      <div className={cn("group/sidebar-row flex items-center rounded-md", dropTarget === path && "bg-accent ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
         <ContextMenu>
           <ContextMenuTrigger className="flex min-w-0 flex-1">
             <button className="tree-item min-w-0 flex-1" aria-expanded={open} onClick={() => setClosed(prev => {
@@ -320,27 +399,101 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       {open && <div className="ml-3 border-l border-border pl-1">{folders.filter(f => parentOf(f) === path).map(folderRow)}{notes.filter(n => n.folder === path).map(noteRow)}</div>}
     </div>;
   }
+
+
   const home = notes.find(n => n.kind === "index");
-  const filterTokens = filter.trim().split(/\s+/).filter(Boolean);
-  const propTokens = filterTokens.filter(t => t.includes(":")).map(t => {
-    const i = t.indexOf(":");
-    return { key: t.slice(0, i).toLowerCase(), value: t.slice(i + 1).toLowerCase() };
-  });
-  const textTokens = filterTokens.filter(t => !t.includes(":"));
-  const visibleNotes = filter ? notes.filter(n => matchesFilter(n, textTokens, propTokens)) : null;
-  const body = <>
-    <div className="flex items-center gap-1 px-3 py-3">
-      <Link href="/app" className="flex min-w-0 flex-1 items-center gap-2 font-heading text-sm font-semibold">
-        <img src="/logo_main.png" alt="" className="h-5 w-5 shrink-0" />
-        <span className="truncate">Chibako</span>
-      </Link>
-      <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note")}><IconPlus /></Button>
-      <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder")}><IconFolderPlus /></Button>
+
+  const searchView = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-2 pb-1 pt-2">
+        <div className="relative flex items-center">
+          <IconSearch size={13} className="pointer-events-none absolute left-2.5 text-muted-foreground" />
+          <Input
+            ref={searchInputRef}
+            aria-label="Search all notes"
+            placeholder="Search notes…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            className="h-8 border-transparent bg-muted/50 pl-8 pr-7 text-xs shadow-none focus-visible:border-border"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => { setSearchQuery(""); searchInputRef.current?.focus(); }}
+              className="absolute right-2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <IconX size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox" id="sidebar-search-results">
+        {searchQuery.trim() === "" ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            <p>Search across titles and note content.</p>
+            <p className="mt-1 text-[11px]">Use ↑↓ to navigate results, ↵ to open.</p>
+          </div>
+        ) : searchResults.length === 0 && !searchBusy ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No notes found for "{searchQuery}".
+          </div>
+        ) : (
+          searchResults.map((r, i) => (
+            <button
+              key={r.id}
+              id={`search-result-${i}`}
+              role="option"
+              tabIndex={-1}
+              aria-selected={i === searchActive}
+              className={cn(
+                "block w-full rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent",
+                i === searchActive && "bg-accent ring-1 ring-primary/40"
+              )}
+              onMouseEnter={() => setSearchActive(i)}
+              onClick={() => {
+                router.push(`/app/note/${r.id}`);
+                if (mobile) onMobileOpenChange(false);
+              }}
+            >
+              <div className="flex items-center gap-1.5 font-medium text-foreground">
+                <IconFile size={13} className="shrink-0 text-muted-foreground" />
+                <span className="truncate">{r.title}</span>
+                {r.folder && (
+                  <span className="ml-auto shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                    {r.folder}
+                  </span>
+                )}
+              </div>
+              {r.snippet && (
+                <div className="mt-0.5 line-clamp-2 pl-4 text-[11px] leading-tight text-muted-foreground">
+                  {r.snippet.split(/(<mark>|<\/mark>)/).map((part, idx, parts) =>
+                    part === "<mark>" || part === "</mark>"
+                      ? null
+                      : parts[idx - 1] === "<mark>"
+                      ? <mark key={idx}>{part}</mark>
+                      : part
+                  )}
+                </div>
+              )}
+            </button>
+          ))
+        )}
+      </div>
+      {searchResults.length > 0 && (
+        <div className="border-t border-border px-3 py-1.5 text-[10.5px] text-muted-foreground">
+          ↑↓ navigate · ↵ open · esc close
+        </div>
+      )}
     </div>
-    <div className="px-3 pb-3"><Input aria-label="Filter files" placeholder="Filter files… (status:done)" value={filter} onChange={e => setFilter(e.target.value)} /></div>
-    <nav aria-label="Files and folders" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-      {home && <Link href={`/app/note/${home.id}`} className="tree-item"><IconHome size={14} />Home</Link>}
-      {visibleNotes ? visibleNotes.map(noteRow) : <>
+  );
+
+  const fileTree = (
+    <>
+      <nav aria-label="Files and folders" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {home && <Link href={`/app/note/${home.id}`} className="tree-item"><IconHome size={14} />Home</Link>}
         {bookmarks.length > 0 && (
           <details open className="mb-1">
             <summary className="tree-item"><IconBookmark size={14} />Bookmarks</summary>
@@ -366,20 +519,126 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
             }}>Restore</Button><Button variant="ghost" size="icon-sm" aria-label={`Delete ${n.title} forever`} onClick={() => setPurgeTarget(n)}><IconTrash /></Button>
           </div>)}
         </details>}
-      </>}
-    </nav>
-    <div className="px-4 py-2 text-xs text-muted-foreground">{notes.length} files</div>
-  </>;
-  return <>
-    {mobile ? <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
-      <SheetContent side="left" className="w-72 p-0"><SheetTitle className="sr-only">Files and folders</SheetTitle><div className="flex h-full flex-col pt-8">{body}</div></SheetContent>
-    </Sheet> : <aside id="file-sidebar" aria-label="Sidebar" className={cn("flex shrink-0 flex-col border-r border-border bg-sidebar", collapsed ? "w-12 items-center gap-2 py-3" : "w-60")}>
-      {collapsed ? <>
-        <Button variant="ghost" size="icon" aria-label="Expand sidebar" onClick={onExpand}><IconLayoutSidebarLeftExpand /></Button>
+      </nav>
+      <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{notes.length} files</div>
+    </>
+  );
+
+  const filePanel = (
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 px-3 py-2.5">
+        <Link href="/app" className="flex min-w-0 flex-1 items-center gap-2 font-heading text-sm font-semibold">
+          <img src="/logo_main.png" alt="" className="h-5 w-5 shrink-0" />
+          <span className="truncate">Chibako</span>
+        </Link>
         <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note")}><IconPlus /></Button>
         <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder")}><IconFolderPlus /></Button>
-      </> : body}
-    </aside>}
+      </div>
+      {searchMode ? searchView : fileTree}
+    </div>
+  );
+
+  const activityRail = (
+    <nav aria-label="Workspace" className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border py-2">
+      <Link
+        href="/app"
+        aria-label="Home"
+        title="Home"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app" && !searchMode && "bg-accent text-foreground"
+        )}
+      >
+        <IconHome size={16} />
+      </Link>
+      {/* Files icon: goes back to file list (expands panel if collapsed) */}
+      <button
+        type="button"
+        aria-label="Files"
+        title="Files"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          !searchMode && !collapsed && "bg-accent text-foreground"
+        )}
+        onClick={() => {
+          if (searchMode) { setSearchMode(false); setSearchQuery(""); }
+          if (collapsed) onExpand();
+        }}
+      >
+        <IconFile size={16} />
+      </button>
+      <button
+        type="button"
+        aria-label="Search notes"
+        title="Search notes"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          searchMode && (!collapsed || mobileOpen) && "bg-accent text-foreground"
+        )}
+        onClick={activateSearch}
+      >
+        <IconSearch size={16} />
+      </button>
+      <Link
+        href="/app/graph"
+        aria-label="Graph"
+        title="Graph"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/graph" && "bg-accent text-foreground"
+        )}
+      >
+        <IconGraph size={16} />
+      </Link>
+      <Link
+        href="/app/agent"
+        aria-label="Agent access"
+        title="Agent access"
+        className={cn(
+          "mt-auto grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/agent" && "bg-accent text-foreground"
+        )}
+      >
+        <IconBot size={16} />
+      </Link>
+      <Link
+        href="/app/settings"
+        aria-label="Settings"
+        title="Settings"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/settings" && "bg-accent text-foreground"
+        )}
+      >
+        <IconGear size={16} />
+      </Link>
+    </nav>
+  );
+
+  return <>
+    {mobile ? (
+      <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
+        <SheetContent side="left" className="w-72 p-0">
+          <SheetTitle className="sr-only">Files and folders</SheetTitle>
+          <div className="flex h-full flex-col pt-8">
+            {filePanel}
+          </div>
+        </SheetContent>
+      </Sheet>
+    ) : (
+      <aside
+        id="file-sidebar"
+        aria-label="Sidebar"
+        className={cn(
+          "flex shrink-0 border-r border-border bg-sidebar transition-[width] duration-150 ease-out",
+          collapsed ? "w-11" : "w-[17.75rem]"
+        )}
+      >
+        {activityRail}
+        {!collapsed && filePanel}
+      </aside>
+    )}
+
     <Dialog open={action !== null} onOpenChange={open => { if (!open && !busy) setAction(null); }}>
       <DialogContent><form onSubmit={submit} className="flex flex-col gap-4">
         <DialogHeader><DialogTitle>{action?.mode === "create" ? "New" : action?.mode === "rename" ? "Rename" : "Move"} {action?.item.type === "folder" ? "folder" : "file"}</DialogTitle></DialogHeader>
@@ -397,6 +656,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setAction(null)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Saving…" : action?.mode === "move" ? "Move" : action?.mode === "rename" ? "Rename" : "Create"}</Button></DialogFooter>
       </form></DialogContent>
     </Dialog>
+
     <Dialog open={bookmarkDialog !== null} onOpenChange={open => { if (!open) setBookmarkDialog(null); }}>
       <DialogContent><form onSubmit={submitBookmark} className="flex flex-col gap-4">
         <DialogHeader><DialogTitle>Bookmark</DialogTitle></DialogHeader>
@@ -433,6 +693,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         </DialogFooter>
       </form></DialogContent>
     </Dialog>
+
     <ConfirmDialog open={purgeTarget !== null} onOpenChange={open => !open && setPurgeTarget(null)} title={`Delete "${purgeTarget?.title}" forever?`} description="This cannot be undone." confirmLabel="Delete forever" destructive onConfirm={async () => {
       if (!purgeTarget) return;
       try { await request(`/api/trash/${purgeTarget.id}`, "DELETE"); setPurgeTarget(null); } catch { toast.error("Could not delete file."); }

@@ -10,7 +10,6 @@ import Image from "@tiptap/extension-image";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { WikiLink } from "./WikiLinkExtension";
 import type { NoteSummary } from "@/lib/notes";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface RichTextEditorProps {
@@ -40,24 +39,6 @@ interface MenuState {
   top: number;
   matches: NoteSummary[];
 }
-
-const ACTIVE_DEFAULTS = {
-  bold: false,
-  italic: false,
-  strike: false,
-  code: false,
-  h1: false,
-  h2: false,
-  h3: false,
-  paragraph: false,
-  bullet: false,
-  ordered: false,
-  task: false,
-  quote: false,
-  codeBlock: false,
-  link: false,
-  table: false,
-};
 
 export function RichTextEditor({
   initialMarkdown,
@@ -231,37 +212,6 @@ export function RichTextEditor({
   wikiPromptRef.current = insertWiki;
   linkPromptRef.current = insertLink;
 
-  const act = useEditorState({
-    editor,
-    selector: ({ editor: ed }) => {
-      if (!ed) return ACTIVE_DEFAULTS;
-      return {
-        bold: ed.isActive("bold"),
-        italic: ed.isActive("italic"),
-        strike: ed.isActive("strike"),
-        code: ed.isActive("code"),
-        h1: ed.isActive("heading", { level: 1 }),
-        h2: ed.isActive("heading", { level: 2 }),
-        h3: ed.isActive("heading", { level: 3 }),
-        paragraph: ed.isActive("paragraph"),
-        bullet: ed.isActive("bulletList"),
-        ordered: ed.isActive("orderedList"),
-        task: ed.isActive("taskList"),
-        quote: ed.isActive("blockquote"),
-        codeBlock: ed.isActive("codeBlock"),
-        link: ed.isActive("link"),
-        table: ed.isActive("table"),
-      };
-    },
-  }) ?? ACTIVE_DEFAULTS;
-
-  function toggleHeading(level: 1 | 2 | 3) {
-    if (!editor) return;
-    const c = editor.chain().focus();
-    if (editor.isActive("heading", { level })) c.setParagraph().run();
-    else c.toggleHeading({ level }).run();
-  }
-
   function insertLink() {
     if (!editor) return;
     const collapsed = editor.state.selection.empty;
@@ -282,13 +232,6 @@ export function RichTextEditor({
     if (!title?.trim()) return;
     const pos = editor.state.selection.$from.pos;
     editor.chain().focus().insertContentAt(pos, { type: "wikilink", attrs: { target: title.trim(), alias: null } }).setTextSelection(pos + 1).run();
-  }
-
-  function insertImage() {
-    if (!editor) return;
-    const url = window.prompt("Image URL");
-    if (!url?.trim()) return;
-    editor.chain().focus().setImage({ src: url.trim() }).run();
   }
 
   function handleRootKeyDown(e: React.KeyboardEvent) {
@@ -322,44 +265,6 @@ export function RichTextEditor({
           This note has inline HTML or comments that can&apos;t be edited here. Switch to the Edit (source) view for this note.
         </div>
       )}
-      <div className="wt-toolbar flex flex-wrap items-center gap-0.5 pb-1.5">
-        <ToolButton title="Undo (⌘Z)" label="↶" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()} />
-        <ToolButton title="Redo (⌘⇧Z)" label="↷" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()} />
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <ToolButton title="Bold (⌘B)" label="B" active={act.bold} onClick={() => editor?.chain().focus().toggleBold().run()} />
-        <ToolButton title="Italic (⌘I)" label="I" active={act.italic} onClick={() => editor?.chain().focus().toggleItalic().run()} />
-        <ToolButton title="Strikethrough (⌘⇧X)" label="S" active={act.strike} onClick={() => editor?.chain().focus().toggleStrike().run()} />
-        <ToolButton title="Inline code (⌘J)" label="`" active={act.code} onClick={() => editor?.chain().focus().toggleCode().run()} />
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <ToolButton title="Paragraph" label="¶" active={act.paragraph} onClick={() => editor?.chain().focus().setParagraph().run()} />
-        <ToolButton title="Heading 1" label="H1" active={act.h1} onClick={() => toggleHeading(1)} />
-        <ToolButton title="Heading 2" label="H2" active={act.h2} onClick={() => toggleHeading(2)} />
-        <ToolButton title="Heading 3" label="H3" active={act.h3} onClick={() => toggleHeading(3)} />
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <ToolButton title="Bullet list (⌘⇧B)" label="•" active={act.bullet} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
-        <ToolButton title="Numbered list" label="1." active={act.ordered} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
-        <ToolButton title="Checklist (⌘⇧T)" label="[]" active={act.task} onClick={() => editor?.chain().focus().toggleTaskList().run()} />
-        <ToolButton title="Quote" label="❝" active={act.quote} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
-        <ToolButton title="Code block (⌘⇧J)" label="<>" active={act.codeBlock} onClick={() => editor?.chain().focus().toggleCodeBlock().run()} />
-        <ToolButton title="Horizontal rule" label="—" onClick={() => editor?.chain().focus().setHorizontalRule().run()} />
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <ToolButton title="Insert table" label="▦" active={act.table} onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} />
-        {act.table && (
-          <>
-            <ToolButton title="Add row below" label="⊞" onClick={() => editor?.chain().focus().addRowAfter().run()} />
-            <ToolButton title="Delete row" label="⊟" onClick={() => editor?.chain().focus().deleteRow().run()} />
-            <ToolButton title="Add column right" label="⊕" onClick={() => editor?.chain().focus().addColumnAfter().run()} />
-            <ToolButton title="Delete column" label="⊖" onClick={() => editor?.chain().focus().deleteColumn().run()} />
-            <ToolButton title="Delete table" label="🗑" onClick={() => editor?.chain().focus().deleteTable().run()} />
-          </>
-        )}
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <ToolButton title="Link (⌘⇧L)" label="🔗" active={act.link} onClick={insertLink} />
-        <ToolButton title="Wikilink (⌘⇧K)" label="⟪⟫" onClick={insertWiki} />
-        <ToolButton title="Image" label="🖼" onClick={insertImage} />
-        <ToolButton title="Keyboard shortcuts (⌘/)" label="?" onClick={() => window.dispatchEvent(new Event("chibako:open-shortcuts"))} />
-      </div>
-
       <div className="relative px-0.5 pt-1 pb-10" onClick={handleClick}>
         {editable ? (
           <EditorContent editor={editor} />
@@ -393,33 +298,5 @@ export function RichTextEditor({
         </div>
       )}
     </div>
-  );
-}
-
-function ToolButton({
-  label,
-  title,
-  onClick,
-  active,
-  disabled,
-}: {
-  label: string;
-  title: string;
-  onClick: () => void;
-  active?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      title={title}
-      disabled={disabled}
-      className={cn("h-6 px-1.5 text-[13px]", active && "bg-accent text-foreground")}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-    >
-      {label}
-    </Button>
   );
 }

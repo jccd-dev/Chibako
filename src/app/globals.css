@@ -197,16 +197,6 @@ textarea {
 
 /* ---- rich (WYSIWYG) editor surface ---- */
 .wt-editor .ProseMirror { outline: none; min-height: 45vh; }
-/* Sticky toolbar: the write pane scrolls as one block; the toolbar pins while the doc moves. */
-.wt-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  margin: 0 -1.5rem;
-  padding: 0.25rem 1.5rem 0.5rem;
-  background: color-mix(in oklch, var(--background) 90%, transparent);
-  backdrop-filter: blur(8px);
-}
 .wt-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
@@ -222,6 +212,20 @@ textarea {
 .wt-editor li[data-type="taskItem"] > div p { margin: 0.15em 0; }
 .wt-editor li[data-type="taskItem"][data-checked="true"] > div { text-decoration: line-through; opacity: 0.65; }
 .wt-editor .wiki-link { cursor: pointer; user-select: none; }
+
+/* ---- graph view ---- */
+.graph-root circle.node,
+.graph-root line.link,
+.graph-root text.label {
+  transition: opacity 0.25s ease, stroke 0.2s ease, stroke-width 0.2s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-root circle.node,
+  .graph-root line.link,
+  .graph-root text.label {
+    transition: none;
+  }
+}
 
 /* ---- UI primitives ---- */
 .tree-item {
@@ -323,4 +327,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 @media (pointer: coarse) {
   button, [data-slot="button"], .tree-item { min-height: 44px; }
   [data-slot="button"]:has(svg:only-child) { min-width: 44px; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-row-action { opacity: 0; }
+  .group\/sidebar-row:hover .sidebar-row-action,
+  .group\/sidebar-row:focus-within .sidebar-row-action { opacity: 1; }
 }

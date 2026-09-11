@@ -8,6 +8,8 @@ import {
   forceManyBody,
   forceCenter,
   forceCollide,
+  forceX,
+  forceY,
   type SimulationNodeDatum,
 } from "d3-force";
 import { select } from "d3-selection";
@@ -23,8 +25,8 @@ interface GraphNode extends SimulationNodeDatum {
 }
 
 interface GraphLink {
-  source: string;
-  target: string;
+  source: string | SimulationNodeDatum;
+  target: string | SimulationNodeDatum;
 }
 
 interface GraphData {
@@ -38,6 +40,9 @@ const KIND_COLOR: Record<string, string> = {
   index: "var(--graph-index)",
 };
 
+const ORPHAN_OPACITY = 0.15;
+const HOVER_DIM = 0.25;
+
 export function GraphView() {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -46,6 +51,8 @@ export function GraphView() {
   const [data, setData] = useState<GraphData | null>(null);
   const [hovered, setHovered] = useState<GraphNode | null>(null);
   const [t, setT] = useState({ x: 0, y: 0, k: 1 });
+  const tRef = useRef(t);
+  tRef.current = t;
   const [orphansOnly, setOrphansOnly] = useState(false);
   const [folder, setFolder] = useState("");
 
@@ -62,21 +69,39 @@ export function GraphView() {
   );
   const links = useMemo(() => (data?.links ?? []).map((l) => ({ source: l.source, target: l.target })), [data]);
   const folders = useMemo(() => [...new Set(nodes.map((n) => n.folder).filter(Boolean))].sort(), [nodes]);
+
+  // Adjacency map: node id -> connected node ids (drives degree, orphan count, hover highlighting)
+  const neighbors = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    const add = (a: string, b: string) => {
+      let s = m.get(a);
+      if (!s) { s = new Set(); m.set(a, s); }
+      s.add(b);
+    };
+    for (const l of links) {
+      const s = typeof l.source === "object" ? (l.source as GraphNode).id : l.source;
+      const t = typeof l.target === "object" ? (l.target as GraphNode).id : l.target;
+      add(s, t);
+      add(t, s);
+    }
+    return m;
+  }, [links]);
   const degree = useMemo(() => {
     const d = new Map<string, number>();
-    for (const l of links) {
-      d.set(l.source, (d.get(l.source) ?? 0) + 1);
-      d.set(l.target, (d.get(l.target) ?? 0) + 1);
-    }
+    for (const [id, set] of neighbors) d.set(id, set.size);
     return d;
-  }, [links]);
+  }, [neighbors]);
   const orphanCount = useMemo(() => nodes.filter((n) => !(degree.get(n.id) ?? 0)).length, [nodes, degree]);
+  const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   // apply pan/zoom transform
   useEffect(() => {
     if (gRef.current) gRef.current.setAttribute("transform", `translate(${t.x},${t.y}) scale(${t.k})`);
   }, [t]);
 
+  // Simulation: built ONLY when the data changes. Filters and hover never
+  // rebuild it, so toggling "Orphans" or picking a folder dims the graph in
+  // place instead of scattering every node with a fresh simulation pulse.
   useEffect(() => {
     if (!nodes.length || !svgRef.current || !wrapRef.current) return;
     const svg = svgRef.current;
@@ -90,50 +115,102 @@ export function GraphView() {
       .force("center", forceCenter(width / 2, height / 2))
       .force("collide", forceCollide(26));
 
+    // Orphan nodes have no link force, so every simulation pulse (e.g. a drag
+    // re-heating alpha) pushes them further out and nothing pulls them back.
+    // Once the layout settles, tether each node with a weak spring to its
+    // settled spot: drags perturb the graph and it relaxes back instead of
+    // accumulating drift.
+    function settleHomes() {
+      for (const n of nodes as any) {
+        n.homeX = n.x;
+        n.homeY = n.y;
+      }
+      if (!sim.force("homeX")) {
+        sim
+          .force("homeX", forceX<SimulationNodeDatum>((d: any) => d.homeX).strength(0.05))
+          .force("homeY", forceY<SimulationNodeDatum>((d: any) => d.homeY).strength(0.05));
+      }
+    }
+    sim.on("end", settleHomes);
+
     const root = select(svg).select("g.graph-root");
     const linkSel = root
       .append("g")
       .selectAll("line")
       .data(links as any)
       .join("line")
-      .attr("stroke", "var(--border)")
-      .attr("stroke-width", 1);
-
-    const dim = (d: any) => {
-      const isOrphan = !(degree.get(d.id) ?? 0);
-      if (orphansOnly && !isOrphan) return 0.15;
-      if (folder && d.folder !== folder) return 0.15;
-      return 1;
-    };
+      .attr("class", "link");
 
     const nodeSel = root
       .append("g")
       .selectAll("circle")
       .data(nodes as any)
       .join("circle")
+      .attr("class", "node")
       .attr("r", (d: any) => (d.kind === "index" ? 11 : d.kind === "wiki" ? 8 : 6))
       .attr("fill", (d: any) => KIND_COLOR[d.kind] ?? "var(--primary)")
       .attr("stroke", "var(--popover)")
       .attr("stroke-width", 2)
-      .attr("cursor", "pointer")
-      .attr("opacity", dim)
-      .on("click", (_e: any, d: any) => {
-        router.push(`/app/note/${d.id}`);
+      .attr("cursor", "grab")
+      .on("mousedown", (event: any, d: any) => {
+        event.stopPropagation();
+        event.preventDefault();
+        dragNode = d;
+        moved = false;
+        sx = event.clientX;
+        sy = event.clientY;
+        document.body.style.cursor = "grabbing";
+        sim.alphaTarget(0.3).restart();
       })
-      .on("mouseover", (_e: any, d: any) => setHovered(d))
-      .on("mouseout", () => setHovered(null));
+      .on("mouseover", (_e: any, d: any) => { if (!dragNode) setHovered(d); })
+      .on("mouseout", () => { if (!dragNode) setHovered(null); });
 
     const labelSel = root
       .append("g")
       .selectAll("text")
       .data(nodes as any)
       .join("text")
+      .attr("class", "label")
       .attr("text-anchor", "middle")
       .attr("dy", -14)
       .attr("font-size", 10)
       .attr("fill", "var(--muted-foreground)")
-      .attr("opacity", dim)
+      .attr("pointer-events", "none")
       .text((d: any) => d.title);
+
+    // Drag a node: pin it under the cursor (fx/fy) while the simulation keeps
+    // running, so linked nodes trail with a springy follow. On release the pin
+    // is lifted and the node springs back into the layout. A press that never
+    // moved is treated as a click and opens the note.
+    let dragNode: GraphNode | null = null;
+    let moved = false;
+    let sx = 0;
+    let sy = 0;
+
+    function toGraph(clientX: number, clientY: number) {
+      const rect = svg.getBoundingClientRect();
+      const { x, y, k } = tRef.current;
+      return { x: (clientX - rect.left - x) / k, y: (clientY - rect.top - y) / k };
+    }
+    function onDragMove(e: MouseEvent) {
+      if (!dragNode) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 3) moved = true;
+      const p = toGraph(e.clientX, e.clientY);
+      dragNode.fx = p.x;
+      dragNode.fy = p.y;
+    }
+    function onDragEnd() {
+      if (!dragNode) return;
+      if (!moved) router.push(`/app/note/${dragNode.id}`);
+      dragNode.fx = null;
+      dragNode.fy = null;
+      dragNode = null;
+      document.body.style.cursor = "";
+      sim.alphaTarget(0);
+    }
+    window.addEventListener("mousemove", onDragMove);
+    window.addEventListener("mouseup", onDragEnd);
+    window.addEventListener("mouseleave", onDragEnd);
 
     sim.on("tick", () => {
       linkSel
@@ -147,9 +224,64 @@ export function GraphView() {
 
     return () => {
       sim.stop();
+      document.body.style.cursor = "";
+      window.removeEventListener("mousemove", onDragMove);
+      window.removeEventListener("mouseup", onDragEnd);
+      window.removeEventListener("mouseleave", onDragEnd);
       root.selectAll("*").remove();
     };
-  }, [nodes, links, router, orphansOnly, folder, degree]);
+  }, [nodes, links, router]);
+
+  // Visual state: orphan/folder filtering + hover neighborhood highlighting,
+  // applied as style updates on the existing DOM (no simulation restarts).
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const root = select(svg).select("g.graph-root");
+
+    const baseOpacity = (d: GraphNode) => {
+      let o = 1;
+      if (orphansOnly && !(degree.get(d.id) ?? 0)) o = ORPHAN_OPACITY;
+      if (folder && d.folder !== folder) o = Math.min(o, ORPHAN_OPACITY);
+      return o;
+    };
+    const related = (id: string) => hovered && (id === hovered.id || neighbors.get(hovered.id)?.has(id));
+
+    const nodeOpacity = (d: GraphNode) => {
+      const base = baseOpacity(d);
+      if (!hovered) return base;
+      return related(d.id) ? Math.max(base, 0.95) : Math.min(base, HOVER_DIM);
+    };
+
+    root.selectAll<SVGCircleElement, GraphNode>("circle.node")
+      .attr("opacity", nodeOpacity)
+      .attr("stroke", (d) => (related(d.id) ? "var(--primary)" : "var(--popover)"));
+    root.selectAll<SVGTextElement, GraphNode>("text.label")
+      .attr("opacity", nodeOpacity)
+      .attr("font-weight", (d) => (related(d.id) ? 600 : 400));
+
+    root.selectAll<SVGLineElement, GraphLink>("line.link")
+      .attr("stroke", (d) => {
+        const s = typeof d.source === "object" ? (d.source as GraphNode).id : d.source;
+        const t = typeof d.target === "object" ? (d.target as GraphNode).id : d.target;
+        return hovered && (s === hovered.id || t === hovered.id) ? "var(--primary)" : "var(--border)";
+      })
+      .attr("stroke-opacity", (d) => {
+        const s = typeof d.source === "object" ? (d.source as GraphNode).id : d.source;
+        const t = typeof d.target === "object" ? (d.target as GraphNode).id : d.target;
+        const so = nodesById.get(s);
+        const to = nodesById.get(t);
+        const base = Math.min(so ? baseOpacity(so) : ORPHAN_OPACITY, to ? baseOpacity(to) : ORPHAN_OPACITY);
+        if (!hovered) return base;
+        return s === hovered.id || t === hovered.id ? 1 : Math.min(base, 0.06);
+      })
+      .attr("stroke-width", (d) => {
+        if (!hovered) return 1;
+        const s = typeof d.source === "object" ? (d.source as GraphNode).id : d.source;
+        const t = typeof d.target === "object" ? (d.target as GraphNode).id : d.target;
+        return s === hovered.id || t === hovered.id ? 1.6 : 1;
+      });
+  }, [hovered, orphansOnly, folder, nodes, links, neighbors, degree, nodesById]);
 
   // wheel zoom + background drag pan (nodes stay clickable)
   useEffect(() => {
@@ -252,7 +384,7 @@ export function GraphView() {
           No notes yet — create a note to start the graph.
         </div>
       )}
-      <svg ref={svgRef} className="h-full w-full cursor-grab active:cursor-grabbing">
+      <svg ref={svgRef} className="h-full w-full cursor-grab select-none active:cursor-grabbing fade-in">
         <g ref={gRef} className="graph-root" />
       </svg>
       {hovered && (

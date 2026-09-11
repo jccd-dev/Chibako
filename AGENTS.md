@@ -4,6 +4,10 @@ Chibako is a self-hosted, Obsidian-like second brain: Markdown notes with
 `[[wikilinks]]`, automatic backlinks, a graph view, and token-efficient AI
 agent access via both a REST API and an MCP server.
 
+Chibako is **open source (MIT)** and developed in public — this repository is
+public. Never commit secrets or environment-specific values. Production deploy
+and host configuration live in the private `chibako-infra` repo, not here.
+
 ## Stack
 - Next.js (App Router) + React 19 + TypeScript, `output: "standalone"`
 - SQLite via `better-sqlite3` — single file at `DATA_DIR/brain.db`, WAL mode
@@ -29,7 +33,7 @@ agent access via both a REST API and an MCP server.
 - `npm run dev` — dev server on :3000
 - `npm run build` — Next build + MCP bundle
 - `npm run mcp` — run MCP server over stdio (`CHIBAKO_DATA_DIR` + optional `CHIBAKO_API_KEY` env)
-- Deploy: `docker compose up -d` (nginx terminates TLS on the VPS)
+- Deploy: self-hosters run `docker compose up -d` (nginx terminates TLS). Production uses the private `chibako-infra` repo, which deploys the GHCR image by digest — do not add host/deploy config here.
 
 ## Gotchas
 - `better-sqlite3` is a native module; it is `serverExternalPackages` and copied wholesale into the Docker runtime image.

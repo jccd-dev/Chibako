@@ -6,7 +6,7 @@ export const GET = withAuth("keys:read", async () => {
   return Response.json({ keys: listApiKeys() });
 });
 
-export const POST = withAuth("keys:write", async (req: NextRequest) => {
+export const POST = withAuth("*", async (req: NextRequest) => {
   const body = await req.json().catch(() => ({}));
   const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Agent key";
   const requested: unknown[] = Array.isArray(body.scopes) ? body.scopes : [];
