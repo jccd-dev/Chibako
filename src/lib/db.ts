@@ -133,6 +133,13 @@ export function getDb(): Database.Database {
     // content remains the source of truth; this column exists for cheap
     // WHERE-based filtering and list payloads, and is re-synced on every write.
     if (!names.has("properties")) db.exec(`ALTER TABLE notes ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'`);
+    // Embedding freshness metadata (see CONTEXT.md / docs/adr/0001). Guarded the
+    // same way so this block re-runs safely on every boot.
+    const embCols = db.prepare(`PRAGMA table_info(note_embeddings)`).all() as Array<{ name: string }>;
+    const embNames = new Set(embCols.map((c) => c.name));
+    if (!embNames.has("content_hash")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`);
+    if (!embNames.has("dim")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN dim INTEGER NOT NULL DEFAULT 0`);
+    if (!embNames.has("input_version")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN input_version INTEGER NOT NULL DEFAULT 1`);
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

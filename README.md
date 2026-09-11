@@ -7,6 +7,9 @@ anything that speaks MCP) can read and write your notes directly.
 
 Designed to run on a single small VPS (1 vCPU / 4 GB is plenty).
 
+Chibako is **open source** under the MIT license — see [LICENSE](LICENSE). This
+repository is public, so never commit secrets or environment-specific values.
+
 ## Features
 
 - **Obsidian-style notes** — plain Markdown, `[[wikilink]]` syntax, backlinks
@@ -34,8 +37,9 @@ Designed to run on a single small VPS (1 vCPU / 4 GB is plenty).
   ranked titles + trimmed snippets capped at a token budget (never full bodies)
 - **Optional semantic recall** — set `CHIBAKO_EMBEDDING_PROVIDER` +
   `CHIBAKO_EMBEDDING_API_KEY` (any OpenAI-compatible `/v1/embeddings` endpoint)
-  to enable vector search fused with BM25 via RRF. Disabled by default, zero
-  network calls when off.
+  to enable vector search fused with BM25 via RRF. Embeddings refresh
+  automatically when notes change, and can be repaired from **Settings →
+  Recall** (Reindex now). Disabled by default, zero network calls when off.
 - **Single admin auth** — password login + DB-backed sessions; one-time setup
 - **One file to back up** — the whole vault is `data/brain.db` (SQLite)
 
@@ -122,12 +126,14 @@ See `/app/agent` in the UI for the full tool list and examples.
 | DELETE | `/api/notes/:id` | `notes:write` | Delete a note |
 | GET | `/api/notes/:id/links` | `notes:read` | Outlinks + backlinks |
 | GET | `/api/search?q=` | `notes:read` or `search:read` | Full-text search |
+| GET | `/api/embeddings` | `notes:read` | Semantic recall status (indexed/stale/error) |
+| POST | `/api/embeddings/reindex` | `notes:write` | Reindex embeddings (no-op when disabled) |
 | GET | `/api/graph` | `notes:read` | Nodes + edges |
 | GET | `/api/schema` | `schema:read` | Knowledge schema (AGENTS.md) |
 | PUT | `/api/schema` | `schema:write` | Update knowledge schema |
 | GET | `/api/keys` | `keys:read` | List API keys |
-| POST | `/api/keys` | `keys:write` | Create API key |
-| DELETE | `/api/keys/:id` | `keys:write` | Revoke API key |
+| POST | `/api/keys` | session only | Create API key |
+| DELETE | `/api/keys/:id` | session only | Revoke API key |
 | GET | `/api/health` | — | Liveness probe |
 
 Auth: `Authorization: Bearer <key>`, or the web session cookie.
@@ -164,3 +170,7 @@ nginx/            reverse-proxy template for the VPS
 ```
 
 See `AGENTS.md` for developer conventions.
+
+## License
+
+Chibako is open source software licensed under the [MIT License](LICENSE).

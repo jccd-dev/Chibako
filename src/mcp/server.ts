@@ -25,9 +25,8 @@ import {
   saveObservation,
   listObservations,
   deleteObservation,
-  indexEmbeddings,
-  getEmbeddingStatus,
 } from "../lib/recall";
+import { reindexEmbeddings, embeddingStatus } from "../lib/embedding-index";
 
 // ---------- auth ----------
 
@@ -160,12 +159,12 @@ server.registerTool("delete_observation", {
 
 server.registerTool("index_embeddings", {
   title: "Index note embeddings",
-  description: "Build/refresh the vector embeddings index for semantic recall. Requires embeddings to be enabled via CHIBAKO_EMBEDDING_* env vars; otherwise this is a no-op. Call after enabling embeddings to backfill existing notes.",
+  description: "Build/refresh the vector embeddings index for semantic recall. Requires embeddings to be enabled via CHIBAKO_EMBEDDING_* env vars; otherwise this is a no-op. Works in capped batches and returns {indexed, skipped, remaining} — call again while remaining > 0 to finish a large backfill.",
   inputSchema: z.object({}),
 }, async () => {
   if (!authorizeAny(["notes:write", "schema:write"])) return deny();
   try {
-    const res = await indexEmbeddings();
+    const res = await reindexEmbeddings();
     return ok(res);
   } catch (e) {
     return fail(`embedding indexing failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -174,11 +173,11 @@ server.registerTool("index_embeddings", {
 
 server.registerTool("embedding_status", {
   title: "Embedding status",
-  description: "Check whether semantic embeddings are enabled and how many notes are indexed.",
+  description: "Check whether semantic embeddings are enabled, the active provider/model/dimensions, how many notes are indexed, how many are stale, and the last error (if any).",
   inputSchema: z.object({}),
 }, () => {
   if (!authorize("notes:read")) return deny();
-  return ok(getEmbeddingStatus());
+  return ok(embeddingStatus());
 });
 
 server.registerTool("read_note", {

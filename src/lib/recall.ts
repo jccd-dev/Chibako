@@ -1,53 +1,11 @@
 import { getDb, now, uid } from "./db";
-import { listNotes, searchNotes, getNote, type SearchResult, type NoteSummary } from "./notes";
+import { listNotes, searchNotes, getNote, type NoteSummary } from "./notes";
 import { stripFrontmatter } from "./markdown";
+import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
+import { listEmbeddings } from "./embedding-store";
+import { freshEmbeddingIds, staleNoteIds, refreshNotes } from "./embedding-index";
 
-// ---------- embedding config (optional, env-gated) ----------
-//
-// Embeddings are OFF by default. To enable semantic recall with a remote
-// OpenAI-compatible embeddings API, set:
-//   CHIBAKO_EMBEDDING_PROVIDER=openai      (or openrouter / custom)
-//   CHIBAKO_EMBEDDING_API_KEY=<key>
-//   CHIBAKO_EMBEDDING_MODEL=text-embedding-3-small
-//   CHIBAKO_EMBEDDING_BASE_URL=https://api.openai.com/v1   (optional)
-//   CHIBAKO_EMBEDDING_DIM=1536                              (optional)
-
-const EMBEDDING_PROVIDER = process.env.CHIBAKO_EMBEDDING_PROVIDER ?? "";
-const EMBEDDING_API_KEY = process.env.CHIBAKO_EMBEDDING_API_KEY ?? "";
-const EMBEDDING_MODEL = process.env.CHIBAKO_EMBEDDING_MODEL ?? "text-embedding-3-small";
-const EMBEDDING_DIM = Number(process.env.CHIBAKO_EMBEDDING_DIM ?? 0);
-
-function embeddingBaseUrl(): string {
-  if (process.env.CHIBAKO_EMBEDDING_BASE_URL) return process.env.CHIBAKO_EMBEDDING_BASE_URL.replace(/\/$/, "");
-  if (EMBEDDING_PROVIDER === "openrouter") return "https://openrouter.ai/api/v1";
-  return "https://api.openai.com/v1";
-}
-
-export function embeddingsEnabled(): boolean {
-  return Boolean(EMBEDDING_PROVIDER && EMBEDDING_API_KEY);
-}
-
-// ---------- embedding primitives ----------
-
-async function embedTexts(texts: string[]): Promise<number[][]> {
-  const url = `${embeddingBaseUrl()}/embeddings`;
-  const body: Record<string, unknown> = { model: EMBEDDING_MODEL, input: texts };
-  if (EMBEDDING_DIM > 0) body.dimensions = EMBEDDING_DIM;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${EMBEDDING_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`embedding request failed (${res.status}): ${detail.slice(0, 300)}`);
-  }
-  const json = (await res.json()) as { data: Array<{ embedding: number[] }> };
-  return json.data.map((d) => d.embedding);
-}
+// ---------- vector search ----------
 
 function cosine(a: number[], b: number[]): number {
   let dot = 0, na = 0, nb = 0;
@@ -60,65 +18,18 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-/** Ensure every visible note has a fresh embedding. No-op when disabled. */
-export async function indexEmbeddings(): Promise<{ indexed: number; skipped: number }> {
-  if (!embeddingsEnabled()) return { indexed: 0, skipped: 0 };
-  const db = getDb();
-  const notes = listNotes().filter((n) => n.kind !== "index");
-  const missing = notes.filter((n) => {
-    const row = db.prepare(`SELECT 1 AS x FROM note_embeddings WHERE note_id = ? AND model = ?`).get(n.id, EMBEDDING_MODEL);
-    return !row;
-  });
-  if (missing.length === 0) return { indexed: 0, skipped: notes.length };
-
-  const batch = 100;
-  let indexed = 0;
-  for (let i = 0; i < missing.length; i += batch) {
-    const slice = missing.slice(i, i + batch);
-    const full = slice.map((n) => getNote(n.id));
-    const texts = full.map((n) => `${n?.title ?? ""}\n\n${stripFrontmatter(n?.content ?? "")}`.slice(0, 8000));
-    const vectors = await embedTexts(texts);
-    const upsert = db.prepare(`
-      INSERT INTO note_embeddings (note_id, model, vector, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(note_id) DO UPDATE SET model=excluded.model, vector=excluded.vector, updated_at=excluded.updated_at
-    `);
-    for (let k = 0; k < slice.length; k++) {
-      upsert.run(slice[k].id, EMBEDDING_MODEL, JSON.stringify(vectors[k]), now());
-      indexed++;
-    }
-  }
-  return { indexed, skipped: notes.length - missing.length };
-}
-
-function storedVector(noteId: string): number[] | null {
-  const row = getDb().prepare(`SELECT vector FROM note_embeddings WHERE note_id = ? AND model = ?`).get(noteId, EMBEDDING_MODEL) as
-    | { vector: string }
-    | undefined;
-  if (!row) return null;
-  try {
-    return JSON.parse(row.vector) as number[];
-  } catch {
-    return null;
-  }
-}
-
-/** Cosine-similarity search over stored vectors. Returns note ids + scores. */
+/** Cosine search over stored vectors, restricted to embeddings that are currently fresh. */
 async function vectorSearch(query: string, limit: number): Promise<Array<{ id: string; score: number }>> {
-  const [qvec] = await embedTexts([query]);
-  const rows = getDb()
-    .prepare(`SELECT note_id, vector FROM note_embeddings WHERE model = ?`)
-    .all(EMBEDDING_MODEL) as Array<{ note_id: string; vector: string }>;
+  const provider = getEmbeddingProvider();
+  if (!provider) return [];
+  const [qvec] = await provider.embed([query]);
+  if (!qvec) return [];
+  const fresh = freshEmbeddingIds();
   const scored: Array<{ id: string; score: number }> = [];
-  for (const r of rows) {
-    let v: number[];
-    try {
-      v = JSON.parse(r.vector) as number[];
-    } catch {
-      continue;
-    }
-    const sim = cosine(qvec, v);
-    if (sim > 0) scored.push({ id: r.note_id, score: sim });
+  for (const e of listEmbeddings()) {
+    if (!fresh.has(e.note_id)) continue;
+    const sim = cosine(qvec, e.vector);
+    if (sim > 0) scored.push({ id: e.note_id, score: sim });
   }
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit);
@@ -141,9 +52,7 @@ function rrf(rankings: Array<Array<{ id: string }>>, k = 60): Array<{ id: string
 
 // ---------- token-budget snippet ----------
 
-const TITLE_WEIGHT = 4;
-
-/** Trim content to roughly `budget` words around the best query-term hit. */
+/** Trim content to roughly `budget` words around the densest query-term hit. */
 function trimmedSnippet(content: string, query: string, budget: number): string {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const lower = content.toLowerCase();
@@ -152,7 +61,6 @@ function trimmedSnippet(content: string, query: string, budget: number): string 
   for (const t of terms) {
     let idx = lower.indexOf(t);
     while (idx !== -1) {
-      // count term occurrences forward to pick the densest window
       let count = 0;
       let j = idx;
       while (j !== -1) {
@@ -208,9 +116,20 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
   let rankings = [bm25];
   let vectorScores: Map<string, number> | null = null;
   if (includeVectors && embeddingsEnabled()) {
-    const vec = await vectorSearch(query, 50);
-    rankings = [bm25, vec.map((v) => ({ id: v.id }))];
-    vectorScores = new Map(vec.map((v) => [v.id, v.score]));
+    // Lazy self-heal: queue a few stale notes for background refresh. This is
+    // the process-agnostic backstop for edits made by the other process, and it
+    // must never block or fail the recall response.
+    const stale = staleNoteIds(20);
+    if (stale.length) void refreshNotes(stale);
+    try {
+      const vec = await vectorSearch(query, 50);
+      if (vec.length) {
+        rankings = [bm25, vec.map((v) => ({ id: v.id }))];
+        vectorScores = new Map(vec.map((v) => [v.id, v.score]));
+      }
+    } catch {
+      // Provider failed: fall back to keyword-only results.
+    }
   }
 
   const fused = rrf(rankings);
@@ -232,7 +151,6 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
 
     if (tokens + addTokens > budget) {
       if (items.length === 0) {
-        // never return zero results on a tiny budget; force one best match
         items.push(buildItem(summary, snippet, score, vectorScores, terms));
       }
       break;
@@ -302,16 +220,4 @@ export function listObservations(limit = 50): Observation[] {
 export function deleteObservation(id: string): boolean {
   const res = getDb().prepare(`DELETE FROM observations WHERE id = ?`).run(id);
   return res.changes > 0;
-}
-
-export function getEmbeddingStatus(): { enabled: boolean; provider: string; model: string; indexed: number } {
-  const indexed = getDb()
-    .prepare(`SELECT COUNT(*) AS c FROM note_embeddings WHERE model = ?`)
-    .get(EMBEDDING_MODEL) as { c: number };
-  return {
-    enabled: embeddingsEnabled(),
-    provider: EMBEDDING_PROVIDER || "disabled",
-    model: EMBEDDING_MODEL,
-    indexed: indexed.c,
-  };
 }

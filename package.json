@@ -8,6 +8,7 @@
     "build": "next build && npm run build:mcp",
     "start": "next start",
     "lint": "next lint",
+    "test": "tsx --test tests/*.test.ts",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/mcp/server.mjs",
     "mcp": "node dist/mcp/server.mjs",
     "mcp:dev": "tsx src/mcp/server.ts"

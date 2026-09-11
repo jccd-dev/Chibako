@@ -36,9 +36,23 @@ interface ApiKey {
   last_used_at: number | null;
 }
 
+interface EmbeddingStatus {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  dim: number;
+  input_version: number;
+  indexed: number;
+  stale: number;
+  total: number;
+  rows: number;
+  last_error: string | null;
+  last_indexed_at: number | null;
+}
+
 export function SettingsView() {
   const router = useRouter();
-  const [tab, setTab] = useState<"schema" | "properties" | "keys" | "password">("schema");
+  const [tab, setTab] = useState<"schema" | "properties" | "keys" | "recall" | "password">("schema");
   const [schema, setSchema] = useState("");
   const [schemaSaved, setSchemaSaved] = useState(false);
   const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
@@ -51,6 +65,12 @@ export function SettingsView() {
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [embStatus, setEmbStatus] = useState<EmbeddingStatus | null>(null);
+  const [reindexing, setReindexing] = useState(false);
+
+  useEffect(() => {
+    if (tab === "recall" && !embStatus) void loadEmbeddings();
+  }, [tab, embStatus]);
 
   useEffect(() => {
     fetch("/api/schema").then((r) => r.json()).then((d) => setSchema(d.schema)).catch(() => {});
@@ -93,6 +113,33 @@ export function SettingsView() {
   async function loadKeys() {
     const res = await fetch("/api/keys");
     if (res.ok) setKeys((await res.json()).keys);
+  }
+
+  async function loadEmbeddings() {
+    const res = await fetch("/api/embeddings");
+    if (res.ok) setEmbStatus((await res.json()).status as EmbeddingStatus);
+  }
+
+  async function runReindex() {
+    setReindexing(true);
+    try {
+      let remaining = Infinity;
+      let guard = 0;
+      while (remaining > 0 && guard++ < 50) {
+        const res = await fetch("/api/embeddings/reindex", { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error || "Reindex failed.");
+          return;
+        }
+        remaining = data.remaining ?? 0;
+        if (data.status) setEmbStatus(data.status as EmbeddingStatus);
+      }
+      await loadEmbeddings();
+      toast.success("Reindex complete.");
+    } finally {
+      setReindexing(false);
+    }
   }
 
   async function saveSchema() {
@@ -162,6 +209,7 @@ export function SettingsView() {
           <TabsTrigger value="schema">Knowledge schema (AGENTS.md)</TabsTrigger>
           <TabsTrigger value="properties">Properties</TabsTrigger>
           <TabsTrigger value="keys">API keys</TabsTrigger>
+          <TabsTrigger value="recall">Recall</TabsTrigger>
           <TabsTrigger value="password">Password</TabsTrigger>
         </TabsList>
 
@@ -301,6 +349,70 @@ export function SettingsView() {
                 </ul>
               )}
             </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="recall" className="fade-in">
+          <div className="flex flex-col gap-4 pt-3">
+            <p className="text-sm text-muted-foreground">
+              Optional semantic recall. Configure <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">CHIBAKO_EMBEDDING_*</code>{" "}
+              to fuse vector search with keyword search. When unset, this stays off and no note content leaves the server.
+            </p>
+            {!embStatus ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : !embStatus.enabled ? (
+              <Alert>
+                <AlertDescription>
+                  Embeddings are disabled. Set <code>CHIBAKO_EMBEDDING_PROVIDER</code> and{" "}
+                  <code>CHIBAKO_EMBEDDING_API_KEY</code> (any OpenAI-compatible <code>/v1/embeddings</code> endpoint), then restart the server.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <>
+                <Card>
+                  <CardContent className="flex flex-col gap-1 pt-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Provider</span>
+                      <span className="text-sm font-medium">
+                        {embStatus.provider} · {embStatus.model}
+                        {embStatus.dim ? ` (${embStatus.dim}d)` : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Indexed</span>
+                      <span className="text-sm font-medium">{embStatus.indexed} / {embStatus.total}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Stale</span>
+                      <span className="text-sm font-medium">{embStatus.stale}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Stored vectors</span>
+                      <span className="text-sm font-medium">{embStatus.rows}</span>
+                    </div>
+                    {embStatus.last_indexed_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Last indexed</span>
+                        <span className="text-sm">{new Date(embStatus.last_indexed_at * 1000).toLocaleString()}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+                {embStatus.last_error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>Last error: {embStatus.last_error}</AlertDescription>
+                  </Alert>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button onClick={runReindex} disabled={reindexing}>
+                    {reindexing ? "Reindexing…" : "Reindex now"}
+                  </Button>
+                  <Button variant="outline" onClick={loadEmbeddings} disabled={reindexing}>
+                    Refresh status
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </TabsContent>
 

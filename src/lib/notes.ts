@@ -1,4 +1,6 @@
 import { getDb, now, uid } from "./db";
+import { markStale } from "./embedding-queue";
+import { deleteEmbedding } from "./embedding-store";
 import {
   applyFrontmatter,
   extractWikiLinks,
@@ -143,6 +145,7 @@ function createNoteRecord(input: CreateNoteInput): Note {
   db.prepare(`INSERT INTO notes_fts (id, title, content, folder) VALUES (?,?,?,?)`).run(id, title, stripFrontmatter(content), folder);
   reindexLinks(id, content);
   resolveLinksForTitle(title, id);
+  markStale(id);
   return getNote(id)!;
 }
 
@@ -190,6 +193,7 @@ function updateNoteRecord(id: string, input: UpdateNoteInput): Note | null {
   reindexLinks(id, content);
   if (renamed) rewriteReferences(before, new Map([[id, { title, folder }]]));
   resolveLinksForTitle(title, id);
+  markStale(id);
   return getNote(id);
 }
 
@@ -206,6 +210,7 @@ export function restoreNote(id: string): Note | null {
   const existing = getNote(id, true);
   if (!existing || !existing.deleted_at) return null;
   db.prepare(`UPDATE notes SET deleted_at = NULL WHERE id = ?`).run(id);
+  markStale(id);
   return getNote(id);
 }
 
@@ -219,6 +224,7 @@ export function purgeNote(id: string): boolean {
   db.prepare(`DELETE FROM links WHERE target_id = ?`).run(id);
   db.prepare(`DELETE FROM notes_fts WHERE id = ?`).run(id);
   db.prepare(`DELETE FROM bookmarks WHERE note_id = ?`).run(id);
+  deleteEmbedding(id);
   return true;
 }
 
