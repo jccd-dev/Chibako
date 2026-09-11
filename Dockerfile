@@ -40,7 +40,10 @@ ENV HOSTNAME=0.0.0.0
 # gosu lets the entrypoint fix bind-mount ownership as root, then drop to `node`.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends gosu \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+    /usr/local/lib/node_modules/npm \
+    /usr/local/bin/npm \
+    /usr/local/bin/npx
 
 COPY --from=build /app/package.json ./
 # Next standalone server (self-contained, includes its own traced deps)
