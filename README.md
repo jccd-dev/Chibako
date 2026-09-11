@@ -20,6 +20,8 @@ agent can read and write your vault without blowing token budgets.
 [![MCP](https://img.shields.io/badge/MCP-native-7C3AED)](https://modelcontextprotocol.io)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing)
 
+**[How agent memory works](docs/AGENT-MEMORY.md)** · architecture, retrieval flow, token-efficiency evidence, and tradeoffs
+
 </div>
 
 ---
@@ -34,6 +36,7 @@ agent can read and write your vault without blowing token budgets.
 - [Quick start (local dev)](#-quick-start-local-dev)
 - [Deploy to your VPS](#-deploy-to-your-vps-docker-compose--nginx)
 - [Connect your AI agent](#-connect-your-ai-agent)
+- [How agent memory works](docs/AGENT-MEMORY.md)
 - [REST API reference](#-rest-api-reference)
 - [Backup](#-backup)
 - [Data model](#-data-model)
@@ -99,7 +102,9 @@ Chibako is **server-first** and treats your agent as a first-class user.
 - **Token-efficient by design.** Notes are raw Markdown (no JSON block trees),
   list/links calls return titles and ids only, `ingest_note` packs a note +
   links + schema into one round trip, and `recall` returns ranked titles +
-  trimmed snippets bounded by a token budget — never full bodies.
+  trimmed snippets approximately bounded by a caller-selected token budget —
+  never full bodies during discovery. See the
+  [design and evidence](docs/AGENT-MEMORY.md#why-retrieval-uses-fewer-context-tokens).
 - **Markdown stays portable.** Your notes are plain text you can read, diff,
   and move. The database is an index, not a lock-in.
 
@@ -158,8 +163,8 @@ agent memory**, that's the gap Chibako was built to fill.
     `get_stats`, plus `memory_save` / `list_observations` / `delete_observation`
     (observation log) and `index_embeddings` / `embedding_status`
 - **Token efficiency by design** — raw Markdown bodies, id-only list/links
-  payloads, single-call `ingest_note`, and `recall` snippets capped at a token
-  budget
+  payloads, single-call `ingest_note`, and `recall` snippets targeted to an
+  approximate token budget
 - **Optional semantic recall** — set `CHIBAKO_EMBEDDING_PROVIDER` +
   `CHIBAKO_EMBEDDING_API_KEY` (any OpenAI-compatible `/v1/embeddings` endpoint)
   to fuse vector search with BM25 via RRF. Embeddings refresh on note changes
@@ -353,7 +358,6 @@ src/lib/          db, auth, notes engine, markdown/wikilinks, api wrapper
 src/components/   sidebar, editor, preview, graph, settings, agent guide
 src/mcp/server.ts MCP stdio server (bundled to dist/mcp/server.mjs)
 nginx/            reverse-proxy template for the VPS
-PRD/              product specs: vision, architecture, roadmap, status
 docs/adr/         architecture decision records
 ```
 
@@ -362,8 +366,7 @@ glossary.
 
 ## 🗺️ Roadmap
 
-Chibako is under active development. These are the directions on the table —
-see `PRD/05-roadmap.md` for the maintained, prioritised list.
+Chibako is under active development. These are the current directions.
 
 **Near-term**
 

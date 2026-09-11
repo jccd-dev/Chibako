@@ -847,6 +847,20 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     );
   }
 
+  function titleInputJSX() {
+    return (
+      <div className="flex items-center gap-3 pb-3 pt-5">
+        <input
+          className="min-w-0 flex-1 bg-transparent font-heading text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
+          value={title}
+          placeholder="Untitled"
+          onChange={(e) => handleChangeTitle(e.target.value)}
+          aria-label="Note title"
+        />
+      </div>
+    );
+  }
+
   /** Shared typed-properties editor shown above both the source and rich editors. */
   function renderPropertyEditor() {
     return (propKeys.length > 0 || addingProp) ? (
@@ -1121,21 +1135,12 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
           </p>
         )}
 
-        <div className="sticky top-0 z-10 mx-auto flex w-[calc(100%-3rem)] max-w-[88ch] items-center gap-3 bg-background pb-3 pt-7">
-          <input
-            className="min-w-0 flex-1 bg-transparent font-heading text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
-            value={title}
-            placeholder="Untitled"
-            onChange={(e) => handleChangeTitle(e.target.value)}
-            aria-label="Note title"
-          />
-        </div>
-
         {/* body */}
         <div className={cn("flex min-h-0 flex-1", showEdit && showPreview && "flex-col md:flex-row")}>
           {showWrite && (
             <div className="w-full overflow-y-auto px-6 py-2">
               <div className="mx-auto w-full max-w-[88ch]">
+                {titleInputJSX()}
                 {propsToggleJSX()}
                 {showProps && renderPropertyEditor()}
                 <RichTextEditor
@@ -1158,6 +1163,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
               className={cn("relative overflow-y-auto px-6 py-2", showPreview ? "h-1/2 w-full border-b border-border md:h-auto md:w-1/2 md:border-b-0 md:border-r" : "w-full")}
             >
               <div className="mx-auto w-full max-w-[88ch]">
+                {titleInputJSX()}
                 {propsToggleJSX()}
                 {showProps && renderPropertyEditor()}
                 <textarea
@@ -1218,6 +1224,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
           {showPreview && (
             <div className={cn("overflow-y-auto px-6 py-4", showEdit ? "h-1/2 w-full md:h-auto md:w-1/2" : "w-full")}>
               <div className="mx-auto w-full max-w-[88ch]">
+                {!showEdit && titleInputJSX()}
                 {propKeys.length > 0 && (
                 <div className="mb-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-[13px]">
                   {propKeys.map((key) => {

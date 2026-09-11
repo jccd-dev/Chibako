@@ -6,8 +6,7 @@ The vault is embedded one whole note at a time through a remote
 OpenAI-compatible Provider. There is no chunking, no local model, and no
 `sqlite-vec` in the MVP. The goal of this work is correctness and freshness of
 an optional feature, not a retrieval-quality upgrade; chunking, local inference,
-and an in-database vector index remain the separate future design in
-`PRD/06-semantic-search-rag.md`.
+and an in-database vector index remain out of scope.
 
 The embedding row is shaped so a chunk layer can be added later without
 changing the freshness model: Staleness is keyed by a content hash per note, and
