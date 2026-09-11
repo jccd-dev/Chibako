@@ -129,7 +129,19 @@ jobs:
     needs: publish
     runs-on: ubuntu-24.04
     steps:
+      - name: Check for INFRA_DISPATCH_TOKEN
+        id: guard
+        run: |
+          if [ -n "${{ secrets.INFRA_DISPATCH_TOKEN }}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Token present, dispatching to infra."
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "INFRA_DISPATCH_TOKEN not set — skipping infra deploy trigger."
+          fi
+
       - name: Dispatch immutable image digest
+        if: steps.guard.outputs.skip != 'true'
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
