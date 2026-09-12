@@ -2,8 +2,16 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { hashPassword, isSetup, createSession, setSessionCookie } from "@/lib/auth";
 import { ensureIndexNote } from "@/lib/notes";
+import { consumeAuthAttempt } from "@/lib/auth-rate-limit";
 
 export async function POST(req: Request) {
+  const attempt = consumeAuthAttempt();
+  if (!attempt.allowed) {
+    return NextResponse.json(
+      { error: `Too many authentication attempts. Try again in ${attempt.retryAfterSeconds} seconds.` },
+      { status: 429, headers: { "Retry-After": String(attempt.retryAfterSeconds) } },
+    );
+  }
   if (isSetup()) {
     return NextResponse.json({ error: "Already set up." }, { status: 400 });
   }

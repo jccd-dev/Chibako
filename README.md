@@ -98,7 +98,7 @@ Chibako is **server-first** and treats your agent as a first-class user.
 - **Runs on a tiny VPS.** 1 vCPU / 4 GB is plenty. No external services, no
   separate database, no vector DB required.
 - **Agent-native by construction.** Scoped, revocable API keys; a REST API that
-  mirrors every UI action; and an MCP stdio server with 20+ tools.
+  mirrors every UI action; and an MCP stdio server with 21 tools.
 - **Token-efficient by design.** Notes are raw Markdown (no JSON block trees),
   list/links calls return titles and ids only, `ingest_note` packs a note +
   links + schema into one round trip, and `recall` returns ranked titles +
@@ -183,10 +183,15 @@ npm run dev        # http://localhost:3000 → run the one-time setup
 
 ## 🚢 Deploy to your VPS (Docker Compose + nginx)
 
-The repo ships a `Dockerfile`, `docker-compose.yml`, and an `nginx/nginx.conf`
-reverse-proxy template (the VPS runs nginx, so there's no Caddy involved).
+The repo ships a `Dockerfile`, `docker-compose.yml`, and an
+`nginx/nginx.conf` reverse-proxy template. The Compose service binds the app
+to IPv4 loopback (`127.0.0.1:3000` by default); host nginx is the public
+entrypoint.
 
-1. Clone the repo on your VPS:
+1. Point DNS at the VPS and allow TCP ports 80 and 443 through its firewall.
+   Do not open port 3000 publicly.
+
+2. Clone the repo on your VPS:
 
    ```bash
    git clone https://github.com/jccd-dev/Chibako.git /opt/chibako
@@ -194,19 +199,61 @@ reverse-proxy template (the VPS runs nginx, so there's no Caddy involved).
    docker compose up -d --build
    ```
 
-   The app listens on port 3000 (internal only). Your vault persists in `./data`.
+   The app listens on `127.0.0.1:3000`. Your vault persists in `./data`.
+   The container entrypoint fixes the bind-mount ownership and runs the app as
+   the unprivileged `node` user.
 
-2. Put nginx in front of it. Edit `nginx/nginx.conf`, change the two
-   `server_name` lines to your domain, then:
+   Before using a real vault, run `./scripts/smoke-docker.sh` on a machine with
+   Docker and a running daemon. It builds the packaged image, uses a temporary
+   project/port/vault, checks setup/login and restart persistence, validates
+   the Compose loopback binding and nginx syntax, then cleans up its resources.
+   Exit status `2` means the check is unverified because Docker or a required
+   local tool is unavailable.
+
+3. Install the bootstrap nginx site. Edit `nginx/nginx.conf`, replace
+   `chibako.example.com` with your domain, then:
 
    ```bash
+   sudo mkdir -p /var/www/html
    sudo cp nginx/nginx.conf /etc/nginx/sites-available/chibako
    sudo ln -s /etc/nginx/sites-available/chibako /etc/nginx/sites-enabled/chibako
    sudo nginx -t && sudo systemctl reload nginx
-   sudo certbot --nginx -d your-domain.com    # free TLS
    ```
 
-3. Open `https://your-domain.com`, complete the one-time setup, and you're in.
+   The bootstrap site proxies ordinary HTTP requests (including the health
+   endpoint) but returns 404 for `/setup` and `/api/setup`, so nobody can claim
+   the vault before TLS is ready. Check that DNS and the proxy are reachable:
+
+   ```bash
+   curl -i http://your-domain.com/api/health
+   curl -i http://your-domain.com/setup       # must be 404 during bootstrap
+   ```
+
+4. Issue and install the certificate with Certbot. The nginx plugin adds the
+   HTTPS server using the already-valid HTTP site:
+
+   ```bash
+   sudo certbot --nginx -d your-domain.com --redirect
+   ```
+
+   Edit the installed site and remove the two temporary `location ^~` setup
+   guards from the configuration Certbot produced. Keep the HTTP-to-HTTPS
+   redirect and the HTTPS proxy, then verify and reload:
+
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   curl -fsS https://your-domain.com/api/health
+   ```
+
+5. Open `https://your-domain.com/setup` and complete the one-time setup over
+   HTTPS. Use a long, unique admin password; setup is one-time and cannot be
+   repeated after the password is stored.
+
+The app also applies a five-attempt-per-minute global limit to `/api/login`
+and `/api/setup` in each application process. It does not trust
+`X-Forwarded-For` or other client-supplied identity headers. The default
+single-process Compose deployment is covered; if you run multiple app
+processes, add a shared or trusted-proxy rate limiter before exposing auth.
 
 ## 🤖 Connect your AI agent
 
@@ -326,14 +373,19 @@ Auth: `Authorization: Bearer <key>`, or the web session cookie.
 
 ## 💾 Backup
 
-Backing up is copying one file (and its WAL):
+Create a SQLite-consistent snapshot with `VACUUM INTO`; this does not require
+copying the live database or WAL files:
 
 ```bash
-sqlite3 data/brain.db "VACUUM INTO 'brain-backup.db'"
+backup_dir=/var/backups/chibako
+sudo install -d -m 700 "$backup_dir"
+sudo sqlite3 data/brain.db \
+  "VACUUM INTO '$backup_dir/brain-$(date +%Y%m%d-%H%M%S).db'"
 ```
 
-Then copy `brain-backup.db` off the VPS. That's the entire vault — notes,
-links, search index, keys, sessions.
+Copy the resulting snapshot off the VPS (for example with `scp` or your
+existing encrypted backup job), and retain more than one dated copy. The
+snapshot contains the vault, links, search index, API keys, and sessions.
 
 ## 🗄️ Data model
 
@@ -374,11 +426,12 @@ Chibako is under active development. These are the current directions.
   "copy `brain.db`."
 - **Attachments and inline images** — file uploads plus reconciling how
   embedded images survive preview sanitization (text-only Markdown today).
-- **Deeper hardening** — login/setup rate limiting, closing the `keys:write`
-  self-escalation path, stronger password hashing, and automated tests for
-  auth, scope enforcement, trash, and search.
-- **Verified deploy path** — a real `docker compose up` smoke test on
-  `node:22-slim` and a documented nginx + TLS runbook.
+- **Deeper hardening** — closing the `keys:write` self-escalation path,
+  stronger password hashing, and broader automated auth/scope/trash/search
+  coverage.
+- **Verified deploy path** — run the isolated Docker smoke check in
+  `scripts/smoke-docker.sh`, then complete the VPS-specific TLS, backup, and
+  production checks.
 
 **Later / exploring**
 

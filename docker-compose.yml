@@ -1,17 +1,16 @@
 services:
   chibako:
     build: .
-    container_name: chibako
     restart: unless-stopped
     environment:
       - DATA_DIR=/app/data
       - SITE_NAME=${SITE_NAME:-Chibako}
     volumes:
-      - ./data:/app/data
+      - ${CHIBAKO_DATA_VOLUME:-./data}:/app/data
     networks:
       - chibako
-    expose:
-      - "3000"
+    ports:
+      - "127.0.0.1:${CHIBAKO_PORT:-3000}:3000"
 
 networks:
   chibako:

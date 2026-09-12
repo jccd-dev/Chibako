@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { verifyPassword, isSetup, createSession, setSessionCookie } from "@/lib/auth";
+import { consumeAuthAttempt } from "@/lib/auth-rate-limit";
 
 export async function POST(req: Request) {
+  const attempt = consumeAuthAttempt();
+  if (!attempt.allowed) {
+    return NextResponse.json(
+      { error: `Too many authentication attempts. Try again in ${attempt.retryAfterSeconds} seconds.` },
+      { status: 429, headers: { "Retry-After": String(attempt.retryAfterSeconds) } },
+    );
+  }
   if (!isSetup()) return NextResponse.json({ error: "Not set up." }, { status: 400 });
   const { password } = await req.json().catch(() => ({}));
   const stored = getDb().prepare(`SELECT value FROM settings WHERE key = 'password_hash'`).get() as { value: string } | undefined;
