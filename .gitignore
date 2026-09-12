@@ -16,6 +16,7 @@ npm-debug.log*
 
 # Project docs kept local (not pushed to GitHub)
 PRD/
+.scratch/
 
 # Agent configs & skills (all agents)
 .agent/
