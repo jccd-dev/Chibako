@@ -238,7 +238,8 @@ entrypoint.
 
    Edit the installed site and remove the two temporary `location ^~` setup
    guards from the configuration Certbot produced. Keep the HTTP-to-HTTPS
-   redirect and the HTTPS proxy, then verify and reload:
+   redirect, the HTTPS proxy, and its `X-Chibako-Client-IP` directive, then
+   verify and reload:
 
    ```bash
    sudo nginx -t && sudo systemctl reload nginx
@@ -249,11 +250,14 @@ entrypoint.
    HTTPS. Use a long, unique admin password; setup is one-time and cannot be
    repeated after the password is stored.
 
-The app also applies a five-attempt-per-minute global limit to `/api/login`
-and `/api/setup` in each application process. It does not trust
-`X-Forwarded-For` or other client-supplied identity headers. The default
-single-process Compose deployment is covered; if you run multiple app
-processes, add a shared or trusted-proxy rate limiter before exposing auth.
+The app also applies a five-attempt-per-minute limit per client address to
+`/api/login` and `/api/setup` in each application process, using a capped
+in-memory table. With this nginx template, nginx overwrites the dedicated
+`X-Chibako-Client-IP` header from `$remote_addr`; the app never uses
+`X-Forwarded-For`. Direct/local requests
+without the proxy header share a bounded fallback bucket, so keep the app
+loopback-only. If you run multiple app processes, add a shared or
+trusted-proxy rate limiter before exposing auth.
 
 ## 🤖 Connect your AI agent
 

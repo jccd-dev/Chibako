@@ -26,11 +26,49 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 project="chibako-smoke-$(date +%s)-$$"
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/chibako-smoke.XXXXXX")"
+tmp_parent="$(mktemp -d "${TMPDIR:-/tmp}/chibako-smoke.XXXXXX")"
+tmp_dir="$tmp_parent/work"
 vault_dir="$tmp_dir/data"
 cookie_jar="$tmp_dir/cookies"
 response_file="$tmp_dir/response.json"
-mkdir -p "$vault_dir"
+nginx_image="${CHIBAKO_SMOKE_NGINX_IMAGE:-nginx:1.27-alpine}"
+
+compose=(docker compose --project-directory "$repo_dir" --project-name "$project" --file "$repo_dir/docker-compose.yml")
+started=0
+
+cleanup() {
+  local status=$?
+  local cleanup_failed=0
+  trap - EXIT INT TERM
+
+  if (( status != 0 )) && (( started )); then
+    "${compose[@]}" logs --no-color >&2 || true
+  fi
+  if (( started )); then
+    "${compose[@]}" down --remove-orphans >/dev/null 2>&1 || cleanup_failed=1
+  fi
+
+  if [[ -e "$tmp_parent" ]] && ! rm -rf -- "$tmp_parent"; then
+    # The app entrypoint may chown the bind mount to UID 1000. Use the already
+    # validated nginx image as a root cleanup helper, scoped to this temp dir.
+    if ! docker run --rm --user 0:0 \
+      --mount "type=bind,src=$tmp_parent,dst=/cleanup" \
+      "$nginx_image" sh -c 'rm -rf -- /cleanup/work' >/dev/null 2>&1; then
+      cleanup_failed=1
+    fi
+    [[ ! -e "$tmp_parent/work" ]] || cleanup_failed=1
+    rmdir -- "$tmp_parent" 2>/dev/null || cleanup_failed=1
+  fi
+
+  if (( cleanup_failed )); then
+    echo "SMOKE CLEANUP WARNING: temporary resources may remain under $tmp_parent" >&2
+    (( status == 0 )) && status=1
+  fi
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+mkdir -p -- "$vault_dir"
 
 port="$(node -e '
   const net = require("node:net");
@@ -44,22 +82,6 @@ port="$(node -e '
 export CHIBAKO_PORT="$port"
 export CHIBAKO_DATA_VOLUME="$vault_dir"
 
-compose=(docker compose --project-directory "$repo_dir" --project-name "$project" --file "$repo_dir/docker-compose.yml")
-started=0
-
-cleanup() {
-  local status=$?
-  if (( status != 0 )) && (( started )); then
-    "${compose[@]}" logs --no-color >&2 || true
-  fi
-  if (( started )); then
-    "${compose[@]}" down --remove-orphans >/dev/null 2>&1 || true
-  fi
-  rm -rf "$tmp_dir"
-  exit "$status"
-}
-trap cleanup EXIT INT TERM
-
 die() {
   echo "SMOKE FAILED: $*" >&2
   exit 1
@@ -68,8 +90,8 @@ die() {
 config="$("${compose[@]}" config)" || die "Compose configuration is invalid"
 grep -Fq "host_ip: 127.0.0.1" <<<"$config" || die "Compose must bind the host port to 127.0.0.1"
 grep -Fq "target: 3000" <<<"$config" || die "Compose must publish container port 3000"
+grep -Fq 'proxy_set_header X-Chibako-Client-IP $remote_addr;' "$repo_dir/nginx/nginx.conf" || die "nginx must overwrite the auth client identity"
 
-nginx_image="${CHIBAKO_SMOKE_NGINX_IMAGE:-nginx:1.27-alpine}"
 docker run --rm \
   --mount "type=bind,src=$repo_dir/nginx/nginx.conf,dst=/etc/nginx/conf.d/chibako.conf,readonly" \
   "$nginx_image" nginx -t >/dev/null || die "nginx template failed validation"

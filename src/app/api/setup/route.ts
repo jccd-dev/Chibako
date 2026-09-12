@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { hashPassword, isSetup, createSession, setSessionCookie } from "@/lib/auth";
 import { ensureIndexNote } from "@/lib/notes";
-import { consumeAuthAttempt } from "@/lib/auth-rate-limit";
+import { consumeAuthAttempt, getAuthClientId } from "@/lib/auth-rate-limit";
 
 export async function POST(req: Request) {
-  const attempt = consumeAuthAttempt();
+  const attempt = consumeAuthAttempt(getAuthClientId(req));
   if (!attempt.allowed) {
     return NextResponse.json(
       { error: `Too many authentication attempts. Try again in ${attempt.retryAfterSeconds} seconds.` },
