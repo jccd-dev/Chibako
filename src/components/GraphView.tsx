@@ -10,11 +10,13 @@ import {
   forceCollide,
   forceX,
   forceY,
+  type Simulation,
   type SimulationNodeDatum,
 } from "d3-force";
 import { select } from "d3-selection";
 import type { NoteSummary } from "@/lib/notes";
 import { cn } from "@/lib/utils";
+import { graphLayoutFor } from "@/lib/graph-layout";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface GraphNode extends SimulationNodeDatum {
@@ -48,6 +50,7 @@ export function GraphView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const gRef = useRef<SVGGElement>(null);
+  const simulationRef = useRef<Simulation<GraphNode, undefined> | null>(null);
   const [data, setData] = useState<GraphData | null>(null);
   const [hovered, setHovered] = useState<GraphNode | null>(null);
   const [t, setT] = useState({ x: 0, y: 0, k: 1 });
@@ -55,6 +58,7 @@ export function GraphView() {
   tRef.current = t;
   const [orphansOnly, setOrphansOnly] = useState(false);
   const [folder, setFolder] = useState("");
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     fetch("/api/graph")
@@ -94,44 +98,44 @@ export function GraphView() {
   const orphanCount = useMemo(() => nodes.filter((n) => !(degree.get(n.id) ?? 0)).length, [nodes, degree]);
   const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      setSize((current) => current.width === width && current.height === height ? current : { width, height });
+    });
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, []);
+
   // apply pan/zoom transform
   useEffect(() => {
     if (gRef.current) gRef.current.setAttribute("transform", `translate(${t.x},${t.y}) scale(${t.k})`);
   }, [t]);
 
-  // Simulation: built ONLY when the data changes. Filters and hover never
-  // rebuild it, so toggling "Orphans" or picking a folder dims the graph in
+  // Filters and hover never rebuild the simulation, so they dim the graph in
   // place instead of scattering every node with a fresh simulation pulse.
   useEffect(() => {
-    if (!nodes.length || !svgRef.current || !wrapRef.current) return;
+    if (!nodes.length || !svgRef.current || !size.width || !size.height) return;
     const svg = svgRef.current;
-    const width = wrapRef.current.clientWidth || 800;
-    const height = wrapRef.current.clientHeight || 600;
+    const { width, height } = size;
+    const layout = graphLayoutFor(nodes.length);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
-    const sim = forceSimulation(nodes as SimulationNodeDatum[])
-      .force("link", forceLink(links as any).id((d: any) => d.id).distance(90).strength(0.5))
-      .force("charge", forceManyBody().strength(-280))
+    const sim = forceSimulation(nodes)
+      .force("link", forceLink(links as any).id((d: any) => d.id).distance(layout.linkDistance).strength(0.5))
+      .force("charge", forceManyBody().strength(layout.chargeStrength))
       .force("center", forceCenter(width / 2, height / 2))
-      .force("collide", forceCollide(26));
-
-    // Orphan nodes have no link force, so every simulation pulse (e.g. a drag
-    // re-heating alpha) pushes them further out and nothing pulls them back.
-    // Once the layout settles, tether each node with a weak spring to its
-    // settled spot: drags perturb the graph and it relaxes back instead of
-    // accumulating drift.
-    function settleHomes() {
-      for (const n of nodes as any) {
-        n.homeX = n.x;
-        n.homeY = n.y;
-      }
-      if (!sim.force("homeX")) {
-        sim
-          .force("homeX", forceX<SimulationNodeDatum>((d: any) => d.homeX).strength(0.05))
-          .force("homeY", forceY<SimulationNodeDatum>((d: any) => d.homeY).strength(0.05));
-      }
-    }
-    sim.on("end", settleHomes);
+      .force("collide", forceCollide(26))
+      .force("centerX", forceX<GraphNode>(width / 2).strength((node) =>
+        (degree.get(node.id) ?? 0) === 0 ? layout.orphanStrength : layout.centerStrength
+      ))
+      .force("centerY", forceY<GraphNode>(height / 2).strength((node) =>
+        (degree.get(node.id) ?? 0) === 0 ? layout.orphanStrength : layout.centerStrength
+      ));
+    simulationRef.current = sim;
 
     const root = select(svg).select("g.graph-root");
     const linkSel = root
@@ -224,13 +228,32 @@ export function GraphView() {
 
     return () => {
       sim.stop();
+      if (simulationRef.current === sim) simulationRef.current = null;
       document.body.style.cursor = "";
       window.removeEventListener("mousemove", onDragMove);
       window.removeEventListener("mouseup", onDragEnd);
       window.removeEventListener("mouseleave", onDragEnd);
       root.selectAll("*").remove();
     };
-  }, [nodes, links, router]);
+  }, [nodes, links, degree, router, size]);
+
+  function resetView() {
+    setT({ x: 0, y: 0, k: 1 });
+    const positioned = nodes.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
+    if (!positioned.length) return;
+
+    const centerX = positioned.reduce((sum, node) => sum + (node.x ?? 0), 0) / positioned.length;
+    const centerY = positioned.reduce((sum, node) => sum + (node.y ?? 0), 0) / positioned.length;
+    for (const node of positioned) {
+      node.x = (node.x ?? centerX) + size.width / 2 - centerX;
+      node.y = (node.y ?? centerY) + size.height / 2 - centerY;
+      node.vx = 0;
+      node.vy = 0;
+      node.fx = null;
+      node.fy = null;
+    }
+    simulationRef.current?.alpha(0.55).restart();
+  }
 
   // Visual state: orphan/folder filtering + hover neighborhood highlighting,
   // applied as style updates on the existing DOM (no simulation restarts).
@@ -373,8 +396,8 @@ export function GraphView() {
         </button>
         <button
           className="rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
-          onClick={() => setT({ x: 0, y: 0, k: 1 })}
-          title="Reset zoom and pan"
+          onClick={resetView}
+          title="Reset zoom, pan, and layout"
         >
           Reset view
         </button>
