@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useAppearance } from "@/components/AppearanceProvider";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { IconCheck, IconKey, IconTrash, IconX } from "@/components/icons";
+import { IconCheck, IconKey, IconPlus, IconTrash, IconX } from "@/components/icons";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -13,10 +14,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { IconPlus } from "@/components/icons";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FONT_OPTIONS, type FontChoice } from "@/lib/appearance";
 import type { PropertyDef, PropertyType } from "@/lib/property-types";
 import { PROPERTY_TYPES } from "@/lib/property-types";
+
+const FONT_ITEMS = Object.fromEntries(FONT_OPTIONS.map((option) => [option.value, option.label]));
 
 const ALL_SCOPES = [
   "notes:read",
@@ -52,7 +55,8 @@ interface EmbeddingStatus {
 
 export function SettingsView() {
   const router = useRouter();
-  const [tab, setTab] = useState<"schema" | "properties" | "keys" | "recall" | "password">("schema");
+  const { appearance, setFont } = useAppearance();
+  const [tab, setTab] = useState<"appearance" | "schema" | "properties" | "keys" | "recall" | "password">("schema");
   const [schema, setSchema] = useState("");
   const [schemaSaved, setSchemaSaved] = useState(false);
   const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
@@ -205,13 +209,71 @@ export function SettingsView() {
     <div className="mx-auto max-w-3xl overflow-y-auto px-6 py-6">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="mt-4">
-        <TabsList className="w-full">
-          <TabsTrigger value="schema">Knowledge schema (AGENTS.md)</TabsTrigger>
-          <TabsTrigger value="properties">Properties</TabsTrigger>
-          <TabsTrigger value="keys">API keys</TabsTrigger>
-          <TabsTrigger value="recall">Recall</TabsTrigger>
-          <TabsTrigger value="password">Password</TabsTrigger>
-        </TabsList>
+        <div className="-mx-1 overflow-x-auto px-1 pb-1">
+          <TabsList className="w-max min-w-full">
+            <TabsTrigger value="appearance">Appearance</TabsTrigger>
+            <TabsTrigger value="schema">Knowledge schema (AGENTS.md)</TabsTrigger>
+            <TabsTrigger value="properties">Properties</TabsTrigger>
+            <TabsTrigger value="keys">API keys</TabsTrigger>
+            <TabsTrigger value="recall">Recall</TabsTrigger>
+            <TabsTrigger value="password">Password</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="appearance" className="fade-in">
+          <Card className="mt-3">
+            <CardHeader>
+              <CardTitle>Fonts</CardTitle>
+              <CardDescription>Choose separate typefaces for the interface and your notes. Changes apply immediately in this browser.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="interface-font">Interface font</FieldLabel>
+                  <Select
+                    items={FONT_ITEMS}
+                    value={appearance.interfaceFont}
+                    onValueChange={(value) => { if (value !== null) setFont("interfaceFont", value as FontChoice); }}
+                  >
+                    <SelectTrigger id="interface-font" className="w-full sm:w-72" data-font-preview={appearance.interfaceFont}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {FONT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value} data-font-preview={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="note-font">Note font</FieldLabel>
+                  <Select
+                    items={FONT_ITEMS}
+                    value={appearance.noteFont}
+                    onValueChange={(value) => { if (value !== null) setFont("noteFont", value as FontChoice); }}
+                  >
+                    <SelectTrigger id="note-font" className="w-full sm:w-72" data-font-preview={appearance.noteFont}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {FONT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value} data-font-preview={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </FieldGroup>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="schema" className="fade-in">
           <div className="flex flex-col gap-3 pt-3">

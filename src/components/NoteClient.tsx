@@ -740,7 +740,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     return (
       <div className="flex items-center gap-3 pb-3 pt-5">
         <input
-          className="min-w-0 flex-1 bg-transparent font-heading text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
+          className="min-w-0 flex-1 bg-transparent font-note-heading text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground"
           value={title}
           placeholder="Untitled"
           onChange={(e) => handleChangeTitle(e.target.value)}

@@ -19,29 +19,29 @@ colors:
   graph-index: "#F59E0B"
 typography:
   display:
-    fontFamily: "Figtree, Source Sans 3, system-ui, sans-serif"
+    fontFamily: "DM Sans, system-ui, sans-serif"
     fontSize: "29px"
     fontWeight: 650
     lineHeight: 1.3
     letterSpacing: "-0.015em"
   headline:
-    fontFamily: "Figtree, Source Sans 3, system-ui, sans-serif"
+    fontFamily: "DM Sans, system-ui, sans-serif"
     fontSize: "22px"
     fontWeight: 650
     lineHeight: 1.3
     letterSpacing: "-0.015em"
   title:
-    fontFamily: "Figtree, Source Sans 3, system-ui, sans-serif"
+    fontFamily: "DM Sans, system-ui, sans-serif"
     fontSize: "18px"
     fontWeight: 650
     lineHeight: 1.3
   body:
-    fontFamily: "Source Sans 3, system-ui, -apple-system, sans-serif"
+    fontFamily: "DM Sans, system-ui, -apple-system, sans-serif"
     fontSize: "15px"
     fontWeight: 400
     lineHeight: 1.6
   label:
-    fontFamily: "Source Sans 3, system-ui, sans-serif"
+    fontFamily: "DM Sans, system-ui, sans-serif"
     fontSize: "13.5px"
     fontWeight: 550
     lineHeight: 1.4
@@ -141,16 +141,17 @@ One violet accent on warm paper neutrals; shadcn teal reserved for shadcn primit
 
 ## Typography
 
-**Display Font:** Figtree (with Source Sans 3 fallback)
-**Body Font:** Source Sans 3 (with system-ui fallback)
-**Label/Mono Font:** ui-monospace stack (SFMono-Regular, Menlo, Monaco, Consolas) for editor, code, and kbd hints
+**Default Display Font:** DM Sans (with system-ui fallback)
+**Default Body Font:** DM Sans (with system-ui fallback)
+**Selectable Fonts:** DM Sans, Questrial, Quicksand, or the existing Source Sans 3 body and Figtree heading pairing
+**Mono Font:** ui-monospace stack (SFMono-Regular, Menlo, Monaco, Consolas) for code, schema text, and kbd hints
 
-**Character:** Quiet editorial pairing — Figtree headlines with tight tracking against a highly legible Source Sans body; monospace reserved for the working surface (editor, code, keystrokes).
+**Character:** DM Sans gives the default interface and notes one restrained, highly legible voice. Owners can select the softer Questrial or Quicksand alternatives independently for interface and note roles, while the original Source Sans 3 and Figtree editorial contrast remains available.
 
 ### Hierarchy
 - **Display** (650, 29px / 1.85em, 1.3, -0.015em): rendered Markdown `h1`; also note titles.
 - **Headline** (650, 22px / 1.45em, 1.3): rendered Markdown `h2`, with Hairline underline.
-- **Title** (650, 18px / 1.18em, 1.3): rendered `h3`; dialogs and sheet titles use Figtree 14px medium.
+- **Title** (650, 18px / 1.18em, 1.3): rendered `h3`; dialogs and sheet titles use the selected interface heading font at 14px medium.
 - **Body** (400, 15px, 1.6; preview 15.5px / 1.7, max ~75ch): app text and `.md` paragraphs.
 - **Label** (550, 13.5px / 0.84–0.88rem, 1.4): buttons (`.btn`), tree items, inputs, nav.
 
