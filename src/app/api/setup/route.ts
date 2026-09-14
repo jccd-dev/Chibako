@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
-import { hashPassword, isSetup, createSession, setSessionCookie } from "@/lib/auth";
-import { ensureIndexNote } from "@/lib/notes";
+import { isSetup } from "@/server/auth/password-authentication";
+import { createSession, setSessionCookie } from "@/lib/auth";
+import { setupVault, VaultAlreadySetupError } from "@/server/setup-vault";
 import { consumeAuthAttempt, getAuthClientId } from "@/lib/auth-rate-limit";
 
 export async function POST(req: Request) {
@@ -19,10 +19,14 @@ export async function POST(req: Request) {
   if (typeof password !== "string" || password.length < 8) {
     return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
   }
-  const db = getDb();
-  db.prepare(`INSERT INTO settings (key, value) VALUES ('password_hash', ?)`).run(hashPassword(password));
-  db.prepare(`INSERT INTO settings (key, value) VALUES ('site_name', 'Chibako')`).run();
-  ensureIndexNote();
+  try {
+    setupVault(password);
+  } catch (error) {
+    if (error instanceof VaultAlreadySetupError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
   const token = createSession();
   await setSessionCookie(token);
   return NextResponse.json({ ok: true });

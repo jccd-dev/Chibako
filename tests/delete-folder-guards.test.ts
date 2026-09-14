@@ -7,11 +7,11 @@ import { test } from 'node:test';
 test('deleteFolder guards: root cannot be deleted, missing folder 404s', async () => {
   const vault = mkdtempSync(join(tmpdir(), 'chibako-del-folder2-test-'));
   process.env.CHIBAKO_DATA_DIR = vault;
-  const notes = await import('../src/lib/notes');
+  const organization = await import('../src/features/organization/organization');
   const { getDb } = await import('../src/lib/db');
   try {
-    assert.throws(() => notes.deleteFolder(''), /root/);
-    assert.throws(() => notes.deleteFolder('Nope'), /not found/);
+    assert.throws(() => organization.deleteFolder(''), /root/);
+    assert.throws(() => organization.deleteFolder('Nope'), /not found/);
   } finally {
     getDb().close();
     rmSync(vault, { recursive: true, force: true });

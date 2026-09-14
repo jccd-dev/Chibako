@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { withAuth } from "@/lib/api";
-import { listNotes, createNote, folderTree, filterByProperties, type PropertyFilter } from "@/lib/notes";
+import { listNotes, createNote, filterByProperties, type PropertyFilter } from "@/lib/notes";
+import { folderTree } from "@/features/organization/folders";
 
 export const GET = withAuth("notes:read", async (req: NextRequest) => {
   // Optional property filter: /api/notes?prop.status=done&prop.tags=work

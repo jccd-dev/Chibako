@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import type { Note, NoteKind, NoteSummary, UpdateNoteInput } from "@/lib/notes";
+import type { Note, NoteKind, NoteSummary } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { parseFrontmatter, serializeFrontmatter, type PropValue } from "@/lib/markdown";
 import { PROPERTY_TYPES, type PropertyDef, type PropertyType } from "@/lib/property-types";
@@ -29,10 +29,9 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { IconDotsVertical } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { useNoteEditorSession } from "@/features/notes/editor/useNoteEditorSession";
 
 type ViewMode = "write" | "edit" | "split" | "preview";
-type SaveState = "saved" | "saving" | "unsaved" | "error";
-
 /** Select sentinel for the "create a new bookmark group" option. */
 const NEW_GROUP_VALUE = "__new__";
 
@@ -46,15 +45,6 @@ const KIND_COLOR: Record<NoteKind, string> = {
 interface LinkInfo {
   outlinks: Array<{ target: string; target_id: string | null; resolved: boolean }>;
   backlinks: Array<{ id: string; title: string; folder: string; snippet: string }>;
-}
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
 }
 
 /**
@@ -95,13 +85,7 @@ function PropTextEditor({ initial, onCommit, placeholder, type, ariaLabel }: {
 export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | null; allNotes: NoteSummary[] }) {
   const router = useRouter();
 
-  const [note, setNote] = useState<Note | null>(initial);
   const [allNotes, setAllNotes] = useState<NoteSummary[]>(initialAll);
-  const [title, setTitle] = useState(initial?.title ?? "");
-  const [folder, setFolder] = useState(initial?.folder ?? "");
-  const [content, setContent] = useState(initial?.content ?? "");
-  const [kind, setKind] = useState<NoteKind>(initial?.kind ?? "note");
-  const [pinned, setPinned] = useState(initial?.is_pinned === 1);
   const [bookmark, setBookmark] = useState<Bookmark | null>(null);
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
   const [bmGroups, setBmGroups] = useState<string[]>([]);
@@ -143,7 +127,6 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     }
     setModKey(/mac/i.test(navigator.platform ?? "") ? "⌘" : "Ctrl+");
   }, []);
-  const [saveState, setSaveState] = useState<SaveState>(initial ? "saved" : "unsaved");
   const [links, setLinks] = useState<LinkInfo | null>(null);
   const [mentions, setMentions] = useState<Array<{ id: string; title: string; folder: string; snippet: string }>>([]);
   const [showLinks, setShowLinks] = useState(false);
@@ -165,18 +148,37 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   const [newPropType, setNewPropType] = useState<PropertyType>("string");
   const [newPropOptions, setNewPropOptions] = useState("");
 
+  const session = useNoteEditorSession(initial, {
+    save: async (current, patch, full) => {
+      const response = await fetch(current ? `/api/notes/${current.id}` : "/api/notes", {
+        method: current ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(current ? patch : full),
+        keepalive: true,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Save failed");
+      return data.note as Note;
+    },
+    onSaved: (savedNote, created) => {
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+      void refreshAllNotes();
+      void refreshLinks();
+      if (created) router.replace(`/app/note/${savedNote.id}`);
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Save failed"),
+    onOrganized: () => {
+      void refreshAllNotes();
+      void refreshLinks();
+    },
+    onOrganizationError: () => toast.error("Could not refresh the organized note."),
+  });
+  const { note, title, folder, content, kind, pinned, saveState, persist, patch } = session;
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editWrapRef = useRef<HTMLDivElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
-  const dirty = useRef(false);
-  const pending = useRef<UpdateNoteInput>({});
-  const saving = useRef<Promise<void> | null>(null);
-  const noteRef = useRef(note);
-  noteRef.current = note;
-  const documentVersion = useRef(0);
   const [editorKey, setEditorKey] = useState(0);
-  const snapshot = useMemo(() => ({ title, folder, content, kind, pinned }), [title, folder, content, kind, pinned]);
-  const debounced = useDebounced(snapshot, 700);
 
   useEffect(() => { void refreshAllNotes(); }, []);
 
@@ -376,114 +378,18 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     return allNotes.some((n) => n.id !== note?.id && !n.deleted_at && n.title.toLowerCase() === t);
   }, [title, allNotes, note?.id]);
 
-  const titleById = useCallback(() => {
+  const noteIdByTitle = useCallback(() => {
     const m = new Map<string, string>();
     for (const n of allNotes) m.set(n.title.toLowerCase(), n.id);
     return m;
   }, [allNotes]);
 
-  async function persist(): Promise<void> {
-    if (saving.current) {
-      await saving.current;
-      if (dirty.current) return persistRef.current();
-      return;
-    }
-    if (!dirty.current) return;
-    const patch = pending.current;
-    pending.current = {};
-    const version = documentVersion.current;
-    const current = noteRef.current;
-    setSaveState("saving");
-    const job = (async () => {
-      try {
-        const res = await fetch(current ? `/api/notes/${current.id}` : "/api/notes", {
-          method: current ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(current ? patch : { title, folder, content, kind }),
-          keepalive: true,
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Save failed");
-        if (version !== documentVersion.current) return;
-        const updated: Note = data.note;
-        noteRef.current = updated;
-        setNote(updated);
-        dirty.current = Object.keys(pending.current).length > 0;
-        setSaveState(dirty.current ? "unsaved" : "saved");
-        window.dispatchEvent(new Event("chibako:notes-changed"));
-        void refreshAllNotes();
-        void refreshLinks();
-        if (!current) router.replace(`/app/note/${updated.id}`);
-      } catch (error) {
-        if (version === documentVersion.current) {
-          pending.current = { ...patch, ...pending.current };
-          dirty.current = true;
-          setSaveState("error");
-          toast.error(error instanceof Error ? error.message : "Save failed");
-        }
-        throw error;
-      }
-    })();
-    saving.current = job;
-    try { await job; } finally { if (saving.current === job) saving.current = null; }
-  }
-
-  // Flush pending edits when leaving the note (route change / unmount) and
-  // warn on full-page unload, so fast navigation never drops keystrokes.
-  const persistRef = useRef(persist);
-  persistRef.current = persist;
   useEffect(() => {
-    return () => {
-      if (dirty.current) void persistRef.current().catch(() => {});
-    };
-  }, []);
-  useEffect(() => {
-    function onUnload(e: BeforeUnloadEvent) {
-      if (dirty.current) e.preventDefault();
-    }
-    window.addEventListener("beforeunload", onUnload);
-    return () => window.removeEventListener("beforeunload", onUnload);
-  }, []);
-
-  useEffect(() => {
-    if ((initial?.id ?? null) === (noteRef.current?.id ?? null)) return;
-    if (dirty.current) void persistRef.current().catch(() => {});
-    documentVersion.current++;
-    pending.current = {};
-    dirty.current = false;
-    noteRef.current = initial;
-    setNote(initial); setTitle(initial?.title ?? ""); setFolder(initial?.folder ?? "");
-    setContent(initial?.content ?? ""); setKind(initial?.kind ?? "note"); setPinned(initial?.is_pinned === 1);
-    setSaveState(initial ? "saved" : "unsaved"); setLinks(null); setMentions([]); setSuggest(null);
-    setEditorKey(key => key + 1);
-  }, [initial]);
-
-  useEffect(() => {
-    const before = (event: Event) => {
-      if (event instanceof CustomEvent) event.detail.push(persistRef.current());
-    };
-    const organized = async () => {
-      const id = noteRef.current?.id;
-      if (!id) return;
-      try {
-        const response = await fetch(`/api/notes/${id}`);
-        if (!response.ok || noteRef.current?.id !== id) return;
-        const { note: updated } = await response.json();
-        if (pending.current.title === undefined) setTitle(updated.title);
-        if (pending.current.folder === undefined) setFolder(updated.folder);
-        if (pending.current.content === undefined && !saving.current) setContent(updated.content);
-        setNote(updated);
-        void refreshAllNotes();
-        void refreshLinks();
-      } catch { toast.error("Could not refresh the organized note."); }
-    };
-    window.addEventListener("chibako:before-organize", before);
-    window.addEventListener("chibako:organized", organized);
-    return () => {
-      window.removeEventListener("chibako:before-organize", before);
-      window.removeEventListener("chibako:organized", organized);
-    };
-  }, []);
+    setLinks(null);
+    setMentions([]);
+    setSuggest(null);
+    setEditorKey((key) => key + 1);
+  }, [initial?.id]);
 
   async function refreshAllNotes() {
     const res = await fetch("/api/notes");
@@ -601,34 +507,17 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
     }
   }
 
-  useEffect(() => {
-    if (!dirty.current) return;
-    const t = setTimeout(() => { void persist().catch(() => {}); }, 0);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced]);
-
-  function markDirty(patch: UpdateNoteInput) {
-    pending.current = { ...pending.current, ...patch };
-    dirty.current = true;
-    setSaveState("unsaved");
-  }
-
   function handleChangeTitle(v: string) {
-    setTitle(v);
-    markDirty({ title: v });
+    patch({ title: v });
   }
   function handleChangeKind(k: NoteKind) {
-    setKind(k);
-    markDirty({ kind: k });
+    patch({ kind: k });
   }
   function togglePinned() {
-    setPinned(!pinned);
-    markDirty({ is_pinned: pinned ? 0 : 1 });
+    patch({ is_pinned: pinned ? 0 : 1 });
   }
   function handleChangeContent(v: string) {
-    setContent(v);
-    markDirty({ content: v });
+    patch({ content: v });
   }
 
   /** WYSIWYG editor edits only the body; frontmatter is preserved as-is. */
@@ -693,7 +582,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   }
 
   function navigateTo(target: string) {
-    const id = titleById().get(target.toLowerCase());
+    const id = noteIdByTitle().get(target.toLowerCase());
     if (id) {
       router.push(`/app/note/${id}`);
     } else {

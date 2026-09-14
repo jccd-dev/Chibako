@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { isSetup, getSession, getCookieToken } from "@/lib/auth";
+import { isSetup } from "@/server/auth/password-authentication";
+import { getSession, getCookieToken } from "@/lib/auth";
 
 export default async function Home() {
   const authed = getSession(await getCookieToken());

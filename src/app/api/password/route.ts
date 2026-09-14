@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api";
-import { getDb } from "@/lib/db";
-import { verifyPassword, hashPassword, destroyOtherSessions, getCookieToken } from "@/lib/auth";
+import { getPasswordHash, setPassword, verifyPassword } from "@/server/auth/password-authentication";
+import { destroyOtherSessions, getCookieToken } from "@/lib/auth";
 
 export const POST = withAuth("*", async (req) => {
   const body = await req.json().catch(() => ({}));
@@ -9,12 +9,11 @@ export const POST = withAuth("*", async (req) => {
   if (typeof current !== "string" || typeof next !== "string" || next.length < 8) {
     return NextResponse.json({ error: "New password must be at least 8 characters." }, { status: 400 });
   }
-  const db = getDb();
-  const stored = db.prepare(`SELECT value FROM settings WHERE key = 'password_hash'`).get() as { value: string } | undefined;
-  if (!stored || !verifyPassword(current, stored.value)) {
+  const stored = getPasswordHash();
+  if (!stored || !verifyPassword(current, stored)) {
     return NextResponse.json({ error: "Current password is incorrect." }, { status: 401 });
   }
-  db.prepare(`UPDATE settings SET value = ? WHERE key = 'password_hash'`).run(hashPassword(next));
+  setPassword(next);
   destroyOtherSessions(await getCookieToken());
   return NextResponse.json({ ok: true });
 });

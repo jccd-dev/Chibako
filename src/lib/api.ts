@@ -1,6 +1,7 @@
 import { NoteInputError } from "@/lib/notes";
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, getCookieToken, hasScope } from "@/lib/auth";
+import { authenticateRequest, getCookieToken } from "@/lib/auth";
+import { hasAnyScope } from "@/server/auth/api-key-authorization";
 
 export interface ApiHandler {
   (req: NextRequest, scopes: string[], ctx: { params: Promise<Record<string, string>> }): Promise<Response>;
@@ -16,7 +17,7 @@ export function withAuthAny(required: string[], handler: ApiHandler) {
     const sessionToken = await getCookieToken();
     const scopes = authenticateRequest(req.headers.get("authorization"), sessionToken);
     if (!scopes) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!required.some((r) => hasScope(scopes, r))) return NextResponse.json({ error: "Forbidden: missing scope" }, { status: 403 });
+    if (!hasAnyScope(scopes, required)) return NextResponse.json({ error: "Forbidden: missing scope" }, { status: 403 });
     try {
       return await handler(req, scopes, ctx);
     } catch (e) {

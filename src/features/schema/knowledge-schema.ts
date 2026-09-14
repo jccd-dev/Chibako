@@ -1,4 +1,6 @@
-export const DEFAULT_SCHEMA = `# Chibako Vault Schema (AGENTS.md)
+import { getDb } from "../../lib/db";
+
+export const DEFAULT_KNOWLEDGE_SCHEMA = `# Chibako Vault Schema (AGENTS.md)
 
 You are an agent working inside the owner's personal knowledge vault.
 
@@ -45,3 +47,16 @@ If two notes contradict each other, do not silently pick one:
 - Never reveal or repeat secrets (API keys, credentials) in replies.
 - You may create notes when asked, but never delete notes without confirmation.
 `;
+
+const KNOWLEDGE_SCHEMA_KEY = "knowledge_schema";
+
+export function getKnowledgeSchema(): string {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(KNOWLEDGE_SCHEMA_KEY) as { value: string } | undefined;
+  return row?.value ?? DEFAULT_KNOWLEDGE_SCHEMA;
+}
+
+export function setKnowledgeSchema(schema: string): void {
+  getDb()
+    .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .run(KNOWLEDGE_SCHEMA_KEY, schema);
+}

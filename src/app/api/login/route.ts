@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
-import { verifyPassword, isSetup, createSession, setSessionCookie } from "@/lib/auth";
+import { getPasswordHash, verifyPassword, isSetup } from "@/server/auth/password-authentication";
+import { createSession, setSessionCookie } from "@/lib/auth";
 import { consumeAuthAttempt, getAuthClientId } from "@/lib/auth-rate-limit";
 
 export async function POST(req: Request) {
@@ -13,8 +13,8 @@ export async function POST(req: Request) {
   }
   if (!isSetup()) return NextResponse.json({ error: "Not set up." }, { status: 400 });
   const { password } = await req.json().catch(() => ({}));
-  const stored = getDb().prepare(`SELECT value FROM settings WHERE key = 'password_hash'`).get() as { value: string } | undefined;
-  if (typeof password !== "string" || !stored || !verifyPassword(password, stored.value)) {
+  const stored = getPasswordHash();
+  if (typeof password !== "string" || !stored || !verifyPassword(password, stored)) {
     return NextResponse.json({ error: "Invalid password." }, { status: 401 });
   }
   const token = createSession();

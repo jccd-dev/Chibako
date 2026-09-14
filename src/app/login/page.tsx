@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { isSetup, getSession, getCookieToken } from "@/lib/auth";
+import { isSetup } from "@/server/auth/password-authentication";
+import { getSession, getCookieToken } from "@/lib/auth";
 import { LoginForm } from "./LoginForm";
 
 export default async function LoginPage() {

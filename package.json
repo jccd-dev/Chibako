@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "test": "node --import tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/mcp/server.mjs",
     "mcp": "node dist/mcp/server.mjs",
     "mcp:dev": "tsx src/mcp/server.ts"
@@ -44,6 +45,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/d3-force": "^3.0.10",

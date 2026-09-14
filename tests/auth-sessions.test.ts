@@ -27,7 +27,7 @@ test('destroyOtherSessions keeps the current session and clears the rest', async
 });
 
 test('the wildcard scope is reachable by sessions but never by API keys', async () => {
-  const auth = await import('../src/lib/auth');
-  assert.equal(auth.hasScope(['*'], '*'), true);
-  assert.equal(auth.hasScope(['keys:write', 'notes:write'], '*'), false);
+  const keyAuth = await import('../src/server/auth/api-key-authorization');
+  assert.equal(keyAuth.hasScope(['*'], '*'), true);
+  assert.equal(keyAuth.hasScope(['keys:write', 'notes:write'], '*'), false);
 });

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { withAuth } from "@/lib/api";
-import { listApiKeys, createApiKey } from "@/lib/auth";
+import { listApiKeys, createApiKey } from "@/server/auth/api-key-authorization";
 
 export const GET = withAuth("keys:read", async () => {
   return Response.json({ keys: listApiKeys() });

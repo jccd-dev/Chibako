@@ -1,5 +1,10 @@
 import { getDb, now, uid } from "./db";
+import { NoteInputError } from "./note-errors";
+import { ensureFolder, normalizeFolder } from "../features/organization/folders";
+import { listReferenceNotes, reindexVisibleLinks, rewriteWikilinkReferences } from "../features/notes/rewrite-wikilink-references";
 import { markStale } from "./embedding-queue";
+
+export { NoteInputError } from "./note-errors";
 import { deleteEmbedding } from "./embedding-store";
 import {
   applyFrontmatter,
@@ -49,7 +54,7 @@ export interface NoteLink {
   target_id: string | null;
 }
 
-const SUM = `id, title, folder, kind, created_at, updated_at, deleted_at, is_pinned, properties`;
+const NOTE_SUMMARY_COLUMNS = `id, title, folder, kind, created_at, updated_at, deleted_at, is_pinned, properties`;
 
 function parsePropsColumn(raw: unknown): NoteProperties {
   if (typeof raw !== "string" || !raw) return {};
@@ -75,7 +80,7 @@ function toNote(row: Record<string, unknown> | undefined): Note | null {
 }
 
 export function listNotes(): NoteSummary[] {
-  return (getDb().prepare(`SELECT ${SUM} FROM notes WHERE deleted_at IS NULL ORDER BY folder, title`).all() as Array<Record<string, unknown>>).map(toSummary);
+  return (getDb().prepare(`SELECT ${NOTE_SUMMARY_COLUMNS} FROM notes WHERE deleted_at IS NULL ORDER BY folder, title`).all() as Array<Record<string, unknown>>).map(toSummary);
 }
 
 /** Trashed notes, newest first. Lazily purges items older than 30 days. */
@@ -85,7 +90,7 @@ export function listTrash(): NoteSummary[] {
     .prepare(`SELECT id FROM notes WHERE deleted_at IS NOT NULL AND deleted_at < ?`)
     .all(now() - 30 * 24 * 3600) as Array<{ id: string }>;
   for (const s of stale) purgeNote(s.id);
-  return (db.prepare(`SELECT ${SUM} FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`).all() as Array<Record<string, unknown>>).map(toSummary);
+  return (db.prepare(`SELECT ${NOTE_SUMMARY_COLUMNS} FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`).all() as Array<Record<string, unknown>>).map(toSummary);
 }
 
 export function getNote(id: string, includeDeleted = false): Note | null {
@@ -174,7 +179,7 @@ function updateNoteRecord(id: string, input: UpdateNoteInput): Note | null {
   if (renamed && listNotes().some(n => n.id !== id && n.folder === folder && n.title === title)) {
     throw new NoteInputError("A note with this name already exists in that folder.", 409);
   }
-  const before = renamed ? listNotes() : [];
+  const before = renamed ? listReferenceNotes() : [];
   ensureFolder(folder);
   let content = input.content ?? existing.content;
   if (input.properties && Object.keys(input.properties).length > 0) {
@@ -191,7 +196,7 @@ function updateNoteRecord(id: string, input: UpdateNoteInput): Note | null {
   db.prepare(`INSERT INTO notes_fts (id, title, content, folder) VALUES (?,?,?,?)`).run(id, title, stripFrontmatter(content), folder);
 
   reindexLinks(id, content);
-  if (renamed) rewriteReferences(before, new Map([[id, { title, folder }]]));
+  if (renamed) rewriteWikilinkReferences(before, new Map([[id, { id, title, folder }]]));
   resolveLinksForTitle(title, id);
   markStale(id);
   return getNote(id);
@@ -243,30 +248,6 @@ export function reindexLinks(id: string, content: string): void {
   }
 }
 
-/** Preserve resolved title/path links and aliases when an item is organized. */
-function rewriteReferences(before: NoteSummary[], changed: Map<string, { title: string; folder: string }>): void {
-  const db = getDb();
-  for (const summary of listNotes()) {
-    const note = getNote(summary.id)!;
-    const content = note.content.replace(WIKILINK_RE, (token, inner: string) => {
-      const [raw, ...alias] = inner.split("|");
-      const target = raw.trim();
-      const resolved = resolveWikiTarget(target, before);
-      const next = resolved && changed.get(resolved.id);
-      if (!next) return token;
-      const old = before.find(n => n.id === resolved.id)!;
-      const pathLink = target === `${old.folder}/${old.title}` && target !== old.title;
-      const replacement = pathLink && next.folder ? `${next.folder}/${next.title}` : next.title;
-      return `[[${replacement}${alias.length ? `|${alias.join("|")}` : ""}]]`;
-    });
-    if (content !== note.content) {
-      db.prepare("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?").run(content, now(), note.id);
-      db.prepare("UPDATE notes_fts SET content = ? WHERE id = ?").run(stripFrontmatter(content), note.id);
-    }
-  }
-  reindexAll();
-}
-
 /**
  * Re-point any [[links]] that reference this note's title to its id.
  * Runs after a note is created or renamed so links made to not-yet-existing
@@ -285,12 +266,7 @@ function resolveLinksForTitle(title: string, id: string): void {
 
 /** Rebuild the whole link index (used after bulk import / restore). */
 export function reindexAll(): void {
-  const db = getDb();
-  db.prepare(`DELETE FROM links`).run();
-  for (const n of listNotes()) {
-    const note = getNote(n.id);
-    if (note) reindexLinks(note.id, note.content);
-  }
+  reindexVisibleLinks();
 }
 
 /** Notes that link TO the given title (case-insensitive). */
@@ -421,110 +397,6 @@ export function linkMention(sourceId: string, title: string): boolean {
   updateNote(sourceId, { content: `${src.content.slice(0, at)}[[${t}]]${src.content.slice(at + t.length)}` });
   return true;
 }
-
-export class NoteInputError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
-}
-
-function normalizeFolder(path: string): string {
-  const normalized = path.trim().replace(/^\/+|\/+$/g, "");
-  if (normalized.length > 512 || /[\\\x00-\x1f]/.test(normalized) ||
-      (normalized && normalized.split("/").some(p => !p.trim() || p === "." || p === ".."))) {
-    throw new NoteInputError("Invalid folder path.");
-  }
-  return normalized;
-}
-
-function ensureFolder(path: string): void {
-  const insert = getDb().prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");
-  const parts = path.split("/").filter(Boolean);
-  for (let i = 1; i <= parts.length; i++) insert.run(parts.slice(0, i).join("/"));
-}
-
-export function folderTree(): string[] {
-  return (getDb().prepare("SELECT path FROM folders ORDER BY path").all() as Array<{ path: string }>).map(r => r.path);
-}
-
-export function createFolder(path: string): string {
-  path = normalizeFolder(path);
-  if (!path) throw new NoteInputError("Enter a folder name.");
-  return getDb().transaction(() => {
-    if (folderTree().includes(path)) throw new NoteInputError("Folder already exists.", 409);
-    ensureFolder(path);
-    return path;
-  })();
-}
-
-/** Rename/move a whole subtree without merging or changing note identities. */
-export function moveFolder(from: string, to: string): string {
-  from = normalizeFolder(from);
-  to = normalizeFolder(to);
-  if (!from || !to) throw new NoteInputError("The vault root cannot be renamed or moved.");
-  if (to.startsWith(`${from}/`)) throw new NoteInputError("Cannot move a folder inside itself.");
-  const db = getDb();
-  return db.transaction(() => {
-    const paths = folderTree();
-    if (!paths.includes(from)) throw new NoteInputError("Folder not found.", 404);
-    if (from === to) return to;
-    if (paths.includes(to)) throw new NoteInputError("Destination folder already exists.", 409);
-    const inside = (path: string) => path === from || path.startsWith(`${from}/`);
-    const destination = (path: string) => normalizeFolder(to + path.slice(from.length));
-    const moved = paths.filter(inside).map(path => [path, destination(path)] as const);
-    const before = listNotes();
-    const changed = new Map<string, { title: string; folder: string }>();
-    // Include trash so restoring a note keeps it in the renamed folder.
-    const rows = db.prepare("SELECT id, title, folder FROM notes").all() as Array<{ id: string; title: string; folder: string }>;
-    for (const note of rows.filter(n => inside(n.folder))) {
-      const folder = destination(note.folder);
-      db.prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?").run(folder, now(), note.id);
-      db.prepare("UPDATE notes_fts SET folder = ? WHERE id = ?").run(folder, note.id);
-      changed.set(note.id, { title: note.title, folder });
-    }
-    for (const [old] of moved) db.prepare("DELETE FROM folders WHERE path = ?").run(old);
-    for (const [, next] of moved) ensureFolder(next);
-    rewriteReferences(before, changed);
-    return to;
-  })();
-}
-
-/**
- * Delete a folder and all its subfolders. Notes inside are NOT trashed —
- * they move up to the parent folder, preserving the remaining hierarchy.
- * e.g. deleting "Projects/Work" moves "Projects/Work/A" to "Projects/A".
- */
-export function deleteFolder(from: string): string {
-  from = normalizeFolder(from);
-  if (!from) throw new NoteInputError("The vault root cannot be deleted.");
-  const db = getDb();
-  return db.transaction(() => {
-    const paths = folderTree();
-    if (!paths.includes(from)) throw new NoteInputError("Folder not found.", 404);
-    const parent = parentOf(from);
-    const inside = (path: string) => path === from || path.startsWith(`${from}/`);
-    const destination = (path: string) => normalizeFolder(parent + path.slice(from.length));
-    const removed = paths.filter(inside);
-    const before = listNotes();
-    const changed = new Map<string, { title: string; folder: string }>();
-    // Include trash so restoring a note keeps it in the promoted folder.
-    const rows = db.prepare("SELECT id, title, folder FROM notes").all() as Array<{ id: string; title: string; folder: string }>;
-    for (const note of rows.filter(n => inside(n.folder))) {
-      const folder = destination(note.folder);
-      db.prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?").run(folder, now(), note.id);
-      db.prepare("UPDATE notes_fts SET folder = ? WHERE id = ?").run(folder, note.id);
-      changed.set(note.id, { title: note.title, folder });
-    }
-    for (const old of removed) db.prepare("DELETE FROM folders WHERE path = ?").run(old);
-    // Recreate only the destination folders that actually received notes;
-    // empty subfolders are dropped entirely.
-    const used = new Set<string>();
-    for (const note of rows.filter(n => inside(n.folder))) used.add(destination(note.folder));
-    for (const path of used) if (path) ensureFolder(path);
-    rewriteReferences(before, changed);
-    return parent;
-  })();
-}
-
-const parentOf = (path: string): string => path.split("/").slice(0, -1).join("/");
 
 /** All nodes + edges for the graph view. */
 export function graphData(): { nodes: NoteSummary[]; links: Array<{ source: string; target: string }> } {

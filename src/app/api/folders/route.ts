@@ -1,5 +1,6 @@
 import { withAuth } from "@/lib/api";
-import { createFolder, folderTree, moveFolder, deleteFolder } from "@/lib/notes";
+import { createFolder, folderTree } from "@/features/organization/folders";
+import { moveFolder, deleteFolder } from "@/features/organization/organization";
 import { z } from "zod";
 
 const pathInput = z.object({ path: z.string().min(1).max(512) });

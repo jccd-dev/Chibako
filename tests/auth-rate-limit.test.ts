@@ -43,7 +43,7 @@ test("both auth entry points apply the limiter before expensive work", async () 
   const vault = mkdtempSync(join(tmpdir(), "chibako-auth-limit-test-"));
   process.env.CHIBAKO_DATA_DIR = vault;
   const limiter = await import("../src/lib/auth-rate-limit");
-  const { hashPassword } = await import("../src/lib/auth");
+  const { hashPassword } = await import("../src/server/auth/password-authentication");
   const { getDb } = await import("../src/lib/db");
   const { POST } = await import("../src/app/api/login/route");
   const { POST: setup } = await import("../src/app/api/setup/route");

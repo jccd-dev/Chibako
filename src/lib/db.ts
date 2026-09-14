@@ -156,6 +156,11 @@ export function getDb(): Database.Database {
   return db;
 }
 
+/** Execute the minimal probe used by the health adapter. */
+export function checkDatabase(): void {
+  getDb().prepare("SELECT 1").get();
+}
+
 export function now(): number {
   return Math.floor(Date.now() / 1000);
 }
