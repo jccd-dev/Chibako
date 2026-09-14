@@ -19,26 +19,38 @@ env:
   TRIVY_VERSION: v0.74.0
 
 jobs:
-  quality:
-    name: Typecheck and unit tests
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
-      - name: Typecheck
-        run: npx tsc --noEmit
-      - name: Unit tests
-        run: node --import tsx --test tests/*.test.ts
+      - run: npm run typecheck
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+        env:
+          NODE_ENV: test
 
   pull-request-image:
     name: Build and scan pull request image
     if: github.event_name == 'pull_request'
-    needs: quality
+    needs: [typecheck, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -73,7 +85,7 @@ jobs:
   publish:
     name: Publish production image
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: quality
+    needs: [typecheck, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM node:22-slim AS build
+FROM node:24-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -18,7 +18,7 @@ RUN npm run build
 # ---- production dependencies ----
 # Install runtime deps only, so build tooling (e.g. the esbuild Go binary) never
 # reaches the shipped image. Native modules still compile here.
-FROM node:22-slim AS prod-deps
+FROM node:24-slim AS prod-deps
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -30,7 +30,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---- runtime stage ----
-FROM node:22-slim AS runtime
+FROM node:24-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
