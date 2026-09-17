@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM node:24-slim AS build
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -18,7 +18,7 @@ RUN npm run build
 # ---- production dependencies ----
 # Install runtime deps only, so build tooling (e.g. the esbuild Go binary) never
 # reaches the shipped image. Native modules still compile here.
-FROM node:24-slim AS prod-deps
+FROM node:24-bookworm-slim AS prod-deps
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -30,7 +30,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---- runtime stage ----
-FROM node:24-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -39,6 +39,7 @@ ENV HOSTNAME=0.0.0.0
 
 # gosu lets the entrypoint fix bind-mount ownership as root, then drop to `node`.
 RUN apt-get update \
+  && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends gosu \
   && rm -rf /var/lib/apt/lists/* \
     /usr/local/lib/node_modules/npm \

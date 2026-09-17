@@ -66,6 +66,7 @@ jobs:
           context: .
           platforms: linux/amd64
           load: true
+          pull: true
           push: false
           tags: chibako:pr-${{ github.event.pull_request.head.sha }}
           cache-from: type=gha,scope=pull-request-image
@@ -116,6 +117,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          pull: true
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
