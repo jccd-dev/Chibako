@@ -47,19 +47,34 @@ async function stopServer(server: ChildProcess): Promise<void> {
   if (server.exitCode !== null) return;
   const exited = new Promise<void>((resolve) => server.once("exit", () => resolve()));
   server.kill("SIGTERM");
-  await Promise.race([exited, sleep(5_000)]);
-  if (server.exitCode === null) server.kill("SIGKILL");
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const stopped = await Promise.race([
+    exited.then(() => {
+      if (timeout) clearTimeout(timeout);
+      return true;
+    }),
+    new Promise<false>((resolve) => {
+      timeout = setTimeout(() => resolve(false), 5_000);
+    }),
+  ]);
+  if (stopped) return;
+  server.kill("SIGKILL");
+  await exited;
 }
 
 test("setup, login, password change, and session invalidation preserve route contracts", async () => {
   const vault = mkdtempSync(join(tmpdir(), "chibako-password-routes-"));
   const port = 3200 + (process.pid % 700);
   const baseUrl = `http://127.0.0.1:${port}`;
-  const server = spawn("npm", ["run", "dev", "--", "--hostname", "127.0.0.1", "--port", String(port)], {
-    cwd: process.cwd(),
-    env: { ...process.env, CHIBAKO_DATA_DIR: vault },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const server = spawn(
+    process.execPath,
+    [join(process.cwd(), "node_modules/next/dist/bin/next"), "dev", "--hostname", "127.0.0.1", "--port", String(port)],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, CHIBAKO_DATA_DIR: vault },
+      stdio: "ignore",
+    },
+  );
   let setupCookie = "";
   let loginCookie = "";
   try {
