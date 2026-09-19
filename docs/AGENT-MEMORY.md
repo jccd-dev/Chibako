@@ -143,10 +143,15 @@ embeddings in one SQLite vault. API keys are hashed, revocable, and scoped. A
 read-only agent can receive `notes:read`, `search:read`, and `schema:read`; add
 `notes:write` only when that agent should save knowledge.
 
-MCP is a local stdio transport in the current release. The MCP process reads
-the same data directory as the web application, so both surfaces must be
-configured with the same `CHIBAKO_DATA_DIR`. See [Connect your AI
-agent](../README.md#-connect-your-ai-agent) for configuration.
+Remote MCP is available at `/mcp` on the Chibako HTTPS origin and requires a
+scoped bearer API key. It is stateless: each request gets an isolated server
+and tool catalog. Remote agents cannot trigger embedding indexing, and
+permanent deletion requires `notes:purge`.
+
+Local stdio remains available through `dist/mcp/server.mjs`. It reads the same
+`CHIBAKO_DATA_DIR` as the web application and has full local access when no API
+key is configured. See [Connect your AI agent](../README.md#-connect-your-ai-agent)
+for both configurations. Chibako API keys are not an OAuth implementation.
 
 ## Current limits
 
@@ -157,4 +162,3 @@ agent](../README.md#-connect-your-ai-agent) for configuration.
 - Semantic recall needs an OpenAI-compatible embedding provider; keyword recall
   works without one.
 - Chibako has no published cross-product token benchmark yet.
-

@@ -87,6 +87,7 @@ export interface RecallOptions {
   limit?: number;
   budget?: number;
   includeVectors?: boolean;
+  refreshStale?: boolean;
 }
 
 export interface RecallItem {
@@ -119,8 +120,10 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
     // Lazy self-heal: queue a few stale notes for background refresh. This is
     // the process-agnostic backstop for edits made by the other process, and it
     // must never block or fail the recall response.
-    const stale = staleNoteIds(20);
-    if (stale.length) void refreshNotes(stale);
+    if (opts.refreshStale !== false) {
+      const stale = staleNoteIds(20);
+      if (stale.length) void refreshNotes(stale);
+    }
     try {
       const vec = await vectorSearch(query, 50);
       if (vec.length) {

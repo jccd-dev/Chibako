@@ -4,6 +4,7 @@ import { getDb, now } from "../../lib/db";
 export type Scope = string;
 
 export interface ApiKeyPrincipal {
+  id: string;
   scopes: Scope[];
 }
 
@@ -22,10 +23,10 @@ export function hashApiKey(rawKey: string): string {
 /** Authenticate a raw API key and record use for every recognized key. */
 export function authenticateApiKey(rawKey: string): ApiKeyPrincipal | null {
   const hash = hashApiKey(rawKey);
-  const row = getDb().prepare("SELECT scopes FROM api_keys WHERE key_hash = ?").get(hash) as { scopes: string } | undefined;
+  const row = getDb().prepare("SELECT id, scopes FROM api_keys WHERE key_hash = ?").get(hash) as { id: string; scopes: string } | undefined;
   if (!row) return null;
   getDb().prepare("UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?").run(now(), hash);
-  return { scopes: row.scopes.split(",").filter(Boolean) };
+  return { id: row.id, scopes: row.scopes.split(",").filter(Boolean) };
 }
 
 export function hasScope(scopes: readonly Scope[], required: Scope): boolean {

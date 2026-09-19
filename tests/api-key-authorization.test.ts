@@ -22,12 +22,12 @@ test("API-key authorization hashes keys, parses scopes, and records recognized u
     assert.equal(row.last_used_at, null);
 
     const principal = auth.authenticateApiKey(created.key);
-    assert.deepEqual(principal, { scopes: ["notes:read", "search:read"] });
+    assert.deepEqual(principal, { id: created.id, scopes: ["notes:read", "search:read"] });
     const used = getDb().prepare("SELECT last_used_at FROM api_keys WHERE id = ?").get(created.id) as { last_used_at: number | null };
     assert.equal(typeof used.last_used_at, "number");
 
     getDb().prepare("UPDATE api_keys SET last_used_at = 0 WHERE id = ?").run(created.id);
-    assert.deepEqual(auth.authenticateApiKey(created.key), { scopes: ["notes:read", "search:read"] });
+    assert.deepEqual(auth.authenticateApiKey(created.key), { id: created.id, scopes: ["notes:read", "search:read"] });
     assert.ok((getDb().prepare("SELECT last_used_at FROM api_keys WHERE id = ?").get(created.id) as { last_used_at: number }).last_used_at > 0);
 
     assert.equal(auth.authenticateApiKey("not-a-key"), null);

@@ -263,28 +263,43 @@ trusted-proxy rate limiter before exposing auth.
 
 Two ways, both scoped by an API key you create in **Settings → API keys**.
 
-### MCP (recommended for Hermes/Claude/Cursor)
+### Remote MCP (recommended)
 
-Point your MCP client at the bundled server:
+Create a read-only key with `notes:read`, `search:read`, and `schema:read`, then
+connect to the HTTPS endpoint already served by Chibako:
 
-```json
-{
-  "mcpServers": {
-    "chibako": {
-      "command": "node",
-      "args": ["/opt/chibako/dist/mcp/server.mjs"],
-      "env": {
-        "CHIBAKO_DATA_DIR": "/opt/chibako/data",
-        "CHIBAKO_API_KEY": "ck_..."
-      }
-    }
-  }
-}
+```toml
+# ~/.codex/config.toml
+[mcp_servers.chibako]
+url = "https://your-domain.com/mcp"
+bearer_token_env_var = "CHIBAKO_API_KEY"
 ```
 
-`CHIBAKO_API_KEY` is optional; when set, the server checks it against the
-vault's API keys and enforces scopes. Without it, the server has full local
-access (fine if only you can reach the machine).
+```yaml
+# ~/.hermes/config.yaml
+mcp_servers:
+  chibako:
+    url: "https://your-domain.com/mcp"
+    headers:
+      Authorization: "Bearer ${CHIBAKO_API_KEY}"
+```
+
+Export `CHIBAKO_API_KEY` before starting Codex. Hermes also resolves it from
+`~/.hermes/.env`. Inline bearer values are supported by many clients but are
+easier to leak through checked-in configuration or shell history. Chibako keys
+are static bearer credentials, not MCP OAuth; revoke and replace a key if it is
+exposed.
+
+Remote MCP exposes only tools allowed by the key. `notes:purge` is separate
+from ordinary writes, and embedding indexing is intentionally local-only.
+
+### Advanced: local stdio MCP
+
+When the client runs on the Chibako host and can read the Vault directory, it
+can launch `dist/mcp/server.mjs` with `CHIBAKO_DATA_DIR`. An optional
+`CHIBAKO_API_KEY` restricts its tools; without one, stdio has full local access.
+Do not copy a VPS or Docker filesystem path into a client running on your
+laptop—the path is local to the machine that starts Node.
 
 ### REST
 

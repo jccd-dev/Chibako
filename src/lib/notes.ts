@@ -83,14 +83,17 @@ export function listNotes(): NoteSummary[] {
   return (getDb().prepare(`SELECT ${NOTE_SUMMARY_COLUMNS} FROM notes WHERE deleted_at IS NULL ORDER BY folder, title`).all() as Array<Record<string, unknown>>).map(toSummary);
 }
 
-/** Trashed notes, newest first. Lazily purges items older than 30 days. */
+/** Trashed notes, newest first. */
 export function listTrash(): NoteSummary[] {
-  const db = getDb();
-  const stale = db
+  return (getDb().prepare(`SELECT ${NOTE_SUMMARY_COLUMNS} FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`).all() as Array<Record<string, unknown>>).map(toSummary);
+}
+
+export function purgeExpiredTrash(): number {
+  const stale = getDb()
     .prepare(`SELECT id FROM notes WHERE deleted_at IS NOT NULL AND deleted_at < ?`)
     .all(now() - 30 * 24 * 3600) as Array<{ id: string }>;
   for (const s of stale) purgeNote(s.id);
-  return (db.prepare(`SELECT ${NOTE_SUMMARY_COLUMNS} FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`).all() as Array<Record<string, unknown>>).map(toSummary);
+  return stale.length;
 }
 
 export function getNote(id: string, includeDeleted = false): Note | null {

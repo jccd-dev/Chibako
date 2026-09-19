@@ -30,45 +30,54 @@ function CodeBlock({ code, label }: { code: string; label?: string }) {
 const TOOLS: Array<{ name: string; desc: string }> = [
   { name: "list_notes", desc: "All notes (titles + folders only — tiny payload)" },
   { name: "search_notes", desc: "Full-text search, returns snippets" },
+  { name: "recall", desc: "Token-budgeted semantic and keyword context" },
   { name: "read_note", desc: "Raw markdown of a note by id or title" },
   { name: "get_links", desc: "Outlinks + backlinks for one note" },
   { name: "create_note", desc: "Create a note (content, folder, kind)" },
   { name: "update_note", desc: "Patch title/content/folder/kind; backlinks re-point automatically" },
+  { name: "memory_save", desc: "Save a durable observation when write access is granted" },
+  { name: "list_observations", desc: "Recent saved decisions and patterns" },
   { name: "get_graph", desc: "Nodes + edges for the whole vault" },
+  { name: "embedding_status", desc: "Recall index health without triggering paid indexing" },
   { name: "get_knowledge_schema", desc: "The AGENTS.md brain instructions" },
   { name: "ingest_note", desc: "Compact read: note + links + schema in one token-efficient call" },
 ];
 
 export function AgentView() {
   const [origin, setOrigin] = useState("https://your-domain.com");
-  const [token, setToken] = useState("ck_…");
 
   useEffect(() => {
     setOrigin(window.location.origin);
   }, []);
 
-  const mcpConfig = JSON.stringify(
-    {
-      mcpServers: {
-        chibako: {
-          command: "node",
-          args: ["/opt/chibako/dist/mcp/server.js"],
-          env: {
-            CHIBAKO_DATA_DIR: "/opt/chibako/data",
-            CHIBAKO_API_KEY: token,
-          },
-        },
-      },
-    },
-    null,
-    2
-  );
+  const codexConfig = `[mcp_servers.chibako]
+url = "${origin}/mcp"
+bearer_token_env_var = "CHIBAKO_API_KEY"`;
+
+  const hermesConfig = `mcp_servers:
+  chibako:
+    url: "${origin}/mcp"
+    headers:
+      Authorization: "Bearer \${CHIBAKO_API_KEY}"`;
+
+  const localConfig = `{
+  "mcpServers": {
+    "chibako": {
+      "command": "node",
+      "args": ["/path/to/chibako/dist/mcp/server.mjs"],
+      "env": {
+        "CHIBAKO_DATA_DIR": "/path/to/chibako/data",
+        "CHIBAKO_API_KEY": "ck_..."
+      }
+    }
+  }
+}`;
 
   const readExample = `curl ${origin}/api/notes \\
-  -H "Authorization: Bearer ${token}"`;
+  -H "Authorization: Bearer $CHIBAKO_API_KEY"`;
 
   const createExample = `curl ${origin}/api/notes \\
-  -X POST -H "Authorization: Bearer ${token}" \\
+  -X POST -H "Authorization: Bearer $CHIBAKO_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"title":"Meeting — Acme 2026-09-07","folder":"Clients/Acme","content":"# Meeting\\n- Decided: ship [[v2 plan]] by Friday\\n- [[Acme]] wants usage reporting"}'`;
 
@@ -80,12 +89,26 @@ export function AgentView() {
       </p>
 
       <section className="mt-10">
-        <h2 className="text-sm font-semibold tracking-tight">MCP server</h2>
+        <h2 className="text-sm font-semibold tracking-tight">Remote MCP</h2>
         <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-muted-foreground">
-          Add this to your MCP client config (Claude Desktop, Cursor, etc.). The server reads the same SQLite vault directly and speaks the agent's key.
+          Create a read-only key first, export it as <code className="font-mono text-xs text-foreground">CHIBAKO_API_KEY</code>, then point your agent at this HTTPS endpoint. Add write or purge scopes only when the agent needs them.
+        </p>
+        <div className="mt-3 space-y-3">
+          <CodeBlock code={codexConfig} label="Codex config.toml" />
+          <CodeBlock code={hermesConfig} label="Hermes config.yaml" />
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+          Hermes resolves the variable from its environment or <code className="font-mono">~/.hermes/.env</code>. Inline bearer headers work as a fallback, but can leak through checked-in config or shell history.
+        </p>
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold tracking-tight">Advanced: local stdio</h2>
+        <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-muted-foreground">
+          Use this only when the MCP client runs on the same machine and can access the Chibako data directory. A Docker path on your VPS does not exist on your laptop.
         </p>
         <div className="mt-3">
-          <CodeBlock code={mcpConfig} label="mcpServers config" />
+          <CodeBlock code={localConfig} label="local mcpServers config" />
         </div>
       </section>
 

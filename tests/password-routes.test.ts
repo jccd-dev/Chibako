@@ -88,6 +88,47 @@ test("setup, login, password change, and session invalidation preserve route con
     assert.equal(setup.status, 200);
     setupCookie = cookieFrom(setup);
 
+    const createdKey = await post(baseUrl, "/api/keys", {
+      name: "Remote MCP reader",
+      scopes: ["notes:read", "search:read", "schema:read"],
+    }, setupCookie);
+    assert.equal(createdKey.status, 201);
+    const apiKey = (await createdKey.json()).key as string;
+    const mcp = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+    assert.equal(mcp.status, 200);
+    const mcpTools = (await mcp.json()).result.tools.map((tool: { name: string }) => tool.name);
+    assert.ok(mcpTools.includes("list_notes"));
+    assert.ok(!mcpTools.includes("create_note"));
+    assert.ok(!mcpTools.includes("index_embeddings"));
+
+    const writeKeyResponse = await post(baseUrl, "/api/keys", { name: "Writer", scopes: ["notes:write"] }, setupCookie);
+    const purgeKeyResponse = await post(baseUrl, "/api/keys", { name: "Purger", scopes: ["notes:purge"] }, setupCookie);
+    const writeKey = (await writeKeyResponse.json()).key as string;
+    const purgeKey = (await purgeKeyResponse.json()).key as string;
+    const createdNote = await fetch(`${baseUrl}/api/notes`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${writeKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Purge scope test", content: "# Purge scope test" }),
+    });
+    assert.equal(createdNote.status, 201);
+    const noteId = (await createdNote.json()).note.id as string;
+    assert.equal((await fetch(`${baseUrl}/api/notes/${noteId}`, { method: "DELETE", headers: { Authorization: `Bearer ${writeKey}` } })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/trash/${noteId}`, { method: "DELETE", headers: { Authorization: `Bearer ${writeKey}` } })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/trash/${noteId}`, { method: "DELETE", headers: { Authorization: `Bearer ${purgeKey}` } })).status, 200);
+
     const alreadySetup = await post(baseUrl, "/api/setup", { password });
     assert.equal(alreadySetup.status, 400);
     assert.match((await alreadySetup.json()).error, /already set up/i);

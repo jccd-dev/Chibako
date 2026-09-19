@@ -6,6 +6,18 @@ agent.
 
 ## Language
 
+### Access
+
+**Vault**:
+The owner's complete Chibako knowledge store: Notes, knowledge schema,
+observations, links, and retrieval indexes.
+_Avoid_: Workspace, brain, database
+
+**Agent access**:
+Scoped machine access to a Vault through Chibako's agent-facing protocols. It
+is distinct from the owner's interactive browser session.
+_Avoid_: Admin access, integration access
+
 ### Knowledge
 
 **Note**:

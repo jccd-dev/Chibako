@@ -24,6 +24,7 @@ const FONT_ITEMS = Object.fromEntries(FONT_OPTIONS.map((option) => [option.value
 const ALL_SCOPES = [
   "notes:read",
   "notes:write",
+  "notes:purge",
   "search:read",
   "schema:read",
   "schema:write",

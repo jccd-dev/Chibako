@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
+    "test:mcp-stdio": "npm run build:mcp && node --import tsx tests/mcp-stdio.smoke.ts",
     "test:e2e": "playwright test",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/mcp/server.mjs",
     "mcp": "node dist/mcp/server.mjs",
@@ -17,7 +18,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@tabler/icons-react": "^3.46.0",
     "@tiptap/extension-image": "^3.31.3",
     "@tiptap/extension-table": "^3.31.3",
