@@ -4,7 +4,7 @@ import { getSession, getCookieToken } from "@/lib/auth";
 import { SetupForm } from "./SetupForm";
 
 export default async function SetupPage() {
-  if (isSetup() && getSession(await getCookieToken())) redirect("/app");
+  if (isSetup()) redirect(getSession(await getCookieToken()) ? "/app" : "/login");
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-sm fade-in">
