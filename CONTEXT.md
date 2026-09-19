@@ -39,6 +39,17 @@ A note's role: `note`, `wiki` (AI-compiled), or `index` (a navigational map of
 content).
 _Avoid_: Type
 
+**Note date**:
+The optional calendar day assigned to a Note through its canonical `date`
+property as a valid `YYYY-MM-DD` value. It carries no time, duration,
+recurrence, or due-date meaning.
+_Avoid_: Event date, scheduled time, due date
+
+**Calendar**:
+The view that groups and browses Notes by Note date. It is not an event or task
+scheduler.
+_Avoid_: Schedule, planner
+
 ### Retrieval
 
 **Search**:

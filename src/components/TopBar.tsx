@@ -8,7 +8,7 @@ import { IconTip } from "@/components/IconTip";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { IconDotsVertical } from "@tabler/icons-react";
+import { IconCalendarMonth, IconDotsVertical } from "@tabler/icons-react";
 
 export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const router = useRouter();
@@ -79,6 +79,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean;
                 <IconLink />Connections{linksOpen && <span className="ml-auto text-primary">✓</span>}
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem onClick={() => router.push("/app/calendar")}><IconCalendarMonth />Calendar</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/app/graph")}><IconGraph />Graph</DropdownMenuItem>
             <DropdownMenuItem onClick={toggle}><IconSun className="dark:hidden" /><IconMoon className="hidden dark:block" />Toggle theme</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/app/settings")}><IconGear />Settings</DropdownMenuItem>

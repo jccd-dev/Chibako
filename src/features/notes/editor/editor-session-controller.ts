@@ -42,14 +42,14 @@ export interface EditorSessionController {
   dispose(): Promise<void>;
 }
 
-function documentFor(note: Note | null): EditorDocument {
+function documentFor(note: Note | null, draft?: Partial<Omit<EditorDocument, "note">>): EditorDocument {
   return {
     note,
-    title: note?.title ?? "",
-    folder: note?.folder ?? "",
-    content: note?.content ?? "",
-    kind: note?.kind ?? "note",
-    pinned: note?.is_pinned === 1,
+    title: note?.title ?? draft?.title ?? "",
+    folder: note?.folder ?? draft?.folder ?? "",
+    content: note?.content ?? draft?.content ?? "",
+    kind: note?.kind ?? draft?.kind ?? "note",
+    pinned: note ? note.is_pinned === 1 : draft?.pinned ?? false,
   };
 }
 
@@ -70,8 +70,9 @@ function applyPatch(document: EditorDocument, patch: UpdateNoteInput): EditorDoc
 export function createEditorSessionController(
   initial: Note | null,
   effects: EditorSessionEffects,
+  initialDraft?: Partial<Omit<EditorDocument, "note">>,
 ): EditorSessionController {
-  let document = documentFor(initial);
+  let document = documentFor(initial, initialDraft);
   let saveState: SaveState = initial ? "saved" : "unsaved";
   let dirty = false;
   let pending: UpdateNoteInput = {};

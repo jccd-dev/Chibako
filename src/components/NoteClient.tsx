@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Note, NoteKind, NoteSummary } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
-import { parseFrontmatter, serializeFrontmatter, type PropValue } from "@/lib/markdown";
+import { applyFrontmatter, parseFrontmatter, serializeFrontmatter, type PropValue } from "@/lib/markdown";
 import { PROPERTY_TYPES, type PropertyDef, type PropertyType } from "@/lib/property-types";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { RichTextEditor } from "@/components/editor/RichTextEditor";
@@ -30,6 +30,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { IconDotsVertical } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useNoteEditorSession } from "@/features/notes/editor/useNoteEditorSession";
+import { isNoteDate } from "@/features/calendar/note-dates";
+import { DatedNotesCalendar } from "@/components/DatedNotesCalendar";
 
 type ViewMode = "write" | "edit" | "split" | "preview";
 /** Select sentinel for the "create a new bookmark group" option. */
@@ -82,7 +84,7 @@ function PropTextEditor({ initial, onCommit, placeholder, type, ariaLabel }: {
   );
 }
 
-export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | null; allNotes: NoteSummary[] }) {
+export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initial: Note | null; allNotes: NoteSummary[]; draftDate?: string }) {
   const router = useRouter();
 
   const [allNotes, setAllNotes] = useState<NoteSummary[]>(initialAll);
@@ -172,7 +174,7 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
       void refreshLinks();
     },
     onOrganizationError: () => toast.error("Could not refresh the organized note."),
-  });
+  }, !initial && isNoteDate(draftDate) ? { content: applyFrontmatter("", { date: draftDate }) } : undefined);
   const { note, title, folder, content, kind, pinned, saveState, persist, patch } = session;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -287,12 +289,12 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
   /** Type for a property: dictionary wins; otherwise inferred from the value shape. */
   function propType(key: string): PropertyType {
     const def = defFor(key);
-    if (def) return def.type;
     const value = fm.props[key];
+    if (def) return def.type === "date" && typeof value === "string" && value !== "" && !isNoteDate(value) ? "string" : def.type;
     if (Array.isArray(value)) return "tags";
     if (typeof value === "boolean") return "checkbox";
     if (typeof value === "number") return "number";
-    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return "date";
+    if (isNoteDate(value)) return "date";
     return "string";
   }
 
@@ -892,12 +894,24 @@ export function NoteClient({ initial, allNotes: initialAll }: { initial: Note | 
 
   function connectionsPanel() {
     if (!note) return null;
+    const noteDate = fm.props.date;
     return <>
       <div className="flex items-center justify-between px-4 py-3">
         <h3 className="text-xs font-semibold text-muted-foreground">Connections</h3>
         <Button variant="ghost" size="icon-sm" aria-label="Close connections" onClick={() => setShowLinks(false)}><IconX size={13} /></Button>
       </div>
       <div className="flex flex-1 flex-col gap-4 px-3 pb-6">
+        {isNoteDate(noteDate) && (
+          <div>
+            <h4 className="mb-1 px-1 text-xs font-medium text-muted-foreground">Calendar</h4>
+            <DatedNotesCalendar
+              notes={allNotes}
+              selected={noteDate}
+              onSelect={(date) => router.push(`/app/calendar?date=${date}`)}
+              compact
+            />
+          </div>
+        )}
         <div>
           <h4 className="px-1 text-xs font-medium text-muted-foreground">Backlinks ({links?.backlinks.length ?? 0})</h4>
           {links?.backlinks.length ? <ul className="mt-1 flex flex-col gap-0.5">

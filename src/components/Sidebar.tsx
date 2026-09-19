@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { IconDotsVertical, IconFolderPlus } from "@tabler/icons-react";
+import { IconCalendarMonth, IconDotsVertical, IconFolderPlus } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { cn } from "@/lib/utils";
@@ -587,6 +587,17 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
       >
         <IconGraph size={16} />
+      </Link>
+      <Link
+        href="/app/calendar"
+        aria-label="Calendar"
+        title="Calendar"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/calendar" && "bg-accent text-foreground"
+        )}
+      >
+        <IconCalendarMonth size={16} />
       </Link>
       <Link
         href="/app/agent"
