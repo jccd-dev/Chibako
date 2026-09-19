@@ -91,6 +91,7 @@ test("setup, login, password change, and session invalidation preserve route con
     const setupPage = await fetch(`${baseUrl}/setup`, { redirect: "manual" });
     assert.equal(setupPage.status, 307);
     assert.equal(setupPage.headers.get("location"), "/login");
+    assert.equal((await fetch(`${baseUrl}/login`)).status, 200);
 
     const createdKey = await post(baseUrl, "/api/keys", {
       name: "Remote MCP reader",

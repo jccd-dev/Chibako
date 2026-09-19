@@ -4,8 +4,9 @@ import { getSession, getCookieToken } from "@/lib/auth";
 import { LoginForm } from "./LoginForm";
 
 export default async function LoginPage() {
+  const authed = getSession(await getCookieToken());
   if (!isSetup()) redirect("/setup");
-  if (getSession(await getCookieToken())) redirect("/app");
+  if (authed) redirect("/app");
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-sm fade-in">
