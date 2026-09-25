@@ -62,7 +62,7 @@ export function CalendarView({ initialNotes, requestedDate }: {
         <h1 className="text-lg font-semibold tracking-tight">Calendar</h1>
         <p className="text-xs text-muted-foreground">Browse Notes by Note date.</p>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-1 content-start overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:content-stretch lg:overflow-hidden">
         <section className="order-2 flex min-h-0 flex-col border-border lg:order-1 lg:border-r">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             <div>

@@ -1,0 +1,18 @@
+# Prebuilt GHCR image deployment. Source builds remain in docker-compose.yml.
+# Pin CHIBAKO_IMAGE to a commit tag or digest for deterministic upgrades.
+services:
+  chibako:
+    image: ${CHIBAKO_IMAGE:-ghcr.io/jccd-dev/chibako:latest}
+    restart: unless-stopped
+    environment:
+      - DATA_DIR=/app/data
+      - SITE_NAME=${SITE_NAME:-Chibako}
+    volumes:
+      - ${CHIBAKO_DATA_VOLUME:-./data}:/app/data
+    networks:
+      - chibako
+    ports:
+      - "127.0.0.1:${CHIBAKO_PORT:-3000}:3000"
+
+networks:
+  chibako:

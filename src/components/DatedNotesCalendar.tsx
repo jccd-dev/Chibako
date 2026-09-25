@@ -36,7 +36,7 @@ export function DatedNotesCalendar({ notes, selected, onSelect, compact = false 
       }}
       className={cn(
         "w-full rounded-lg border",
-        compact ? "p-1 [--cell-size:1.75rem]" : "p-4 [--cell-size:clamp(2.5rem,7vw,5rem)]"
+        compact ? "p-1 [--cell-size:1.75rem]" : "p-4 [--cell-size:clamp(2.25rem,6vw,3rem)] mx-auto max-w-md"
       )}
       components={{
         DayButton: ({ day, modifiers, ...props }) => {
@@ -55,7 +55,7 @@ export function DatedNotesCalendar({ notes, selected, onSelect, compact = false 
               aria-label={`${dateLabel}${count ? `, ${count} Note${count === 1 ? "" : "s"}` : ""}`}
             >
               <span>{day.date.getDate()}</span>
-              {count > 0 && (
+              {!compact && count > 0 && (
                 <Badge variant={modifiers.selected ? "secondary" : "outline"} className="h-4 min-w-4 px-1" aria-hidden="true">
                   {count > 99 ? "99+" : count}
                 </Badge>

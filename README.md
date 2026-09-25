@@ -183,10 +183,10 @@ npm run dev        # http://localhost:3000 → run the one-time setup
 
 ## 🚢 Deploy to your VPS (Docker Compose + nginx)
 
-The repo ships a `Dockerfile`, `docker-compose.yml`, and an
-`nginx/nginx.conf` reverse-proxy template. The Compose service binds the app
-to IPv4 loopback (`127.0.0.1:3000` by default); host nginx is the public
-entrypoint.
+The repo ships a `Dockerfile`, source-build `docker-compose.yml`, prebuilt-image
+`docker-compose.release.yml`, and an `nginx/nginx.conf` reverse-proxy template.
+Both Compose files bind the app to IPv4 loopback (`127.0.0.1:3000` by default);
+host nginx is the public entrypoint.
 
 1. Point DNS at the VPS and allow TCP ports 80 and 443 through its firewall.
    Do not open port 3000 publicly.
@@ -203,10 +203,33 @@ entrypoint.
    The container entrypoint fixes the bind-mount ownership and runs the app as
    the unprivileged `node` user.
 
-   Before using a real vault, run `./scripts/smoke-docker.sh` on a machine with
-   Docker and a running daemon. It builds the packaged image, uses a temporary
-   project/port/vault, checks setup/login and restart persistence, validates
-   the Compose loopback binding and nginx syntax, then cleans up its resources.
+   To use the published GHCR image instead of building locally:
+
+   ```bash
+   docker compose -f docker-compose.release.yml pull
+   docker compose -f docker-compose.release.yml up -d
+   ```
+
+   The release image tracks `latest` by default. Pin `CHIBAKO_IMAGE` to a
+   commit tag or digest when you need repeatable upgrades; the published image
+   currently targets `linux/amd64`.
+
+   For an existing release-image install, update it with:
+
+   ```bash
+   docker compose -f docker-compose.release.yml pull
+   docker compose -f docker-compose.release.yml up -d
+   ```
+
+   The `./data` bind mount is unchanged, so the SQLite vault survives image
+   replacement. Existing source-build installs remain on the source flow:
+   `git pull --ff-only && docker compose up -d --build`.
+
+   Before using a real vault with the source-build path, run
+   `./scripts/smoke-docker.sh` on a machine with Docker and a running daemon.
+   It builds the packaged image, uses a temporary project/port/vault, checks
+   setup/login and restart persistence, validates the Compose loopback binding
+   and nginx syntax, then cleans up its resources.
    Exit status `2` means the check is unverified because Docker or a required
    local tool is unavailable.
 

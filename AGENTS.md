@@ -33,7 +33,7 @@ and host configuration live in the private `chibako-infra` repo, not here.
 - `npm run dev` — dev server on :3000
 - `npm run build` — Next build + MCP bundle
 - `npm run mcp` — run MCP server over stdio (`CHIBAKO_DATA_DIR` + optional `CHIBAKO_API_KEY` env)
-- Deploy: self-hosters run `docker compose up -d` (nginx terminates TLS). Production uses the private `chibako-infra` repo, which deploys the GHCR image by digest — do not add host/deploy config here.
+- Deploy: source-based self-hosters run `docker compose up -d --build`; release-image self-hosters use `docker-compose.release.yml` with the public GHCR image (nginx terminates TLS). Production uses the private `chibako-infra` repo, which deploys the GHCR image by digest — do not add host/deploy config here.
 
 ## Gotchas
 - `better-sqlite3` is a native module; it is `serverExternalPackages` and copied wholesale into the Docker runtime image.

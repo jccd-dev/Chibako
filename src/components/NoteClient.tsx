@@ -33,7 +33,7 @@ import { useNoteEditorSession } from "@/features/notes/editor/useNoteEditorSessi
 import { isNoteDate } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/components/DatedNotesCalendar";
 
-type ViewMode = "write" | "edit" | "split" | "preview";
+export type ViewMode = "write" | "edit" | "split" | "preview";
 /** Select sentinel for the "create a new bookmark group" option. */
 const NEW_GROUP_VALUE = "__new__";
 
@@ -47,6 +47,25 @@ const KIND_COLOR: Record<NoteKind, string> = {
 interface LinkInfo {
   outlinks: Array<{ target: string; target_id: string | null; resolved: boolean }>;
   backlinks: Array<{ id: string; title: string; folder: string; snippet: string }>;
+}
+
+const VIEW_MODES: readonly ViewMode[] = ["write", "edit", "split", "preview"];
+
+function readLegacyView(): ViewMode | null {
+  try {
+    const value = localStorage.getItem("chibako_view");
+    return VIEW_MODES.includes(value as ViewMode) ? (value as ViewMode) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistView(mode: ViewMode) {
+  try {
+    document.cookie = `chibako_view=${mode}; path=/; max-age=31536000; samesite=lax`;
+  } catch {
+    // private mode — server falls back to split
+  }
 }
 
 /**
@@ -84,7 +103,12 @@ function PropTextEditor({ initial, onCommit, placeholder, type, ariaLabel }: {
   );
 }
 
-export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initial: Note | null; allNotes: NoteSummary[]; draftDate?: string }) {
+export function NoteClient({ initial, allNotes: initialAll, draftDate, initialView }: {
+  initial: Note | null;
+  allNotes: NoteSummary[];
+  draftDate?: string;
+  initialView?: ViewMode;
+}) {
   const router = useRouter();
 
   const [allNotes, setAllNotes] = useState<NoteSummary[]>(initialAll);
@@ -111,29 +135,26 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
       // private mode — ignore
     }
   }
-  // Server renders "split"; stored preference / mobile default applies after
-  // mount so server HTML and first client render always match (no hydration
-  // mismatch).
-  const [view, setView] = useState<ViewMode>("split");
+  // View preference is mirrored to a cookie so the server renders the same
+  // mode the client will resolve to (no first-paint mode swap on navigation).
+  const [view, setView] = useState<ViewMode>(initialView ?? "split");
   const [modKey, setModKey] = useState("");
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("chibako_view");
-      const wide = window.innerWidth >= 1024;
-      if (stored === "write" || stored === "edit" || stored === "preview") setView(stored);
-      else if (stored === "split") setView(wide ? "split" : "edit");
-      else if (!wide) setView("edit"); // split needs room for two panes
-      else setView("write");
-    } catch {
-      // private mode — keep default
-    }
+    const wide = window.innerWidth >= 1024;
+    const stored = readLegacyView();
+    const resolved: ViewMode =
+      stored === "write" || stored === "edit" || stored === "preview" ? stored
+        : stored === "split" ? (wide ? "split" : "edit")
+        : wide ? "write" : "edit";
+    setView(resolved);
+    persistView(resolved);
     setModKey(/mac/i.test(navigator.platform ?? "") ? "⌘" : "Ctrl+");
   }, []);
   const [links, setLinks] = useState<LinkInfo | null>(null);
   const [mentions, setMentions] = useState<Array<{ id: string; title: string; folder: string; snippet: string }>>([]);
   const [showLinks, setShowLinks] = useState(false);
   const [wideLinks, setWideLinks] = useState(true);
-  // TopBar owns the dedicated connections toggle in the theme icon group;
+  // TopBar owns the dedicated note details toggle;
   // these events bridge the button and this panel's state across components.
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("chibako:links-open", { detail: showLinks }));
@@ -368,11 +389,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
 
   function setViewAndRemember(m: ViewMode) {
     setView(m);
-    try {
-      localStorage.setItem("chibako_view", m);
-    } catch {
-      // private mode — ignore
-    }
+    persistView(m);
   }
   const duplicateTitle = useMemo(() => {
     const t = title.trim().toLowerCase();
@@ -718,8 +735,9 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
     if (!showEdit) return;
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = "0px";
-    ta.style.height = `${ta.scrollHeight}px`;
+    if ("fieldSizing" in ta) return;
+    const next = `${ta.scrollHeight}px`;
+    if (ta.style.height !== next) ta.style.height = next;
   }, [content, view, showEdit, showProps, editorKey, note?.id]);
 
   /** Collapsible "Properties" row shown above both editors. */
@@ -892,18 +910,13 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
     );
   }
 
-  function connectionsPanel() {
+  function noteDetailsPanel() {
     if (!note) return null;
     const noteDate = fm.props.date;
     return <>
-      <div className="flex items-center justify-between px-4 py-3">
-        <h3 className="text-xs font-semibold text-muted-foreground">Connections</h3>
-        <Button variant="ghost" size="icon-sm" aria-label="Close connections" onClick={() => setShowLinks(false)}><IconX size={13} /></Button>
-      </div>
-      <div className="flex flex-1 flex-col gap-4 px-3 pb-6">
+      <div className="flex flex-1 flex-col gap-3 px-2 py-2 pb-4">
         {isNoteDate(noteDate) && (
           <div>
-            <h4 className="mb-1 px-1 text-xs font-medium text-muted-foreground">Calendar</h4>
             <DatedNotesCalendar
               notes={allNotes}
               selected={noteDate}
@@ -913,20 +926,20 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
           </div>
         )}
         <div>
-          <h4 className="px-1 text-xs font-medium text-muted-foreground">Backlinks ({links?.backlinks.length ?? 0})</h4>
-          {links?.backlinks.length ? <ul className="mt-1 flex flex-col gap-0.5">
-            {links.backlinks.map((b) => <li key={b.id}><button className="w-full rounded-md px-2 py-1.5 text-left transition hover:bg-muted" onClick={() => router.push(`/app/note/${b.id}`)}><span className="block text-[13px] font-medium text-primary">{b.title}</span><span className="block truncate text-xs text-muted-foreground">{b.snippet}</span></button></li>)}
-          </ul> : <p className="mt-1 px-2 text-xs text-muted-foreground">Nothing links here yet. Add <code>[[{note.title}]]</code> elsewhere.</p>}
+          <h4 className="px-2 text-xs font-medium text-muted-foreground">Backlinks ({links?.backlinks.length ?? 0})</h4>
+          {links?.backlinks.length ? <ul className="mt-1 flex flex-col">
+            {links.backlinks.map((b) => <li key={b.id}><button className="min-h-6 w-full rounded-md px-2 py-0.5 text-left transition hover:bg-muted" onClick={() => router.push(`/app/note/${b.id}`)}><span className="block text-[13px] font-medium text-primary">{b.title}</span><span className="block truncate text-xs text-muted-foreground">{b.snippet}</span></button></li>)}
+          </ul> : <p className="mt-1 px-1.5 text-xs text-muted-foreground">Nothing links here yet. Add <code>[[{note.title}]]</code> elsewhere.</p>}
         </div>
         <div>
-          <h4 className="px-1 text-xs font-medium text-muted-foreground">Linked to ({links?.outlinks.length ?? 0})</h4>
-          {links?.outlinks.length ? <ul className="mt-1 flex flex-col gap-0.5">
-            {links.outlinks.map((o) => <li key={o.target}><button className={cn("w-full rounded-md px-2 py-1.5 text-left text-[13px] transition hover:bg-muted", o.resolved ? "text-primary" : "text-muted-foreground italic")} onClick={() => navigateTo(o.target)}>{o.target}</button></li>)}
-          </ul> : <p className="mt-1 px-2 text-xs text-muted-foreground">No outgoing links.</p>}
+          <h4 className="px-2 text-xs font-medium text-muted-foreground">Linked to ({links?.outlinks.length ?? 0})</h4>
+          {links?.outlinks.length ? <ul className="mt-1 flex flex-col">
+            {links.outlinks.map((o) => <li key={o.target}><button className={cn("min-h-6 w-full rounded-md px-2 py-0.5 text-left text-[13px] transition hover:bg-muted", o.resolved ? "text-primary" : "text-muted-foreground italic")} onClick={() => navigateTo(o.target)}>{o.target}</button></li>)}
+          </ul> : <p className="mt-1 px-1.5 text-xs text-muted-foreground">No outgoing links.</p>}
         </div>
         {mentions.length > 0 && <div>
           <h4 className="px-1 text-xs font-medium text-muted-foreground">Mentioned in ({mentions.length})</h4>
-          <ul className="mt-1 flex flex-col gap-0.5">{mentions.map((m) => <li key={m.id} className="rounded-md px-2 py-1.5 transition hover:bg-muted"><button className="block w-full text-left" onClick={() => router.push(`/app/note/${m.id}`)} title="Open note"><span className="block text-[13px] font-medium">{m.title}</span><span className="block truncate text-xs text-muted-foreground">{m.snippet}</span></button><button className="mt-0.5 text-[11px] font-medium text-primary hover:underline" onClick={() => linkMentionFrom(m.id)}>Link first mention</button></li>)}</ul>
+          <ul className="mt-1 flex flex-col gap-0.5">{mentions.map((m) => <li key={m.id} className="rounded-md px-1.5 py-1 transition hover:bg-muted"><button className="block w-full text-left" onClick={() => router.push(`/app/note/${m.id}`)} title="Open note"><span className="block text-[13px] font-medium">{m.title}</span><span className="block truncate text-xs text-muted-foreground">{m.snippet}</span></button><button className="mt-0.5 text-[11px] font-medium text-primary hover:underline" onClick={() => linkMentionFrom(m.id)}>Link first mention</button></li>)}</ul>
         </div>}
       </div>
     </>;
@@ -1063,7 +1076,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
             <div
               ref={editWrapRef}
               onScroll={() => setSuggest(null)}
-              className={cn("relative overflow-y-auto px-6 py-2", showPreview ? "h-1/2 w-full border-b border-border md:h-auto md:w-1/2 md:border-b-0 md:border-r" : "w-full")}
+              className={cn("relative min-h-0 overflow-y-auto px-6 py-2", showPreview ? "h-1/2 w-full border-b border-border md:h-auto md:w-1/2 md:border-b-0 md:border-r" : "w-full")}
             >
               <div className="mx-auto w-full max-w-[88ch]">
                 {titleInputJSX()}
@@ -1072,7 +1085,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
                 <textarea
                 key={editorKey}
                 ref={textareaRef}
-                className="editor min-h-full"
+                className="editor"
                 value={content}
                 placeholder={"Start writing…\n\nLink notes with [[Another Note]]."}
                 onChange={(e) => {
@@ -1125,7 +1138,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
             </div>
           )}
           {showPreview && (
-            <div className={cn("overflow-y-auto px-6 py-4", showEdit ? "h-1/2 w-full md:h-auto md:w-1/2" : "w-full")}>
+            <div className={cn("min-h-0 overflow-y-auto px-6 py-4", showEdit ? "h-1/2 w-full md:h-auto md:w-1/2" : "w-full")}>
               <div className="mx-auto w-full max-w-[88ch]">
                 {!showEdit && titleInputJSX()}
                 {propKeys.length > 0 && (
@@ -1164,9 +1177,9 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate }: { initi
         </div>
       </div>
 
-      {/* right links panel */}
-      {note && showLinks && wideLinks && <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-border bg-background">{connectionsPanel()}</aside>}
-      {note && !wideLinks && <Sheet open={showLinks} onOpenChange={setShowLinks}><SheetContent side="right" className="w-72 bg-background p-0" showCloseButton={false}><SheetTitle className="sr-only">Connections</SheetTitle>{connectionsPanel()}</SheetContent></Sheet>}
+      {/* right note details panel */}
+      {note && showLinks && wideLinks && <aside aria-label="Note details" className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-border bg-background">{noteDetailsPanel()}</aside>}
+      {note && !wideLinks && <Sheet open={showLinks} onOpenChange={setShowLinks}><SheetContent side="right" className="w-72 bg-background p-0" showCloseButton={false}><SheetTitle className="sr-only">Note details</SheetTitle>{noteDetailsPanel()}</SheetContent></Sheet>}
 
       {/* create missing note dialog */}
       <Dialog open={createModal !== null} onOpenChange={(o) => !o && setCreateModal(null)}>

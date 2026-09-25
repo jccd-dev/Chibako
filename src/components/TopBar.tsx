@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { IconBot, IconGear, IconGraph, IconKeyboard, IconLink, IconMenu, IconMoon, IconSun } from "@/components/icons";
+import { IconBot, IconGear, IconGraph, IconKeyboard, IconMenu, IconMoon, IconSun } from "@/components/icons";
 import { useTheme } from "@/components/ThemeProvider";
 import { IconTip } from "@/components/IconTip";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { IconCalendarMonth, IconDotsVertical } from "@tabler/icons-react";
+import { IconCalendarMonth, IconDotsVertical, IconListDetails } from "@tabler/icons-react";
 
 export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const router = useRouter();
@@ -54,15 +54,6 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean;
 
       <div className="flex items-center gap-1">
         <div className="hidden items-center gap-1 md:flex">
-          {onNotePage && (
-            <IconTip
-              label={linksOpen ? "Hide connections" : "Show connections"}
-              onClick={() => window.dispatchEvent(new Event("chibako:toggle-links"))}
-              active={linksOpen}
-            >
-              <IconLink size={15} />
-            </IconTip>
-          )}
           <IconTip label="Toggle theme" onClick={toggle}>
             <IconSun size={15} className="dark:hidden" />
             <IconMoon size={15} className="hidden dark:block" />
@@ -70,21 +61,30 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean;
           <IconTip label="Keyboard shortcuts (⌘/)" onClick={() => setShortcutsOpen(true)}>
             <IconKeyboard size={15} />
           </IconTip>
+          {onNotePage && (
+            <IconTip
+              label={linksOpen ? "Hide note details" : "Show note details"}
+              onClick={() => window.dispatchEvent(new Event("chibako:toggle-links"))}
+              active={linksOpen}
+            >
+              <IconListDetails size={15} />
+            </IconTip>
+          )}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="md:hidden" aria-label="More workspace actions" />}><IconDotsVertical /></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
-            {onNotePage && (
-              <DropdownMenuItem onClick={() => window.dispatchEvent(new Event("chibako:toggle-links"))}>
-                <IconLink />Connections{linksOpen && <span className="ml-auto text-primary">✓</span>}
-              </DropdownMenuItem>
-            )}
             <DropdownMenuItem onClick={() => router.push("/app/calendar")}><IconCalendarMonth />Calendar</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/app/graph")}><IconGraph />Graph</DropdownMenuItem>
             <DropdownMenuItem onClick={toggle}><IconSun className="dark:hidden" /><IconMoon className="hidden dark:block" />Toggle theme</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/app/settings")}><IconGear />Settings</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/app/agent")}><IconBot />Agent access</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShortcutsOpen(true)}><IconKeyboard />Keyboard shortcuts</DropdownMenuItem>
+            {onNotePage && (
+              <DropdownMenuItem onClick={() => window.dispatchEvent(new Event("chibako:toggle-links"))}>
+                <IconListDetails />Note details{linksOpen && <span className="ml-auto text-primary">✓</span>}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

@@ -117,6 +117,49 @@ function yamlQuote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+// ---------- Rich-editor HTML guard ----------
+//
+// The WYSIWYG editor round-trips Markdown through ProseMirror, which drops
+// HTML tags, their attributes, and comments. Detect those before the editor
+// loads so a save can't silently lose them.
+
+// A tag-shaped token: name, then attributes, self-closing slash, or nothing.
+// `<Cmd+S>` and `<3` are not valid tag syntax, so notes full of those stay
+// rich-editable.
+const HTML_TOKEN_RE = /<!--[\s\S]*?-->|<\/?[a-zA-Z][\w-]*(?:\s[^<>]*)?\/?>|<![a-zA-Z][^<>]*>|<\?[^<>]*>/g;
+const MARKDOWN_AUTOLINK_RE = /<(?:[a-z][a-z0-9+.-]*:[^\s<>]*|[^\s<>@]+@[^\s<>@]+)>/gi;
+
+/** Markdown with code blocks/spans and autolinks blanked out, since neither is HTML. */
+function withoutCodeOrAutolinks(md: string): string {
+  const lines = md.split("\n");
+  let inFence = false;
+  const text = lines
+    .map((line, i) => {
+      if (/^\s*(?:```|~~~)/.test(line)) {
+        inFence = !inFence;
+        return "";
+      }
+      if (inFence) return "";
+      // ponytail: a 4-space line after a blank line counts as code; HTML indented
+      // inside a list item can slip through.
+      if (/^ {4,}\S/.test(line) && !(lines[i - 1] ?? "").trim()) return "";
+      return line;
+    })
+    .join("\n");
+  return text.replace(/``[\s\S]*?``|`[^`\n]*`/g, "").replace(MARKDOWN_AUTOLINK_RE, "");
+}
+
+/**
+ * HTML snippets that rich editing would drop or flatten, deduplicated and
+ * ordered, capped at `limit` so the UI can name what it found. Autolinks
+ * (`<https://…>`, `<me@example.com>`) and code are Markdown, not HTML, so a
+ * note full of them stays rich-editable.
+ */
+export function findUnsupportedHtml(md: string, limit = 3): string[] {
+  const matches = withoutCodeOrAutolinks(md).match(HTML_TOKEN_RE) ?? [];
+  return [...new Set(matches)].slice(0, limit);
+}
+
 /** Split a [[target|alias]] token into { target, alias }. */
 export function parseWikiToken(raw: string): { target: string; alias: string } {
   const [target, ...rest] = raw.split("|");
