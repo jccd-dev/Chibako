@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NoteLink } from "@/components/NoteLink";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import { cn } from "@/lib/utils";
 import { IconBot, IconFile, IconGear, IconGraph, IconHome, IconPlus } from "@/components/icons";
@@ -138,6 +139,64 @@ export function CommandPalette() {
     }
   }
 
+  function itemRow(item: (typeof flat)[number], i: number) {
+    const className = cn(
+      "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition",
+      i === idx && "bg-muted"
+    );
+    const body = (
+      <>
+        {item.kind === "note" ? (
+          <IconFile size={14} />
+        ) : item.kind === "create" ? (
+          <IconPlus size={14} />
+        ) : item.key === "graph" ? (
+          <IconGraph size={14} />
+        ) : item.key === "settings" ? (
+          <IconGear size={14} />
+        ) : item.key === "agent" ? (
+          <IconBot size={14} />
+        ) : item.key === "home" ? (
+          <IconHome size={14} />
+        ) : (
+          <IconPlus size={14} />
+        )}
+        <span className="flex-1 truncate font-medium">{item.label}</span>
+        {item.sub && <span className="text-xs text-muted-foreground">{item.sub}</span>}
+      </>
+    );
+    const shared = {
+      id: `command-${item.key}`,
+      tabIndex: -1,
+      role: "option" as const,
+      "aria-selected": i === idx,
+      className,
+      onMouseEnter: () => setIdx(i),
+    };
+    // Note rows are links so the arrow-key highlight can warm the note's route.
+    if (item.kind === "note") {
+      return (
+        <NoteLink
+          key={item.key}
+          {...shared}
+          noteId={item.key}
+          prefetch={i === idx}
+          onClick={(event) => {
+            event.preventDefault();
+            item.run();
+          }}
+        >
+          {body}
+        </NoteLink>
+      );
+    }
+    return (
+      <button key={item.key} {...shared} onClick={() => item.run()}>
+        {body}
+      </button>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={value => value ? setOpen(true) : close()}>
       <DialogContent showCloseButton={false} className="sm:max-w-lg">
@@ -159,39 +218,7 @@ export function CommandPalette() {
           {flat.length === 0 && (
             <p className="px-3 py-4 text-sm text-muted-foreground">No matches. Press ↵ to create “{q}”.</p>
           )}
-          {flat.map((item, i) => (
-            <button
-              key={item.key}
-              id={`command-${item.key}`}
-              tabIndex={-1}
-              role="option"
-              aria-selected={i === idx}
-              className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition",
-                i === idx && "bg-muted"
-              )}
-              onMouseEnter={() => setIdx(i)}
-              onClick={() => item.run()}
-            >
-              {item.kind === "note" ? (
-                <IconFile size={14} />
-              ) : item.kind === "create" ? (
-                <IconPlus size={14} />
-              ) : item.key === "graph" ? (
-                <IconGraph size={14} />
-              ) : item.key === "settings" ? (
-                <IconGear size={14} />
-              ) : item.key === "agent" ? (
-                <IconBot size={14} />
-              ) : item.key === "home" ? (
-                <IconHome size={14} />
-              ) : (
-                <IconPlus size={14} />
-              )}
-              <span className="flex-1 truncate font-medium">{item.label}</span>
-              {item.sub && <span className="text-xs text-muted-foreground">{item.sub}</span>}
-            </button>
-          ))}
+          {flat.map((item, i) => itemRow(item, i))}
         </div>
         <p className="border-t border-border px-4 py-1.5 text-[11px] text-muted-foreground">
           ↑↓ navigate · ↵ run · esc close

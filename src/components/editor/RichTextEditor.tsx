@@ -10,6 +10,7 @@ import Image from "@tiptap/extension-image";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { WikiLink } from "./WikiLinkExtension";
 import type { NoteSummary } from "@/lib/notes";
+import { findUnsupportedHtml } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 
 interface RichTextEditorProps {
@@ -23,13 +24,6 @@ interface RichTextEditorProps {
   onNavigate: (target: string) => void;
   /** ⌘1..⌘4 mode switching while the rich editor is focused. */
   onViewShortcut?: (mode: "write" | "edit" | "split" | "preview") => void;
-}
-
-/** Constructs a WYSIWYG round-trip would drop or mangle. */
-function hasUnsupportedMarkdown(md: string): boolean {
-  const fences = md.replace(/```[\s\S]*?```/g, "");
-  const plain = fences.replace(/`[^`\n]*`/g, "");
-  return /<!--[\s\S]*?-->/.test(md) || /<(?:\/?[a-zA-Z][\w:-]*|\?|!)[^>]*>/.test(plain);
 }
 
 interface MenuState {
@@ -49,7 +43,11 @@ export function RichTextEditor({
   onNavigate,
   onViewShortcut,
 }: RichTextEditorProps) {
-  const [editable] = useState(() => !hasUnsupportedMarkdown(initialMarkdown));
+  // Frozen at mount: the note's own edits flow back in through initialMarkdown,
+  // and swapping the editor for a warning mid-keystroke would be worse than
+  // waiting for the next open.
+  const [unsupportedHtml] = useState(() => findUnsupportedHtml(initialMarkdown));
+  const editable = unsupportedHtml.length === 0;
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuIdx, setMenuIdx] = useState(0);
 
@@ -261,8 +259,16 @@ export function RichTextEditor({
   return (
     <div className="md wt-editor relative" onKeyDown={handleRootKeyDown}>
       {!editable && (
-        <div className="mb-2 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          This note has inline HTML or comments that can&apos;t be edited here. Switch to the Edit (source) view for this note.
+        <div className="mb-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          <p>Rich editing is off: this note has HTML that saving would drop.</p>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {unsupportedHtml.map((snippet) => (
+              <li key={snippet} className="truncate font-mono">
+                {snippet.length > 80 ? `${snippet.slice(0, 80)}…` : snippet}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">Remove or rewrite it in the Edit (source) view to turn rich editing back on.</p>
         </div>
       )}
       <div className="relative px-0.5 pt-1 pb-10" onClick={handleClick}>

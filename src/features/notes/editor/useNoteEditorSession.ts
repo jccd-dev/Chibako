@@ -7,6 +7,7 @@ import {
   type EditorSessionEffects,
 } from "./editor-session-controller";
 import type { Note } from "../../../lib/notes";
+import type { EditorDocument } from "./editor-session-controller";
 
 export interface NoteEditorSessionEffects extends EditorSessionEffects {
   onOrganized?(): void;
@@ -16,6 +17,7 @@ export interface NoteEditorSessionEffects extends EditorSessionEffects {
 export function useNoteEditorSession(
   initial: Note | null,
   effects: NoteEditorSessionEffects,
+  initialDraft?: Partial<Omit<EditorDocument, "note">>,
 ): ReturnType<EditorSessionController["getSnapshot"]> & Pick<EditorSessionController, "patch" | "persist" | "refreshFromServer" | "shouldBlockUnload"> {
   const effectsRef = useRef(effects);
   effectsRef.current = effects;
@@ -25,7 +27,7 @@ export function useNoteEditorSession(
       save: (...args) => effectsRef.current.save(...args),
       onSaved: (...args) => effectsRef.current.onSaved(...args),
       onError: (error) => effectsRef.current.onError(error),
-    });
+    }, initialDraft);
   }
   const controller = controllerRef.current;
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);

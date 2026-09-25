@@ -2,7 +2,13 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
-export const DATA_DIR = process.env.CHIBAKO_DATA_DIR ?? process.env.DATA_DIR ?? path.join(process.cwd(), "data");
+/**
+ * Vault directory. Resolved on first use rather than at import so tests can
+ * point CHIBAKO_DATA_DIR at a temporary vault after the module is loaded.
+ */
+export function dataDir(): string {
+  return process.env.CHIBAKO_DATA_DIR ?? process.env.DATA_DIR ?? path.join(process.cwd(), "data");
+}
 
 let _db: Database.Database | null = null;
 
@@ -114,8 +120,9 @@ const MIGRATIONS: string[] = [
 
 export function getDb(): Database.Database {
   if (_db) return _db;
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const db = new Database(path.join(DATA_DIR, "brain.db"));
+  const dir = dataDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new Database(path.join(dir, "brain.db"));
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");

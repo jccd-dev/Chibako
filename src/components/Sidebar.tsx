@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { IconDotsVertical, IconFolderPlus } from "@tabler/icons-react";
+import { IconCalendarMonth, IconDotsVertical, IconFolderPlus } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { cn } from "@/lib/utils";
 import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { NoteLink } from "@/components/NoteLink";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +40,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const [bmNewGroup, setBmNewGroup] = useState("");
   const [dragBookmarkId, setDragBookmarkId] = useState<string | null>(null);
   const [dropBookmarkId, setDropBookmarkId] = useState<string | null>(null);
-  const [closed, setClosed] = useState(new Set<string>());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [fileView, setFileView] = useState<"files" | "trash">("files");
 
   // Search state
   const [searchMode, setSearchMode] = useState(false);
@@ -74,6 +76,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     } catch { toast.error("Could not load notes. Try again."); }
   }, []);
 
+  // Refresh on focus or an explicit write. Navigation never changes the note
+  // tree, so refetching notes/trash/bookmarks on every switch is pure traffic.
   useEffect(() => {
     void load();
     const refresh = () => { void load(); };
@@ -83,7 +87,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       window.removeEventListener("focus", refresh);
       window.removeEventListener("chibako:notes-changed", refresh);
     };
-  }, [load, pathname]);
+  }, [load]);
 
   useEffect(() => { onMobileOpenChange(false); }, [pathname, onMobileOpenChange]);
 
@@ -193,7 +197,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     if (item.parent === destination) return;
     if (item.type === "folder") await request("/api/folders", "PATCH", { from: item.id, to: join(destination, item.name) });
     else await request(`/api/notes/${item.id}`, "PATCH", { folder: destination });
-    setClosed(prev => new Set([...prev].filter(path => path !== destination)));
+    setExpanded(prev => new Set(prev).add(destination));
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -224,15 +228,18 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   function dropProps(path: string) {
     return {
       onDragOver(e: DragEvent) {
-        if (!validDrop(path)) return;
-        e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; setDropTarget(path);
+        if (!dragging) return;
+        e.stopPropagation();
+        if (!validDrop(path)) { setDropTarget(null); return; }
+        e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(path);
       },
       onDragLeave(e: DragEvent) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
       },
       async onDrop(e: DragEvent) {
+        if (!dragging) return;
         e.preventDefault(); e.stopPropagation(); setDropTarget(null);
-        if (!validDrop(path) || !dragging) return;
+        if (!validDrop(path)) return;
         setBusy(true);
         try { await move(dragging, path); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not move item."); }
         finally { setBusy(false); setDragging(null); }
@@ -355,9 +362,9 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     return <div key={b.id} className={cn("flex items-center rounded-md", dropBookmarkId === b.id && "bg-accent ring-1 ring-primary")} {...bookmarkDragProps(b)} {...bookmarkDropProps(b)}>
       <ContextMenu>
         <ContextMenuTrigger className="flex min-w-0 flex-1">
-          <Link href={`/app/note/${b.note_id}`} title={title} className="tree-item min-w-0 flex-1" draggable={false}>
+          <NoteLink noteId={b.note_id} title={title} className="tree-item min-w-0 flex-1" draggable={false}>
             <IconBookmark size={14} /><span className="truncate">{label}</span>
-          </Link>
+          </NoteLink>
         </ContextMenuTrigger>
         <ContextMenuContent><ContextMenuGroup>
           <ContextMenuItem onClick={() => openBookmarkDialog(b.note_id)}>Edit bookmark</ContextMenuItem>
@@ -371,32 +378,37 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     return <div key={note.id} className="group/sidebar-row flex items-center" {...dragProps(item)}>
       <ContextMenu>
         <ContextMenuTrigger className="flex min-w-0 flex-1">
-          <Link href={`/app/note/${note.id}`} aria-current={pathname === `/app/note/${note.id}` ? "page" : undefined}
+          <NoteLink noteId={note.id} aria-current={pathname === `/app/note/${note.id}` ? "page" : undefined}
             title={note.title} className={cn("tree-item min-w-0 flex-1", pathname === `/app/note/${note.id}` && "active")} draggable={false}>
-            <IconFile size={14} /><span className="truncate">{note.title}</span>
-          </Link>
+            <IconFile size={14} className="shrink-0" /><span className="truncate">{note.title}</span>
+          </NoteLink>
         </ContextMenuTrigger>
         <ContextMenuContent>{actions(item)}</ContextMenuContent>
       </ContextMenu>{menu(item)}
     </div>;
   }
+  const hasItems = (path: string) =>
+    folders.some(folder => folder === path || folder.startsWith(`${path}/`)) ||
+    notes.some(note => note.folder === path || note.folder.startsWith(`${path}/`));
   function folderRow(path: string): React.ReactNode {
     const item: Item = { type: "folder", id: path, name: nameOf(path), parent: parentOf(path) };
-    const open = !closed.has(path);
+    const open = expanded.has(path);
     return <div key={path}>
       <div className={cn("group/sidebar-row flex items-center rounded-md", dropTarget === path && "bg-accent ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
         <ContextMenu>
           <ContextMenuTrigger className="flex min-w-0 flex-1">
-            <button className="tree-item min-w-0 flex-1" aria-expanded={open} onClick={() => setClosed(prev => {
+            <button className="tree-item min-w-0 flex-1" aria-expanded={open} onClick={() => setExpanded(prev => {
               const next = new Set(prev); if (next.has(path)) next.delete(path); else next.add(path); return next;
             })}>
-              <IconChevron size={12} className={cn(open && "rotate-90")} /><IconFolder size={14} /><span className="truncate">{item.name}</span>
+              <IconChevron size={12} className={cn(open && "rotate-90")} />
+              <IconFolder size={14} filled={hasItems(path)} className={cn(hasItems(path) && "text-primary")} />
+              <span className="truncate">{item.name}</span>
             </button>
           </ContextMenuTrigger>
           <ContextMenuContent>{actions(item)}</ContextMenuContent>
         </ContextMenu>{menu(item)}
       </div>
-      {open && <div className="ml-3 border-l border-border pl-1">{folders.filter(f => parentOf(f) === path).map(folderRow)}{notes.filter(n => n.folder === path).map(noteRow)}</div>}
+      {open && <div {...dropProps(path)} className="ml-3 min-h-8 border-l border-border pl-1">{folders.filter(f => parentOf(f) === path).map(folderRow)}{notes.filter(n => n.folder === path).map(noteRow)}</div>}
     </div>;
   }
 
@@ -441,8 +453,10 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           </div>
         ) : (
           searchResults.map((r, i) => (
-            <button
+            <NoteLink
               key={r.id}
+              noteId={r.id}
+              prefetch={i === searchActive}
               id={`search-result-${i}`}
               role="option"
               tabIndex={-1}
@@ -452,7 +466,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
                 i === searchActive && "bg-accent ring-1 ring-primary/40"
               )}
               onMouseEnter={() => setSearchActive(i)}
-              onClick={() => {
+              onClick={(event) => {
+                event.preventDefault();
                 router.push(`/app/note/${r.id}`);
                 if (mobile) onMobileOpenChange(false);
               }}
@@ -477,7 +492,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
                   )}
                 </div>
               )}
-            </button>
+            </NoteLink>
           ))
         )}
       </div>
@@ -491,7 +506,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
 
   const fileTree = (
     <>
-      <nav aria-label="Files and folders" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      <nav aria-label="Files and folders" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
         {bookmarks.length > 0 && (
           <details open className="mb-1">
             <summary className="tree-item"><IconBookmark size={14} />Bookmarks</summary>
@@ -506,20 +521,27 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
         {notes.some(n => n.is_pinned) && <details><summary className="tree-item">Pinned</summary>{notes.filter(n => n.is_pinned).map(noteRow)}</details>}
         <details><summary className="tree-item">Recent</summary>{[...notes].sort((a,b) => b.updated_at - a.updated_at).slice(0,5).map(noteRow)}</details>
-        <div {...dropProps("")} className={cn("tree-item my-1", dropTarget === "" && "bg-accent ring-1 ring-primary")}><IconFolder size={14} />Files</div>
-        {folders.filter(f => !parentOf(f)).map(folderRow)}
-        {notes.filter(n => !n.folder).map(noteRow)}
-        {trash.length > 0 && <details className="mt-3"><summary className="tree-item"><IconTrash size={14} />Trash ({trash.length})</summary>
-          {trash.map(n => <div key={n.id} className="flex items-center gap-1 px-2"><span className="min-w-0 flex-1 truncate text-xs">{n.title}</span>
-            <Button variant="ghost" size="sm" onClick={async () => {
-              try { await request(`/api/notes/${n.id}/restore`, "POST"); router.push(`/app/note/${n.id}`); }
-              catch { toast.error("Could not restore file."); }
-            }}>Restore</Button><Button variant="ghost" size="icon-sm" aria-label={`Delete ${n.title} forever`} onClick={() => setPurgeTarget(n)}><IconTrash /></Button>
-          </div>)}
-        </details>}
+        <div {...dropProps("")} className="min-h-16 flex-1">
+          <div className={cn("tree-item my-1", dropTarget === "" && "bg-accent ring-1 ring-primary")}><IconFolder size={14} />Files</div>
+          {folders.filter(f => !parentOf(f)).map(folderRow)}
+          {notes.filter(n => !n.folder).map(noteRow)}
+        </div>
       </nav>
       <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{notes.length} files</div>
     </>
+  );
+
+  const trashView = (
+    <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      {trash.length === 0 ? (
+        <div className="px-3 py-6 text-center text-xs text-muted-foreground">Trash is empty.</div>
+      ) : trash.map(n => <div key={n.id} className="flex items-center gap-1 px-2"><span className="min-w-0 flex-1 truncate text-xs" title={n.title}>{n.title}</span>
+        <Button variant="ghost" size="sm" onClick={async () => {
+          try { await request(`/api/notes/${n.id}/restore`, "POST"); router.push(`/app/note/${n.id}`); }
+          catch { toast.error("Could not restore file."); }
+        }}>Restore</Button><Button variant="ghost" size="icon-sm" aria-label={`Delete ${n.title} forever`} onClick={() => setPurgeTarget(n)}><IconTrash /></Button>
+      </div>)}
+    </div>
   );
 
   const filePanel = (
@@ -532,7 +554,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note")}><IconPlus /></Button>
         <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder")}><IconFolderPlus /></Button>
       </div>
-      {searchMode ? searchView : fileTree}
+      {searchMode ? searchView : fileView === "trash" ? trashView : fileTree}
     </div>
   );
 
@@ -556,10 +578,11 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Files"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          !searchMode && !collapsed && "bg-accent text-foreground"
+          !searchMode && fileView === "files" && !collapsed && "bg-accent text-foreground"
         )}
         onClick={() => {
           if (searchMode) { setSearchMode(false); setSearchQuery(""); }
+          setFileView("files");
           if (collapsed) onExpand();
         }}
       >
@@ -577,6 +600,23 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       >
         <IconSearch size={16} />
       </button>
+      <button
+        type="button"
+        aria-label="Trash"
+        title="Trash"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          !searchMode && fileView === "trash" && !collapsed && "bg-accent text-foreground"
+        )}
+        onClick={() => {
+          setSearchMode(false);
+          if (searchQuery) setSearchQuery("");
+          setFileView("trash");
+          if (collapsed) onExpand();
+        }}
+      >
+        <IconTrash size={16} />
+      </button>
       <Link
         href="/app/graph"
         aria-label="Graph"
@@ -587,6 +627,17 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
       >
         <IconGraph size={16} />
+      </Link>
+      <Link
+        href="/app/calendar"
+        aria-label="Calendar"
+        title="Calendar"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/calendar" && "bg-accent text-foreground"
+        )}
+      >
+        <IconCalendarMonth size={16} />
       </Link>
       <Link
         href="/app/agent"
