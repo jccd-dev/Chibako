@@ -253,12 +253,12 @@ textarea.font-mono { font-family: var(--font-mono); }
   color: var(--muted-foreground);
 }
 .wt-editor ul[data-type="taskList"] { list-style: none; padding-left: 0.25em; }
-.wt-editor ul[data-type="taskList"] li[data-type="taskItem"] { display: flex; align-items: flex-start; gap: 0.5em; }
-.wt-editor li[data-type="taskItem"] > label { flex: none; margin-top: 0.35em; cursor: pointer; }
-.wt-editor li[data-type="taskItem"] input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--primary); }
-.wt-editor li[data-type="taskItem"] > div { flex: 1 1 auto; min-width: 0; }
-.wt-editor li[data-type="taskItem"] > div p { margin: 0.15em 0; }
-.wt-editor li[data-type="taskItem"][data-checked="true"] > div { text-decoration: line-through; opacity: 0.65; }
+.wt-editor ul[data-type="taskList"] li[data-checked] { display: flex; align-items: flex-start; gap: 0.5em; }
+.wt-editor li[data-checked] > label { flex: none; cursor: pointer; }
+.wt-editor li[data-checked] input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--primary); }
+.wt-editor li[data-checked] > div { flex: 1 1 auto; min-width: 0; }
+.wt-editor li[data-checked] > div p { margin: 0; }
+.wt-editor li[data-checked="true"] > div { text-decoration: line-through; opacity: 0.65; }
 .wt-editor .wiki-link { cursor: pointer; user-select: none; }
 
 /* ---- graph view ---- */
