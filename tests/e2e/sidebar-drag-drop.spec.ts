@@ -31,7 +31,7 @@ test("sidebar drops files into root space and open folder contents", async ({ pa
   await folderButton.click();
   await expect(folderButton).toHaveAttribute("aria-expanded", "true");
 
-  const rootScope = sidebar.locator("nav > div").last();
+  const rootScope = sidebar.locator("xpath=./div").last();
   const sourceRow = sidebar.getByRole("link", { name: "Drag source", exact: true })
     .locator("xpath=ancestor::div[@draggable='true'][1]");
   const rootBox = await rootScope.boundingBox();

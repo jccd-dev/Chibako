@@ -45,3 +45,26 @@ test("a new tab is saved before switching notes", async ({ page }) => {
   await expect(page).toHaveURL(`/app/note/${sourceNote.id}`);
   await expect(page.getByRole("tab", { name: createdNote.title })).toBeVisible();
 });
+
+test("deleting an open note from the file manager removes its tab", async ({ page }) => {
+  await authenticate(page);
+  const response = await page.request.post("/api/notes", {
+    data: { title: `Doomed tab ${Date.now()}`, content: "body", kind: "note" },
+  });
+  expect(response.ok()).toBeTruthy();
+  const note = (await response.json()).note as { id: string; title: string };
+
+  await page.evaluate(() => localStorage.removeItem("chibako_note_tabs"));
+  await page.goto(`/app/note/${note.id}`);
+  const tab = page.getByRole("tab", { name: note.title });
+  await expect(tab).toBeVisible();
+
+  const sidebar = page.getByRole("navigation", { name: "Files and folders" });
+  const rootScope = sidebar.locator("xpath=./div").last();
+  await expect(rootScope.getByRole("link", { name: note.title, exact: true })).toBeVisible();
+  await rootScope.getByRole("button", { name: `Actions for ${note.title}` }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await page.locator('[role="alertdialog"]').getByRole("button", { name: "Delete", exact: true }).click();
+
+  await expect(tab).toBeHidden();
+});

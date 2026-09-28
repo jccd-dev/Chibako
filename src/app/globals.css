@@ -289,6 +289,8 @@ textarea.font-mono { font-family: var(--font-mono); }
 }
 .tree-item:hover { background: var(--muted); color: var(--foreground); }
 .tree-item.active { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 550; }
+.group\/sidebar-row[data-accented] .tree-item:hover,
+.group\/sidebar-row[data-accented] .tree-item.active { background: transparent; }
 
 mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
 

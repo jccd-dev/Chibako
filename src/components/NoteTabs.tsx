@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { IconPlus, IconX } from "@/components/icons";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "chibako_note_tabs";
@@ -56,6 +57,26 @@ export function NoteTabs() {
     setTabs(readTabs());
     setLoaded(true);
 
+    // Prune tabs for notes that no longer exist (deleted to trash or purged).
+    const onNotesChanged = () => {
+      void fetch("/api/notes")
+        .then((response) => response.json() as Promise<unknown>)
+        .then((data) => {
+          const notes = (data as { notes?: unknown }).notes;
+          if (!Array.isArray(notes)) return;
+          const ids = new Set(
+            notes
+              .map((note) => (note as { id?: unknown }).id)
+              .filter((id): id is string => typeof id === "string"),
+          );
+          setTabs((current) => {
+            const next = current.filter((tab) => tab.id === "new" || ids.has(tab.id));
+            return next.length === current.length ? current : next;
+          });
+        })
+        .catch(() => { /* transient fetch failure — keep current tabs */ });
+    };
+
     const onTab = (event: Event) => {
       const detail = (event as CustomEvent<NoteTabEvent>).detail;
       if (!detail?.id || typeof detail.title !== "string") return;
@@ -70,7 +91,11 @@ export function NoteTabs() {
       });
     };
     window.addEventListener("chibako:note-tab", onTab);
-    return () => window.removeEventListener("chibako:note-tab", onTab);
+    window.addEventListener("chibako:notes-changed", onNotesChanged);
+    return () => {
+      window.removeEventListener("chibako:note-tab", onTab);
+      window.removeEventListener("chibako:notes-changed", onNotesChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -164,7 +189,7 @@ export function NoteTabs() {
             <div
               key={tab.id}
               className={cn(
-                "group flex h-8 max-w-56 min-w-0 shrink-0 items-center rounded-md",
+                "group flex h-8 min-w-0 max-w-48 flex-1 items-center rounded-md",
                 active
                   ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:bg-muted/60",
@@ -193,16 +218,17 @@ export function NoteTabs() {
             </div>
           );
         })}
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="New note tab"
           aria-busy={creating}
           disabled={creating}
-          className="grid size-8 shrink-0 place-items-center rounded-md bg-muted/60 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+          className="mr-2 rounded-md bg-muted/60 hover:bg-muted"
           onClick={() => void createNoteTab()}
         >
-          <IconPlus size={16} />
-        </button>
+          <IconPlus />
+        </Button>
       </div>
     </div>
   );
