@@ -2,7 +2,12 @@
 
 import { Button } from "@/components/ui/button";
 import type { ReactNode } from "react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 /** Icon-only button with a themed tooltip (replaces bare `title` attrs). */
 export function IconTip({
@@ -12,6 +17,7 @@ export function IconTip({
   className,
   children,
   active,
+  expanded,
   destructive,
 }: {
   label: string;
@@ -20,13 +26,23 @@ export function IconTip({
   className?: string;
   children: ReactNode;
   active?: boolean;
+  expanded?: boolean;
   destructive?: boolean;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button variant={destructive ? "destructive" : "ghost"} size="icon" type="button" onClick={onClick} aria-label={label} aria-pressed={active}>
+          <Button
+            variant={destructive ? "destructive" : "ghost"}
+            size="icon"
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            aria-pressed={active}
+            aria-expanded={expanded}
+            className={cn("rounded-md bg-muted/60 hover:bg-muted", className)}
+          >
             {children}
           </Button>
         }

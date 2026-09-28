@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { IconCalendarMonth, IconDotsVertical, IconFolderPlus } from "@tabler/icons-react";
+import { IconCalendarMonth, IconDotsVertical, IconFolderPlus, IconUpload } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { cn } from "@/lib/utils";
@@ -63,6 +63,13 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const [purgeTarget, setPurgeTarget] = useState<NoteSummary | null>(null);
   const [deleteFolderTarget, setDeleteFolderTarget] = useState<Item | null>(null);
   const [deleteNoteTarget, setDeleteNoteTarget] = useState<Item | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkMoveParent, setBulkMoveParent] = useState("");
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkPurgeOpen, setBulkPurgeOpen] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -90,6 +97,17 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   }, [load]);
 
   useEffect(() => { onMobileOpenChange(false); }, [pathname, onMobileOpenChange]);
+
+  // Drop ids that no longer exist (deleted or purged elsewhere) so bulk actions
+  // never fire at rows that are gone.
+  useEffect(() => {
+    setSelected(prev => {
+      if (!prev.size) return prev;
+      const live = new Set([...notes.map(n => n.id), ...trash.map(n => n.id)]);
+      const next = new Set([...prev].filter(id => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [notes, trash]);
 
   // Live search effect
   useEffect(() => {
@@ -182,16 +200,63 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     setParent(item.parent); setError("");
   }
   function create(type: Item["type"], parent = "") { start("create", { type, parent, id: "", name: "" }); }
-  async function request(url: string, method: string, body?: object) {
+  const multiSelect = (e: React.MouseEvent) => e.metaKey || e.ctrlKey || e.altKey;
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() { setSelected(prev => (prev.size ? new Set() : prev)); }
+  function notifyChanged() {
+    window.dispatchEvent(new Event("chibako:notes-changed"));
+    window.dispatchEvent(new Event("chibako:organized"));
+  }
+  async function request(url: string, method: string, body?: object, quiet = false) {
     const saves: Promise<void>[] = [];
     window.dispatchEvent(new CustomEvent("chibako:before-organize", { detail: saves }));
     await Promise.all(saves);
     const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not save changes.");
-    window.dispatchEvent(new Event("chibako:notes-changed"));
-    window.dispatchEvent(new Event("chibako:organized"));
+    if (!quiet) notifyChanged();
     return data;
+  }
+  /** Runs one request per selected note, then refreshes listeners once. */
+  async function bulk(ids: string[], url: (id: string) => string, method: string, body?: object, failure = "Could not complete the action.", navigateAway = true) {
+    if (!ids.length || busy) return false;
+    setBusy(true);
+    try {
+      await Promise.all(ids.map(id => request(url(id), method, body, true)));
+      notifyChanged();
+      setSelected(new Set());
+      if (navigateAway && ids.some(id => pathname === `/app/note/${id}`)) router.push("/app");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : failure);
+      return false;
+    } finally { setBusy(false); }
+  }
+  async function upload(files: FileList | null) {
+    const picked = [...(files ?? [])];
+    const markdown = picked.filter(f => /\.(md|markdown)$/i.test(f.name));
+    if (!markdown.length) { toast.error(picked.length ? "Only Markdown (.md) files can be imported." : "Pick a Markdown file to import."); return; }
+    setBusy(true);
+    const created: string[] = [];
+    const failed: string[] = [];
+    try {
+      for (const file of markdown) {
+        try {
+          const data = await request("/api/notes", "POST", { title: file.name.replace(/\.(md|markdown)$/i, ""), content: await file.text(), folder: selectedFolder ?? "" }, true);
+          created.push(data.note.id);
+        } catch { failed.push(file.name); }
+      }
+      if (created.length) notifyChanged();
+      if (failed.length) toast.error(`Could not import: ${failed.join(", ")}`);
+      if (created.length === 1) router.push(`/app/note/${created[0]}`);
+      else if (created.length) toast.success(`Imported ${created.length} files.`);
+    } finally { setBusy(false); }
   }
   async function move(item: Item, destination: string) {
     if (item.parent === destination) return;
@@ -241,7 +306,13 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         e.preventDefault(); e.stopPropagation(); setDropTarget(null);
         if (!validDrop(path)) return;
         setBusy(true);
-        try { await move(dragging, path); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not move item."); }
+        try {
+          const group = dragging.type === "note" && selected.has(dragging.id)
+            ? notes.filter(n => selected.has(n.id)).map(n => ({ type: "note" as const, id: n.id, name: n.title, parent: n.folder }))
+            : [dragging];
+          for (const item of group) await move(item, path);
+          if (group.length > 1) setSelected(new Set());
+        } catch (e) { toast.error(e instanceof Error ? e.message : "Could not move item."); }
         finally { setBusy(false); setDragging(null); }
       },
     };
@@ -262,7 +333,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       <ContextMenuItem disabled={busy} onClick={() => start("move", item)}>Move to…</ContextMenuItem>
       {item.type === "folder"
         ? <ContextMenuItem disabled={busy} variant="destructive" onClick={() => setDeleteFolderTarget(item)}>Delete folder</ContextMenuItem>
-        : <ContextMenuItem disabled={busy} variant="destructive" onClick={() => setDeleteNoteTarget(item)}>Delete</ContextMenuItem>}
+        : <ContextMenuItem disabled={busy} variant="destructive" onClick={() => { if (selected.size > 1 && selected.has(item.id)) setBulkDeleteOpen(true); else setDeleteNoteTarget(item); }}>Delete</ContextMenuItem>}
     </ContextMenuGroup>;
   }
   function menu(item: Item) {
@@ -375,11 +446,13 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   }
   function noteRow(note: NoteSummary) {
     const item: Item = { type: "note", id: note.id, name: note.title, parent: note.folder };
-    return <div key={note.id} className="group/sidebar-row flex items-center" {...dragProps(item)}>
+    const picked = selected.has(note.id);
+    return <div key={note.id} data-accented={picked || undefined} className={cn("group/sidebar-row flex items-center rounded-md", picked && "bg-accent ring-1 ring-primary/40")} {...dragProps(item)}>
       <ContextMenu>
         <ContextMenuTrigger className="flex min-w-0 flex-1">
           <NoteLink noteId={note.id} aria-current={pathname === `/app/note/${note.id}` ? "page" : undefined}
-            title={note.title} className={cn("tree-item min-w-0 flex-1", pathname === `/app/note/${note.id}` && "active")} draggable={false}>
+            title={note.title} className={cn("tree-item min-w-0 flex-1", pathname === `/app/note/${note.id}` && "active")} draggable={false}
+            onClick={e => { setSelectedFolder(null); if (multiSelect(e)) { e.preventDefault(); toggleSelected(note.id); } else clearSelection(); }}>
             <IconFile size={14} className="shrink-0" /><span className="truncate">{note.title}</span>
           </NoteLink>
         </ContextMenuTrigger>
@@ -390,16 +463,31 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const hasItems = (path: string) =>
     folders.some(folder => folder === path || folder.startsWith(`${path}/`)) ||
     notes.some(note => note.folder === path || note.folder.startsWith(`${path}/`));
+  /** Folder destination picker, shared by create/rename/move and bulk move. */
+  function folderPicker(value: string, onChange: (value: string) => void, exclude?: Item, id?: string) {
+    const options = folders.filter(f => !exclude || exclude.type !== "folder" || (f !== exclude.id && !f.startsWith(`${exclude.id}/`)));
+    return <Select items={{ "": "Files (root)", ...Object.fromEntries(options.map(f => [f, f])) }} value={value} onValueChange={v => { if (v !== null) onChange(v); }}>
+      <SelectTrigger id={id} size="sm" className="w-full"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="">Files (root)</SelectItem>
+        {options.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+      </SelectContent>
+    </Select>;
+  }
   function folderRow(path: string): React.ReactNode {
     const item: Item = { type: "folder", id: path, name: nameOf(path), parent: parentOf(path) };
     const open = expanded.has(path);
     return <div key={path}>
-      <div className={cn("group/sidebar-row flex items-center rounded-md", dropTarget === path && "bg-accent ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
+      <div data-accented={(dropTarget === path || selectedFolder === path) || undefined} className={cn("group/sidebar-row flex items-center rounded-md", (dropTarget === path || selectedFolder === path) && "bg-accent", dropTarget === path && "ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
         <ContextMenu>
           <ContextMenuTrigger className="flex min-w-0 flex-1">
-            <button className="tree-item min-w-0 flex-1" aria-expanded={open} onClick={() => setExpanded(prev => {
-              const next = new Set(prev); if (next.has(path)) next.delete(path); else next.add(path); return next;
-            })}>
+            <button className="tree-item min-w-0 flex-1" aria-expanded={open} aria-pressed={selectedFolder === path} onClick={() => {
+              setSelectedFolder(path);
+              clearSelection();
+              setExpanded(prev => {
+                const next = new Set(prev); if (next.has(path)) next.delete(path); else next.add(path); return next;
+              });
+            }}>
               <IconChevron size={12} className={cn(open && "rotate-90")} />
               <IconFolder size={14} filled={hasItems(path)} className={cn(hasItems(path) && "text-primary")} />
               <span className="truncate">{item.name}</span>
@@ -521,26 +609,53 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
         {notes.some(n => n.is_pinned) && <details><summary className="tree-item">Pinned</summary>{notes.filter(n => n.is_pinned).map(noteRow)}</details>}
         <details><summary className="tree-item">Recent</summary>{[...notes].sort((a,b) => b.updated_at - a.updated_at).slice(0,5).map(noteRow)}</details>
-        <div {...dropProps("")} className="min-h-16 flex-1">
-          <div className={cn("tree-item my-1", dropTarget === "" && "bg-accent ring-1 ring-primary")}><IconFolder size={14} />Files</div>
+        <div {...dropProps("")} className="min-h-16 flex-1" onClick={e => { if (e.target === e.currentTarget) { clearSelection(); setSelectedFolder(null); } }}>
+          <button type="button" aria-pressed={selectedFolder === ""} onClick={() => { setSelectedFolder(""); clearSelection(); }}
+            className={cn("tree-item my-1", (dropTarget === "" || selectedFolder === "") && "bg-accent", dropTarget === "" && "ring-1 ring-primary")}>
+            <IconFolder size={14} />Files
+          </button>
           {folders.filter(f => !parentOf(f)).map(folderRow)}
           {notes.filter(n => !n.folder).map(noteRow)}
         </div>
       </nav>
+      {selected.size > 0 && (
+        <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{selected.size} selected</span>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setBulkMoveParent(selectedFolder ?? ""); setBulkMoveOpen(true); }}>Move</Button>
+          <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => setBulkDeleteOpen(true)}>Delete</Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={clearSelection}><IconX /></Button>
+        </div>
+      )}
       <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{notes.length} files</div>
     </>
   );
 
   const trashView = (
-    <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-      {trash.length === 0 ? (
-        <div className="px-3 py-6 text-center text-xs text-muted-foreground">Trash is empty.</div>
-      ) : trash.map(n => <div key={n.id} className="flex items-center gap-1 px-2"><span className="min-w-0 flex-1 truncate text-xs" title={n.title}>{n.title}</span>
-        <Button variant="ghost" size="sm" onClick={async () => {
-          try { await request(`/api/notes/${n.id}/restore`, "POST"); router.push(`/app/note/${n.id}`); }
-          catch { toast.error("Could not restore file."); }
-        }}>Restore</Button><Button variant="ghost" size="icon-sm" aria-label={`Delete ${n.title} forever`} onClick={() => setPurgeTarget(n)}><IconTrash /></Button>
-      </div>)}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {selected.size > 0 && (
+        <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{selected.size}</span>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void bulk([...selected], id => `/api/notes/${id}/restore`, "POST", undefined, "Could not restore files.", false)}>Restore</Button>
+          <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => setBulkPurgeOpen(true)}>Delete forever</Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={clearSelection}><IconX /></Button>
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {trash.length === 0 ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">Trash is empty.</div>
+        ) : trash.map(n => (
+          <div key={n.id} onClick={e => { if (multiSelect(e)) toggleSelected(n.id); else setSelected(new Set([n.id])); }}
+            className={cn("flex items-center gap-1 rounded-md px-2 ", selected.has(n.id) && "bg-accent ring-1 ring-primary/40")}>
+            <span className="min-w-0 flex-1 truncate text-xs" title={n.title}>{n.title}</span>
+            <Button variant="ghost" size="sm" onClick={async e => {
+              e.stopPropagation(); clearSelection();
+              try { await request(`/api/notes/${n.id}/restore`, "POST"); router.push(`/app/note/${n.id}`); }
+              catch { toast.error("Could not restore file."); }
+            }}>Restore</Button>
+            <Button variant="ghost" size="icon-sm" aria-label={`Delete ${n.title} forever`} onClick={e => { e.stopPropagation(); if (selected.size > 1 && selected.has(n.id)) setBulkPurgeOpen(true); else setPurgeTarget(n); }}><IconTrash /></Button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 
@@ -551,8 +666,11 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           <img src="/logo_main.png" alt="" className="h-5 w-5 shrink-0" />
           <span className="truncate">Chibako</span>
         </Link>
-        <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note")}><IconPlus /></Button>
-        <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder")}><IconFolderPlus /></Button>
+        <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note", selectedFolder ?? "")}><IconPlus /></Button>
+        <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder", selectedFolder ?? "")}><IconFolderPlus /></Button>
+        <Button variant="ghost" size="icon" aria-label="Import Markdown files" disabled={busy} onClick={() => uploadRef.current?.click()}><IconUpload /></Button>
+        <input ref={uploadRef} type="file" accept=".md,.markdown,text/markdown" multiple className="hidden"
+          onChange={e => { void upload(e.target.files); e.target.value = ""; }} />
       </div>
       {searchMode ? searchView : fileView === "trash" ? trashView : fileTree}
     </div>
@@ -583,6 +701,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         onClick={() => {
           if (searchMode) { setSearchMode(false); setSearchQuery(""); }
           setFileView("files");
+          clearSelection();
           if (collapsed) onExpand();
         }}
       >
@@ -612,6 +731,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           setSearchMode(false);
           if (searchQuery) setSearchQuery("");
           setFileView("trash");
+          clearSelection();
           if (collapsed) onExpand();
         }}
       >
@@ -693,16 +813,21 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         <DialogHeader><DialogTitle>{action?.mode === "create" ? "New" : action?.mode === "rename" ? "Rename" : "Move"} {action?.item.type === "folder" ? "folder" : "file"}</DialogTitle></DialogHeader>
         <FieldGroup>
           {action?.mode !== "move" && <Field data-invalid={!!error}><FieldLabel htmlFor="item-name">Name</FieldLabel><Input id="item-name" autoFocus value={name} onChange={e => setName(e.target.value)} aria-invalid={!!error} maxLength={120} /></Field>}
-          {action?.mode !== "rename" && <Field><FieldLabel htmlFor="item-parent">Folder</FieldLabel><Select items={{ "": "Files (root)", ...Object.fromEntries(folders.filter(f => action?.mode !== "move" || action.item.type !== "folder" || (f !== action.item.id && !f.startsWith(`${action.item.id}/`))).map(f => [f, f])) }} value={parent} onValueChange={value => { if (value !== null) setParent(value); }}>
-            <SelectTrigger id="item-parent" size="sm" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Files (root)</SelectItem>
-              {folders.filter(f => action?.mode !== "move" || action.item.type !== "folder" || (f !== action.item.id && !f.startsWith(`${action.item.id}/`))).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-            </SelectContent>
-          </Select></Field>}
+          {action?.mode !== "rename" && <Field><FieldLabel htmlFor="item-parent">Folder</FieldLabel>{folderPicker(parent, setParent, action?.mode === "move" ? action.item : undefined, "item-parent")}</Field>}
           {error && <FieldError>{error}</FieldError>}
         </FieldGroup>
         <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setAction(null)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Saving…" : action?.mode === "move" ? "Move" : action?.mode === "rename" ? "Rename" : "Create"}</Button></DialogFooter>
+      </form></DialogContent>
+    </Dialog>
+
+    <Dialog open={bulkMoveOpen} onOpenChange={open => { if (!open && !busy) setBulkMoveOpen(false); }}>
+      <DialogContent><form onSubmit={async e => {
+        e.preventDefault();
+        if (await bulk([...selected], id => `/api/notes/${id}`, "PATCH", { folder: bulkMoveParent }, "Could not move files.")) setBulkMoveOpen(false);
+      }} className="flex flex-col gap-4">
+        <DialogHeader><DialogTitle>Move {selected.size} files</DialogTitle></DialogHeader>
+        <FieldGroup><Field><FieldLabel htmlFor="bulk-parent">Folder</FieldLabel>{folderPicker(bulkMoveParent, setBulkMoveParent, undefined, "bulk-parent")}</Field></FieldGroup>
+        <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setBulkMoveOpen(false)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Moving…" : "Move"}</Button></DialogFooter>
       </form></DialogContent>
     </Dialog>
 
@@ -746,6 +871,12 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     <ConfirmDialog open={purgeTarget !== null} onOpenChange={open => !open && setPurgeTarget(null)} title={`Delete "${purgeTarget?.title}" forever?`} description="This cannot be undone." confirmLabel="Delete forever" destructive onConfirm={async () => {
       if (!purgeTarget) return;
       try { await request(`/api/trash/${purgeTarget.id}`, "DELETE"); setPurgeTarget(null); } catch { toast.error("Could not delete file."); }
+    }} />
+    <ConfirmDialog open={bulkDeleteOpen} onOpenChange={open => !open && setBulkDeleteOpen(false)} title={`Delete ${selected.size} files?`} description="The files move to Trash. You can restore them from there for 30 days." confirmLabel="Delete" destructive onConfirm={async () => {
+      if (await bulk([...selected], id => `/api/notes/${id}`, "DELETE", undefined, "Could not delete files.")) setBulkDeleteOpen(false);
+    }} />
+    <ConfirmDialog open={bulkPurgeOpen} onOpenChange={open => !open && setBulkPurgeOpen(false)} title={`Delete ${selected.size} files forever?`} description="This cannot be undone." confirmLabel="Delete forever" destructive onConfirm={async () => {
+      if (await bulk([...selected], id => `/api/trash/${id}`, "DELETE", undefined, "Could not delete files.")) setBulkPurgeOpen(false);
     }} />
     <ConfirmDialog open={deleteFolderTarget !== null} onOpenChange={open => !open && setDeleteFolderTarget(null)} title={`Delete folder "${deleteFolderTarget?.name}"?`} description={deleteFolderTarget ? `Files inside will move up to "${deleteFolderTarget.parent || "Files (root)"}" and keep their subfolders. The folder itself and its empty subfolders are removed.` : ""} confirmLabel="Delete folder" destructive onConfirm={async () => {
       if (!deleteFolderTarget) return;

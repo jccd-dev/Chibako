@@ -9,7 +9,6 @@ import { applyFrontmatter, parseFrontmatter, serializeFrontmatter, type PropValu
 import { PROPERTY_TYPES, type PropertyDef, type PropertyType } from "@/lib/property-types";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { RichTextEditor } from "@/components/editor/RichTextEditor";
-import { relTime } from "@/components/Sidebar";
 import {
   Dialog,
   DialogContent,
@@ -196,7 +195,15 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     },
     onOrganizationError: () => toast.error("Could not refresh the organized note."),
   }, !initial && isNoteDate(draftDate) ? { content: applyFrontmatter("", { date: draftDate }) } : undefined);
-  const { note, title, folder, content, kind, pinned, saveState, persist, patch } = session;
+  const { note, title, folder, content, kind, pinned, persist, patch } = session;
+
+  useEffect(() => {
+    const id = note?.id ?? (!initial ? "new" : null);
+    if (!id) return;
+    window.dispatchEvent(new CustomEvent("chibako:note-tab", {
+      detail: { id, title: title.trim() || "Untitled" },
+    }));
+  }, [initial, note?.id, title]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editWrapRef = useRef<HTMLDivElement>(null);
@@ -942,6 +949,9 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
           <ul className="mt-1 flex flex-col gap-0.5">{mentions.map((m) => <li key={m.id} className="rounded-md px-1.5 py-1 transition hover:bg-muted"><button className="block w-full text-left" onClick={() => router.push(`/app/note/${m.id}`)} title="Open note"><span className="block text-[13px] font-medium">{m.title}</span><span className="block truncate text-xs text-muted-foreground">{m.snippet}</span></button><button className="mt-0.5 text-[11px] font-medium text-primary hover:underline" onClick={() => linkMentionFrom(m.id)}>Link first mention</button></li>)}</ul>
         </div>}
       </div>
+      <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+        {wordCount} word{wordCount === 1 ? "" : "s"}
+      </div>
     </>;
   }
 
@@ -1165,15 +1175,6 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
               </div>
             </div>
           )}
-        </div>
-        <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3 text-[11px] text-muted-foreground">
-          <span>{view === "edit" ? "Markdown" : view === "preview" ? "Read" : view[0].toUpperCase() + view.slice(1)}</span>
-          <span role="status" aria-live="polite" className={saveState === "error" ? "text-destructive" : undefined}>
-            {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : saveState === "error" ? "Save failed" : "Unsaved"}
-          </span>
-          {saveState === "error" && <button type="button" className="font-medium text-destructive hover:underline" onClick={() => void persist().catch(() => {})}>Retry</button>}
-          {note && <span className="ml-auto">{wordCount} word{wordCount === 1 ? "" : "s"}</span>}
-          {note && <span className="hidden sm:inline">Edited {relTime(note.updated_at)}</span>}
         </div>
       </div>
 
