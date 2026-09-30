@@ -41,6 +41,8 @@ export function normalizePropertyType(type: string | undefined | null): Property
 }
 
 export const DEFAULT_PROPERTY_DEFS: PropertyDef[] = [
+  { name: "layer", type: "select", options: ["raw", "wiki", "output"] },
+  { name: "type", type: "select", options: ["entity", "concept", "comparison", "query", "summary", "guide"] },
   { name: "status", type: "select", options: ["draft", "active", "done", "archived"] },
   { name: "category", type: "string" },
   { name: "tags", type: "tags" },

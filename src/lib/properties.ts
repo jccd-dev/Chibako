@@ -22,27 +22,57 @@ export { DEFAULT_PROPERTY_DEFS, PROPERTY_TYPES };
 export type { PropertyDef, PropertyType };
 
 const SETTINGS_KEY = "property_schema";
+// Bumped whenever DEFAULT_PROPERTY_DEFS gains entries. A vault whose saved
+// dictionary predates the bump gets the new defaults merged in exactly once,
+// so the defaults can still be deleted afterwards.
+const DEFAULTS_VERSION_KEY = "property_defaults_version";
+const DEFAULTS_VERSION = 2;
 
 export class PropertySchemaError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
+function readSetting(key: string): string | undefined {
+  const row = getDb().prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined;
+  return row?.value;
+}
+
+function writeSetting(key: string, value: string): void {
+  getDb()
+    .prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+    .run(key, value);
+}
+
+/** Defaults the stored dictionary is missing, appended in canonical order. */
+function mergeMissingDefaults(stored: PropertyDef[]): PropertyDef[] {
+  const names = new Set(stored.map((def) => def.name));
+  return [...stored, ...DEFAULT_PROPERTY_DEFS.filter((def) => !names.has(def.name))];
+}
+
 export function getPropertyDefs(): PropertyDef[] {
-  const row = getDb().prepare(`SELECT value FROM settings WHERE key = ?`).get(SETTINGS_KEY) as { value: string } | undefined;
-  if (!row) return DEFAULT_PROPERTY_DEFS;
+  const raw = readSetting(SETTINGS_KEY);
+  if (raw === undefined) return DEFAULT_PROPERTY_DEFS;
+  let stored: PropertyDef[];
   try {
-    const parsed = JSON.parse(row.value);
-    return Array.isArray(parsed) ? parsed.map(normalizeDef).filter(Boolean) as PropertyDef[] : DEFAULT_PROPERTY_DEFS;
+    const parsed = JSON.parse(raw);
+    stored = Array.isArray(parsed) ? parsed.map(normalizeDef).filter(Boolean) as PropertyDef[] : DEFAULT_PROPERTY_DEFS;
   } catch {
     return DEFAULT_PROPERTY_DEFS;
+  }
+  if (Number(readSetting(DEFAULTS_VERSION_KEY) ?? 0) >= DEFAULTS_VERSION) return stored;
+  // One-time lazy migration. If the stored dictionary is malformed enough to
+  // fail validation, leave it untouched rather than breaking reads.
+  try {
+    return setPropertyDefs(mergeMissingDefaults(stored));
+  } catch {
+    return stored;
   }
 }
 
 export function setPropertyDefs(defs: unknown): PropertyDef[] {
   const clean = validateDefs(defs);
-  getDb()
-    .prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
-    .run(SETTINGS_KEY, JSON.stringify(clean));
+  writeSetting(SETTINGS_KEY, JSON.stringify(clean));
+  writeSetting(DEFAULTS_VERSION_KEY, String(DEFAULTS_VERSION));
   return clean;
 }
 

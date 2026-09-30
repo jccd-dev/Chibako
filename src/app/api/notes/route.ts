@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { withAuth } from "@/lib/api";
-import { listNotes, createNote, filterByProperties, type PropertyFilter } from "@/lib/notes";
+import { listNotes, createNote, filterByProperties, isNoteKind, type PropertyFilter } from "@/lib/notes";
 import { folderTree } from "@/features/organization/folders";
 
 export const GET = withAuth("notes:read", async (req: NextRequest) => {
@@ -22,7 +22,7 @@ export const POST = withAuth("notes:write", async (req: NextRequest) => {
     title: typeof body.title === "string" ? body.title : undefined,
     folder: typeof body.folder === "string" ? body.folder : undefined,
     content: typeof body.content === "string" ? body.content : undefined,
-    kind: body.kind === "wiki" ? "wiki" : body.kind === "index" ? "index" : "note",
+    kind: isNoteKind(body.kind) ? body.kind : "note",
     properties: body.properties && typeof body.properties === "object" && !Array.isArray(body.properties) ? body.properties : undefined,
   });
   return Response.json({ note }, { status: 201 });

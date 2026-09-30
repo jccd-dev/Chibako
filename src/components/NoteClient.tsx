@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconTip } from "@/components/IconTip";
-import { IconBookmark, IconCheck, IconChevron, IconHome, IconPin, IconPlus, IconTrash, IconX } from "@/components/icons";
+import { IconBookmark, IconCheck, IconChevron, IconEye, IconHome, IconPencil, IconPin, IconPlus, IconTrash, IconX } from "@/components/icons";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -724,6 +724,8 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   const showWrite = view === "write";
   const showEdit = view === "edit" || view === "split";
   const showPreview = view === "preview" || view === "split";
+  // The header toggle only owns the two single-pane modes; split shows both.
+  const reading = view === "preview";
 
   useEffect(() => {
     const media = matchMedia("(min-width: 1024px)");
@@ -921,7 +923,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     if (!note) return null;
     const noteDate = fm.props.date;
     return <>
-      <div className="flex flex-1 flex-col gap-3 px-2 py-2 pb-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 py-2 pb-4">
         {isNoteDate(noteDate) && (
           <div>
             <DatedNotesCalendar
@@ -959,9 +961,9 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     <div className="flex h-full" onKeyDown={handleKeys}>
       <div className="flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <div className="flex flex-col gap-0.5 px-4 py-2">
+        <div className="flex flex-col gap-0.5 p-2">
           {/* context row: where am I · what is this · document actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5">
             <nav aria-label="Location" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-xs text-muted-foreground">
               <button
                 type="button"
@@ -994,19 +996,28 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
                 );
               })}
             </nav>
+            {/* Write/Read toggle — the other view modes live in the menu below */}
+            <IconTip
+              label={reading ? "Write" : "Read"}
+              onClick={() => setViewAndRemember(reading ? "write" : "preview")}
+              active={reading}
+              className="bg-transparent text-muted-foreground hover:bg-accent"
+            >
+              {reading ? <IconPencil size={16} /> : <IconEye size={16} />}
+            </IconTip>
             {/* Vertical-dot actions dropdown */}
             <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="shrink-0" aria-label="Note actions" />}>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground" aria-label="Note actions" />}>
                 <IconDotsVertical size={16} />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 {/* View mode */}
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">View</DropdownMenuLabel>
-                  {(["write", "edit", "split", "preview"] as const).map((v) => (
+                  {(["edit", "split"] as const).map((v) => (
                     <DropdownMenuItem key={v} onClick={() => setViewAndRemember(v)}>
                       <span className={cn("flex w-full items-center justify-between", view === v && "font-medium")}>
-                        {{ write: "Write", edit: "Markdown", split: "Split", preview: "Read" }[v]}
+                        {{ edit: "Markdown", split: "Split" }[v]}
                         {view === v && <span className="text-primary">✓</span>}
                       </span>
                     </DropdownMenuItem>
@@ -1179,7 +1190,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
       </div>
 
       {/* right note details panel */}
-      {note && showLinks && wideLinks && <aside aria-label="Note details" className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-border bg-background">{noteDetailsPanel()}</aside>}
+      {note && showLinks && wideLinks && <aside aria-label="Note details" className="flex w-64 shrink-0 flex-col overflow-hidden border-l border-border bg-background">{noteDetailsPanel()}</aside>}
       {note && !wideLinks && <Sheet open={showLinks} onOpenChange={setShowLinks}><SheetContent side="right" className="w-72 bg-background p-0" showCloseButton={false}><SheetTitle className="sr-only">Note details</SheetTitle>{noteDetailsPanel()}</SheetContent></Sheet>}
 
       {/* create missing note dialog */}

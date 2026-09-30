@@ -21,6 +21,11 @@ import { PROPERTY_TYPES } from "@/lib/property-types";
 
 const FONT_ITEMS = Object.fromEntries(FONT_OPTIONS.map((option) => [option.value, option.label]));
 
+/** A property row plus the raw comma-separated text, so typing a separator isn't eaten. */
+type PropDefDraft = PropertyDef & { optionsText?: string };
+
+const parseOptions = (raw: string): string[] => raw.split(",").map((s) => s.trim()).filter(Boolean);
+
 const ALL_SCOPES = [
   "notes:read",
   "notes:write",
@@ -60,7 +65,7 @@ export function SettingsView() {
   const [tab, setTab] = useState<"appearance" | "schema" | "properties" | "keys" | "recall" | "password">("schema");
   const [schema, setSchema] = useState("");
   const [schemaSaved, setSchemaSaved] = useState(false);
-  const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
+  const [propDefs, setPropDefs] = useState<PropDefDraft[]>([]);
   const [propsSaved, setPropsSaved] = useState(false);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
@@ -83,10 +88,13 @@ export function SettingsView() {
     loadKeys();
   }, []);
 
-  function updatePropDef(index: number, patch: Partial<PropertyDef>) {
+  function updatePropDef(index: number, patch: Partial<PropDefDraft>) {
     setPropDefs((defs) => defs.map((d, i) => {
       const next = i === index ? { ...d, ...patch } : d;
-      if (next.type !== "select") delete next.options;
+      if (next.type !== "select") {
+        delete next.options;
+        delete next.optionsText;
+      }
       return next;
     }));
   }
@@ -100,10 +108,16 @@ export function SettingsView() {
   }
 
   async function savePropDefs() {
+    // Strip the local draft text; the parsed `options` array is the persisted shape.
+    const payload: PropertyDef[] = propDefs.map((def) => {
+      const clean: PropertyDef = { name: def.name, type: def.type };
+      if (def.type === "select") clean.options = def.options ?? [];
+      return clean;
+    });
     const res = await fetch("/api/properties", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ properties: propDefs }),
+      body: JSON.stringify({ properties: payload }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -330,9 +344,9 @@ export function SettingsView() {
                       <Field className="min-w-0 flex-1">
                         <FieldLabel>Allowed values</FieldLabel>
                         <Input
-                          value={(def.options ?? []).join(", ")}
+                          value={def.optionsText ?? (def.options ?? []).join(", ")}
                           placeholder="comma, separated, values"
-                          onChange={(e) => updatePropDef(i, { options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                          onChange={(e) => updatePropDef(i, { optionsText: e.target.value, options: parseOptions(e.target.value) })}
                           aria-label={`Options for ${def.name}`}
                         />
                       </Field>
