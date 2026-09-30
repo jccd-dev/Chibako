@@ -25,7 +25,10 @@ PRD/
 
 # Agent configs & skills (all agents)
 .agent/
-.agents/
+.agents/*
+!.agents/plugins/
+.agents/plugins/*
+!.agents/plugins/marketplace.json
 .claude/
 .codex/
 .cursor/

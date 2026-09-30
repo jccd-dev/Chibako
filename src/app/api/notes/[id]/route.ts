@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { withAuth } from "@/lib/api";
-import { getNote, updateNote, deleteNote } from "@/lib/notes";
+import { getNote, updateNote, deleteNote, isNoteKind } from "@/lib/notes";
 
 export const GET = withAuth("notes:read", async (_req, _scopes, ctx) => {
   const { id } = await ctx.params;
@@ -17,7 +17,7 @@ export const PATCH = withAuth("notes:write", async (req: NextRequest, _scopes, c
     title: typeof body.title === "string" ? body.title : undefined,
     folder: typeof body.folder === "string" ? body.folder : undefined,
     content: typeof body.content === "string" ? body.content : undefined,
-    kind: body.kind === "note" || body.kind === "wiki" || body.kind === "index" ? body.kind : undefined,
+    kind: isNoteKind(body.kind) ? body.kind : undefined,
     is_pinned: body.is_pinned === 1 || body.is_pinned === 0 ? body.is_pinned : undefined,
     properties: body.properties && typeof body.properties === "object" && !Array.isArray(body.properties) ? body.properties : undefined,
   });

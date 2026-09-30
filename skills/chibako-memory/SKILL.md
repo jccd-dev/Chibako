@@ -53,7 +53,8 @@ distinguish saved claims from facts verified during the current task.
 An explicit request to remember or maintain notes authorizes the corresponding
 write. A standing user instruction can authorize routine memory updates too.
 Installing this skill alone does not authorize writes. For read-only questions,
-do not silently save the conversation; offer a useful memory only if warranted.
+save nothing from the conversation unless the user asks for it; offer a useful
+memory only if warranted.
 
 - Save confirmed, reusable preferences, decisions with reasons, or lessons.
   Skip temporary status, repeated facts, guesses, raw transcripts, credentials,
@@ -72,8 +73,9 @@ do not silently save the conversation; offer a useful memory only if warranted.
   use the schema's conventions and `[[Exact Note Title]]` links. Backlinks are
   maintained by Chibako, not handwritten.
 - Preserve the provenance of conflicting claims. State which decision supersedes
-  which and why when confirmed; do not silently delete conflicting observations
-  or change the knowledge schema as routine memory maintenance.
+  which and why when confirmed; keep conflicting observations rather than
+  deleting them, and do not change the knowledge schema as routine memory
+  maintenance.
 - Inspect the write result before reporting success. If a write times out or
   its outcome is uncertain, inspect recent observations or the target note
   before retrying to avoid duplicates. Report unresolved failures clearly.

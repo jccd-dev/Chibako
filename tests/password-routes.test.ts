@@ -150,6 +150,7 @@ test("setup, login, password change, and session invalidation preserve route con
     assert.equal(notesBeforeChange.status, 200);
     assert.deepEqual((await notesBeforeChange.json()).notes.map((note: { title: string }) => note.title), [
       "Home",
+      "How to organize notes",
       "Obsidian-style linking",
       "Setup & deployment",
     ]);

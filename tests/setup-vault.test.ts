@@ -17,7 +17,7 @@ test("setup vault initializes settings and bootstrap notes once", async () => {
     assert.ok(stored);
     assert.equal(password.verifyPassword("correct horse battery staple", stored), true);
     assert.equal((getDb().prepare("SELECT value FROM settings WHERE key = 'site_name'").get() as { value: string }).value, "Chibako");
-    assert.deepEqual(notes.listNotes().map((note) => note.title), ["Home", "Obsidian-style linking", "Setup & deployment"]);
+    assert.deepEqual(notes.listNotes().map((note) => note.title), ["Home", "How to organize notes", "Obsidian-style linking", "Setup & deployment"]);
     assert.throws(() => setupVault("another password"), VaultAlreadySetupError);
   } finally {
     getDb().close();

@@ -2,6 +2,7 @@ import { getDb, now, uid } from "./db";
 import { NoteInputError } from "./note-errors";
 import { ensureFolder, normalizeFolder } from "../features/organization/folders";
 import { listReferenceNotes, reindexVisibleLinks, rewriteWikilinkReferences } from "../features/notes/rewrite-wikilink-references";
+import { ORGANIZE_GUIDE_MARKDOWN } from "../features/schema/knowledge-schema";
 import { markStale } from "./embedding-queue";
 
 export { NoteInputError } from "./note-errors";
@@ -17,7 +18,13 @@ import {
   type PropValue,
 } from "./markdown";
 
-export type NoteKind = "note" | "wiki" | "index";
+export const NOTE_KINDS = ["note", "wiki", "index"] as const;
+export type NoteKind = (typeof NOTE_KINDS)[number];
+
+/** Boundary guard for untrusted `kind` values, so invalid kinds never reach the DB. */
+export function isNoteKind(value: unknown): value is NoteKind {
+  return typeof value === "string" && (NOTE_KINDS as readonly string[]).includes(value);
+}
 export type { NoteProperties, PropValue };
 
 export interface Note {
@@ -328,12 +335,15 @@ export function searchNotes(query: string, propertyFilters: PropertyFilter[] = [
   if (!query.trim() && !propertyFilters.length) return [];
   const db = getDb();
   const clean = query.trim().replace(/[^A-Za-z0-9_\-\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af ]/g, " ").slice(0, 60);
-  if (!clean && propertyFilters.length) {
+  // The 60-char slice can land on whitespace and leave empty terms; a bare `*`
+  // is an FTS5 syntax error, so drop empties before building the MATCH query.
+  const terms = clean.split(/\s+/).filter(Boolean);
+  if (!terms.length && propertyFilters.length) {
     // Property-only filter: skip FTS and scan the property cache directly.
     return filterByProperties(listNotes(), propertyFilters).map((n) => ({ ...n, snippet: "", score: 0 }));
   }
-  if (!clean) return [];
-  const q = clean.split(/\s+/).map((t) => `${t}*`).join(" AND ");
+  if (!terms.length) return [];
+  const q = terms.map((t) => `${t}*`).join(" AND ");
   const rows = db
     .prepare(`
       SELECT id, bm25(notes_fts, 0.0, 2.0, 1.0, 0.5) AS score, snippet(notes_fts, 2, '<mark>', '</mark>', '…', 14) AS snippet
@@ -435,6 +445,7 @@ export function ensureIndexNote(): void {
       "- Read `AGENTS.md` (in settings) to teach your AI agent how to use this vault",
       "",
       "## Starting points",
+      "- [[How to organize notes]]",
       "- [[Obsidian-style linking]]",
       "- [[Setup & deployment]]",
     ].join("\n"),
@@ -470,6 +481,13 @@ export function ensureIndexNote(): void {
       "",
       "Point your AI agent at the MCP server (see `AGENTS.md`) to read and write notes directly.",
     ].join("\n"),
+  });
+  createNote({
+    kind: "wiki",
+    title: "How to organize notes",
+    folder: "Guides",
+    content: ORGANIZE_GUIDE_MARKDOWN,
+    properties: { layer: "wiki", type: "guide", status: "active", tags: ["organization", "guide"] },
   });
 }
 

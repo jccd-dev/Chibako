@@ -1,0 +1,31 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "chibako",
+  "version": "0.1.0",
+  "description": "Self-hosted second brain for AI agents: token-budgeted recall, Markdown notes, wikilinks, and backlinks.",
+  "author": {
+    "name": "JC",
+    "url": "https://github.com/jccd-dev/Chibako"
+  },
+  "homepage": "https://github.com/jccd-dev/Chibako",
+  "repository": "https://github.com/jccd-dev/Chibako",
+  "license": "MIT",
+  "keywords": ["memory", "notes", "knowledge-base", "mcp", "recall", "second-brain"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Chibako",
+        "shortDescription": "Token-efficient second brain for AI agents",
+        "longDescription": "Chibako is a self-hosted, Obsidian-like knowledge box. This plugin bundles the Chibako Memory skill and connects to the Chibako MCP server so an agent can recall relevant notes within a token budget, read and write Markdown notes, and maintain [[wikilinks]] and backlinks without loading the whole vault into context.",
+        "developerName": "JC",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://github.com/jccd-dev/Chibako",
+        "defaultPrompt": [
+          "Use Chibako to recall our prior decisions before you start.",
+          "Use $chibako-memory to load relevant vault context for this task."
+        ]
+      }
+    }
+  }
+}

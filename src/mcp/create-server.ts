@@ -15,6 +15,8 @@ import {
   purgeNote,
   graphData,
   filterByProperties,
+  NOTE_KINDS,
+  type NoteKind,
   type PropertyFilter,
 } from "../lib/notes";
 import {
@@ -213,25 +215,23 @@ if (authorized(["notes:read"])) server.registerTool("get_links", {
 
 if (authorized(["notes:write"])) server.registerTool("create_note", {
   title: "Create note",
-  description: "Create a new note. Title defaults to the first # heading if omitted. Content is plain Markdown; use [[Note Title]] to link to other notes. kind: note|wiki|index. properties: optional frontmatter values (e.g. { status: \"draft\", tags: [\"a\", \"b\"] }) — check get_property_defs for the vault's typed dictionary.",
-  inputSchema: z.object({ title: str.optional(), folder: str.optional(), content: str, kind: str.optional(), properties: propPatch.optional() }).strict(),
+  description: "Create a new note. Title defaults to the first # heading if omitted. Content is plain Markdown; use [[Note Title]] to link to other notes. kind: note|wiki|index. properties: optional frontmatter values (e.g. { layer: \"raw\", type: \"concept\", tags: [\"a\", \"b\"] }) — check get_property_defs for the vault's typed dictionary.",
+  inputSchema: z.object({ title: str.optional(), folder: str.optional(), content: str, kind: z.enum(NOTE_KINDS).optional(), properties: propPatch.optional() }).strict(),
   annotations: MUTATING,
-}, (args: { title?: string; folder?: string; content: string; kind?: string; properties?: Record<string, string | number | boolean | string[] | null> }) => {
+}, (args: { title?: string; folder?: string; content: string; kind?: NoteKind; properties?: Record<string, string | number | boolean | string[] | null> }) => {
   if (!authorized(["notes:write"])) return deny();
-  const kind = args.kind === "wiki" || args.kind === "index" ? args.kind : "note";
-  const note = createNote({ title: args.title, folder: args.folder, content: args.content, kind, properties: args.properties });
+  const note = createNote({ title: args.title, folder: args.folder, content: args.content, kind: args.kind, properties: args.properties });
   return ok({ id: note.id, title: note.title, folder: note.folder, properties: note.properties, created: true });
 });
 
 if (authorized(["notes:write"])) server.registerTool("update_note", {
   title: "Update note",
   description: "Update a note by id. Pass only the fields to change (title, folder, content, kind, properties). Renaming a title automatically re-points all [[backlinks]]. properties merges into the existing frontmatter (null removes a key). Returns the updated note.",
-  inputSchema: z.object({ id: str, title: str.optional(), folder: str.optional(), content: str.optional(), kind: str.optional(), properties: propPatch.optional() }).strict(),
+  inputSchema: z.object({ id: str, title: str.optional(), folder: str.optional(), content: str.optional(), kind: z.enum(NOTE_KINDS).optional(), properties: propPatch.optional() }).strict(),
   annotations: MUTATING,
-}, (args: { id: string; title?: string; folder?: string; content?: string; kind?: string; properties?: Record<string, string | number | boolean | string[] | null> }) => {
+}, (args: { id: string; title?: string; folder?: string; content?: string; kind?: NoteKind; properties?: Record<string, string | number | boolean | string[] | null> }) => {
   if (!authorized(["notes:write"])) return deny();
-  const kind = args.kind === "wiki" || args.kind === "index" ? args.kind : undefined;
-  const updated = updateNote(args.id, { title: args.title, folder: args.folder, content: args.content, kind, properties: args.properties });
+  const updated = updateNote(args.id, { title: args.title, folder: args.folder, content: args.content, kind: args.kind, properties: args.properties });
   if (!updated) return fail("note not found");
   return ok({ id: updated.id, title: updated.title, folder: updated.folder, properties: updated.properties, updated_at: updated.updated_at, saved: true });
 });

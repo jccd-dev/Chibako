@@ -343,6 +343,42 @@ agents to fetch your Knowledge Schema, recall relevant notes, inspect recent
 observations, and save durable knowledge when authorized. Configure Chibako MCP
 first using the instructions above. With a scoped API key, use `schema:read`
 and `notes:read`; add `notes:write` if you want the agent to save knowledge.
+
+### Install as a Codex or ChatGPT plugin
+
+This repository is also a portable [Agent Plugins](https://agent-plugins.org)
+package. [`plugin.json`](plugin.json) bundles the `chibako-memory` skill and
+[`mcp.json`](mcp.json) points at the hosted Chibako MCP endpoint, so Codex and
+the ChatGPT desktop app can install both at once.
+
+```bash
+codex plugin marketplace add jccd-dev/Chibako
+```
+
+Then open **Plugins** (or run `/plugins` in Codex CLI) and install **Chibako**
+from your marketplace. In Codex CLI you can also press <kbd>Space</kbd> on the
+installed plugin to toggle it.
+
+The plugin ships no credential. Add your own key once, in your user config —
+never in this repository:
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.chibako]
+bearer_token_env_var = "CHIBAKO_API_KEY"
+```
+
+Self-hosters should edit `mcp.json` to point at their own `/mcp` URL before
+publishing a fork. IDE extensions do not support plugins; use the desktop app
+or Codex CLI.
+
+### Security audits on `npx skills add`
+
+The `skills` CLI prints a **Security Risk Assessments** table (Gen, Socket,
+Snyk). Those verdicts come from third-party scanners that run on a schedule
+against the GitHub repository — they are not a live scan of your local files,
+and the table is cached server-side, so it can lag your latest commits.
+[View the current verdicts for this repo](https://skills.sh/jccd-dev/Chibako).
 The skill does not install Chibako, configure MCP, or copy your vault.
 
 Install from this public repository using the [skills CLI](https://github.com/vercel-labs/skills):
