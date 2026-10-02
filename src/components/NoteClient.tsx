@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { useNoteEditorSession } from "@/features/notes/editor/useNoteEditorSession";
 import { createNoteDetailClient, type MentionInfo } from "@/features/notes/note-detail-client";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
+import { noteSaveRefreshChanges } from "@/features/notes/note-save-refresh";
 import { isNoteDate } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/components/DatedNotesCalendar";
 
@@ -187,9 +188,9 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
       if (!response.ok) throw new Error(data.error || "Save failed");
       return data.note as Note;
     },
-    onSaved: (savedNote, created) => {
+    onSaved: (savedNote, created, switching) => {
       schedulePostSaveRefresh(savedNote, created);
-      if (created) router.replace(`/app/note/${savedNote.id}`);
+      if (created && !switching) router.replace(`/app/note/${savedNote.id}`);
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Save failed"),
     onSwitchBlocked: (unsavedNote) => {
@@ -448,11 +449,11 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     void refreshAllNotes();
   }, [initialAll, refreshAllNotes]);
 
-  // One cache per tab: a revisited note renders instantly, and links plus
-  // mentions cost a single parallel round trip the first time.
+  // The detail cache survives note switches within this editor.
   const detailClient = useMemo(() => createNoteDetailClient(async (url) => {
     const response = await fetch(url);
-    return response.ok ? await response.json() : null;
+    if (!response.ok) throw new Error("Could not load note details");
+    return response.json();
   }), []);
 
   /** Show the detail panel for `noteId` as soon as it has data (cached or not). */
@@ -468,22 +469,44 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     setMentions(data.mentions);
   }, [detailClient]);
 
-  // Autosave fires every ~700 ms of typing. The tree and sidebar refresh it
-  // triggers is coalesced onto the trailing edge so a burst of edits costs one
-  // refresh instead of one per save.
+  const savedNotesRef = useRef(new Map<string, Note>());
+  useEffect(() => {
+    if (initial && !savedNotesRef.current.has(initial.id)) savedNotesRef.current.set(initial.id, initial);
+  }, [initial]);
   const postSaveRefreshTimer = useRef<number | null>(null);
-  const schedulePostSaveRefresh = useCallback((savedNote: Note, _created: boolean) => {
-    window.dispatchEvent(new Event("chibako:notes-changed"));
+  const pendingRefresh = useRef({ tree: false, details: false });
+  const flushPostSaveRefresh = useCallback(() => {
+    const pending = pendingRefresh.current;
+    pendingRefresh.current = { tree: false, details: false };
+    if (pending.tree) {
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+      void refreshAllNotes();
+    }
+    if (pending.details) void refreshLinks();
+  }, [refreshAllNotes, refreshLinks]);
+  const schedulePostSaveRefresh = useCallback((savedNote: Note, created: boolean) => {
+    const previous = created ? null : savedNotesRef.current.get(savedNote.id) ?? null;
+    const changes = noteSaveRefreshChanges(previous, savedNote);
+    savedNotesRef.current.set(savedNote.id, savedNote);
+    if (changes.invalidateDetails) detailClient.invalidate();
+    pendingRefresh.current.tree ||= changes.tree;
+    pendingRefresh.current.details ||= changes.details;
+    if (!pendingRefresh.current.tree && !pendingRefresh.current.details) return;
     if (postSaveRefreshTimer.current !== null) window.clearTimeout(postSaveRefreshTimer.current);
     postSaveRefreshTimer.current = window.setTimeout(() => {
       postSaveRefreshTimer.current = null;
-      void refreshAllNotes();
-      // This note's own panel just changed under us, so its cached copy has to
-      // go: editing the body can add or remove links and mentions.
-      detailClient.invalidate(savedNote.id);
-      void refreshLinks(savedNote.id);
+      flushPostSaveRefresh();
     }, POST_SAVE_REFRESH_MS);
-  }, [detailClient, refreshAllNotes, refreshLinks]);
+  }, [detailClient, flushPostSaveRefresh]);
+  useEffect(() => () => {
+    if (postSaveRefreshTimer.current !== null) {
+      window.clearTimeout(postSaveRefreshTimer.current);
+      postSaveRefreshTimer.current = null;
+      // Metadata changes still need to reach the sidebar when this page leaves.
+      if (pendingRefresh.current.tree) window.dispatchEvent(new Event("chibako:notes-changed"));
+      pendingRefresh.current = { tree: false, details: false };
+    }
+  }, []);
 
   async function linkMentionFrom(sourceId: string) {
     if (!note) return;

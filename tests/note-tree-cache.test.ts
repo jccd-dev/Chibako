@@ -74,7 +74,7 @@ test("a change signal forces the next read to refetch", async () => {
 });
 
 test("a forced refresh serves the new tree to later readers", async () => {
-  const updated: NoteTreeData = { notes: [], folders: [{ name: "f" }] };
+  const updated: NoteTreeData = { notes: [], folders: ["f"] };
   let current = TREE;
   const requests: FakeRequest[] = [];
   const fetcher = async (): Promise<unknown> => {
@@ -98,6 +98,31 @@ test("a forced refresh serves the new tree to later readers", async () => {
   await refreshed;
 
   assert.deepEqual(await cache.read(), updated, "the new tree replaced the old one");
+});
+
+test("a failed refresh preserves the last good tree and retries", async () => {
+  let response: unknown = TREE;
+  const cache = createNoteTreeCache(async () => response);
+  await cache.read();
+  cache.invalidate();
+  response = null;
+  assert.deepEqual(await cache.read(), TREE);
+  response = { notes: [], folders: ["new"] };
+  assert.deepEqual(await cache.read(), response);
+});
+
+test("an invalidated in-flight tree cannot replace the fresh cache", async () => {
+  const releases: Array<(data: NoteTreeData) => void> = [];
+  const cache = createNoteTreeCache(() => new Promise((resolve) => { releases.push(resolve); }));
+  const old = cache.read();
+  cache.invalidate();
+  const fresh = cache.read();
+  const updated = { notes: [], folders: ["new"] };
+  releases[1](updated);
+  await fresh;
+  releases[0](TREE);
+  await old;
+  assert.deepEqual(await cache.read(), updated);
 });
 
 test("a failed fetch keeps the previous tree and allows a retry", async () => {

@@ -20,7 +20,7 @@ const EMPTY_LINKS: LinkInfo = { outlinks: [], backlinks: [] };
 export type DetailFetcher = (url: string) => Promise<unknown>;
 
 export interface NoteDetailClient {
-  /** Links and mentions for a note: one round trip each, in parallel, cached per note. */
+  /** Links and mentions in one request, cached per note. */
   load(noteId: string): Promise<NoteDetailData>;
   /** Drop one note's cached detail, or all of it when no id is given. */
   invalidate(noteId?: string): void;
@@ -28,26 +28,10 @@ export interface NoteDetailClient {
 
 interface DetailResult {
   data: NoteDetailData;
-  /** At least one endpoint failed, so this is not worth remembering. */
   partial: boolean;
 }
 
-async function readJson<T>(fetcher: DetailFetcher, url: string, fallback: T): Promise<{ value: T; ok: boolean }> {
-  try {
-    const response = (await fetcher(url)) as { ok?: boolean };
-    if (response.ok === false) return { value: fallback, ok: false };
-    return { value: (response as T) ?? fallback, ok: true };
-  } catch {
-    // A failed endpoint must not blank out the panel the user is reading.
-    return { value: fallback, ok: false };
-  }
-}
-
-/**
- * The right-hand details panel needs two endpoints per note. Fetching them in
- * parallel behind a per-note cache means a note switch costs one round trip
- * for a note seen for the first time and none at all for one already visited.
- */
+/** A cold note costs one request; revisits use the same per-editor cache. */
 export function createNoteDetailClient(fetcher: DetailFetcher): NoteDetailClient {
   const cache = new Map<string, NoteDetailData>();
   const inFlight = new Map<string, Promise<NoteDetailData>>();
@@ -56,14 +40,21 @@ export function createNoteDetailClient(fetcher: DetailFetcher): NoteDetailClient
   let generation = 0;
 
   async function fetchDetail(noteId: string): Promise<DetailResult> {
-    const [links, mentions] = await Promise.all([
-      readJson<LinkInfo>(fetcher, `/api/notes/${noteId}/links`, EMPTY_LINKS),
-      readJson<{ mentions?: MentionInfo[] }>(fetcher, `/api/notes/${noteId}/mentions`, { mentions: [] }),
-    ]);
-    return {
-      data: { links: links.value, mentions: mentions.value.mentions ?? [] },
-      partial: !links.ok || !mentions.ok,
-    };
+    try {
+      const response = await fetcher(`/api/notes/${noteId}/links?include=mentions`) as
+        (Partial<LinkInfo> & { ok?: boolean; mentions?: MentionInfo[] }) | null;
+      if (!response || response.ok === false) throw new Error("Note detail request failed");
+      const complete = Array.isArray(response.outlinks) && Array.isArray(response.backlinks) && Array.isArray(response.mentions);
+      return {
+        data: {
+          links: { outlinks: response.outlinks ?? [], backlinks: response.backlinks ?? [] },
+          mentions: response.mentions ?? [],
+        },
+        partial: !complete,
+      };
+    } catch {
+      return { data: { links: EMPTY_LINKS, mentions: [] }, partial: true };
+    }
   }
 
   return {

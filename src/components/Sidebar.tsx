@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { IconCalendarMonth, IconDotsVertical, IconFolderPlus, IconUpload } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
+import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import type { Bookmark } from "@/lib/bookmarks";
 import { cn } from "@/lib/utils";
 import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
@@ -71,30 +72,35 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const [bulkPurgeOpen, setBulkPurgeOpen] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
 
+  const treeCache = useMemo(() => noteTreeCache(async () => {
+    const response = await fetch("/api/notes");
+    if (!response.ok) throw new Error("Could not load notes");
+    return response.json();
+  }), []);
   const load = useCallback(async () => {
     try {
-      const [res, trashed, marks] = await Promise.all([fetch("/api/notes"), fetch("/api/trash"), fetch("/api/bookmarks")]);
-      if (!res.ok || !trashed.ok) throw new Error();
-      const data = await res.json();
-      setNotes(data.notes);
+      const [data, trashed, marks] = await Promise.all([treeCache.read(), fetch("/api/trash"), fetch("/api/bookmarks")]);
+      if (!trashed.ok) throw new Error();
+      setNotes(data.notes as NoteSummary[]);
       setFolders(data.folders);
       setTrash((await trashed.json()).notes);
       if (marks.ok) setBookmarks((await marks.json()).bookmarks);
     } catch { toast.error("Could not load notes. Try again."); }
-  }, []);
+  }, [treeCache]);
 
   // Refresh on focus or an explicit write. Navigation never changes the note
   // tree, so refetching notes/trash/bookmarks on every switch is pure traffic.
   useEffect(() => {
     void load();
     const refresh = () => { void load(); };
-    window.addEventListener("focus", refresh);
+    const focus = () => { treeCache.invalidate(); refresh(); };
+    window.addEventListener("focus", focus);
     window.addEventListener("chibako:notes-changed", refresh);
     return () => {
-      window.removeEventListener("focus", refresh);
+      window.removeEventListener("focus", focus);
       window.removeEventListener("chibako:notes-changed", refresh);
     };
-  }, [load]);
+  }, [load, treeCache]);
 
   useEffect(() => { onMobileOpenChange(false); }, [pathname, onMobileOpenChange]);
 

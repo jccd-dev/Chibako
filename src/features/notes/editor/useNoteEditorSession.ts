@@ -40,11 +40,13 @@ export function useNoteEditorSession(
   const controller = controllerRef.current;
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const previousInitialIdRef = useRef<string | null>(initial?.id ?? null);
+  const draftContent = initialDraft?.content;
+  const previousDraftContentRef = useRef(draftContent);
 
   useEffect(() => {
     const initialId = initial?.id ?? null;
     const currentId = controller.getSnapshot().note?.id ?? null;
-    if (initialId === currentId) {
+    if (initialId === currentId && (initialId !== null || previousDraftContentRef.current === draftContent)) {
       previousInitialIdRef.current = initialId;
       return;
     }
@@ -55,8 +57,9 @@ export function useNoteEditorSession(
     // The controller owns the refusal decision: it either swaps the document
     // or keeps the one holding unsaved text and reports onSwitchBlocked.
     previousInitialIdRef.current = initialId;
-    void controller.replaceDocument(initial);
-  }, [controller, initial]);
+    previousDraftContentRef.current = draftContent;
+    void controller.replaceDocument(initial, { content: draftContent });
+  }, [controller, initial, draftContent]);
 
   useEffect(() => {
     if (!snapshot.dirty) return;

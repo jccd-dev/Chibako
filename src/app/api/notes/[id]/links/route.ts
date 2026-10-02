@@ -1,7 +1,7 @@
 import { withAuth } from "@/lib/api";
-import { getNote, getOutlinks, getBacklinks } from "@/lib/notes";
+import { getNote, getOutlinks, getBacklinks, unlinkedMentions } from "@/lib/notes";
 
-export const GET = withAuth("notes:read", async (_req, _scopes, ctx) => {
+export const GET = withAuth("notes:read", async (req, _scopes, ctx) => {
   const { id } = await ctx.params;
   const note = getNote(id);
   if (!note) return Response.json({ error: "Not found" }, { status: 404 });
@@ -16,5 +16,10 @@ export const GET = withAuth("notes:read", async (_req, _scopes, ctx) => {
     folder: b.folder,
     snippet: b.snippet,
   }));
-  return Response.json({ outlinks: out, backlinks: back });
+  const includeMentions = req.nextUrl.searchParams.get("include") === "mentions";
+  return Response.json({
+    outlinks: out,
+    backlinks: back,
+    ...(includeMentions ? { mentions: unlinkedMentions(id) } : {}),
+  });
 });

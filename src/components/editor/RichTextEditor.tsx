@@ -43,10 +43,13 @@ export function RichTextEditor({
   onNavigate,
   onViewShortcut,
 }: RichTextEditorProps) {
-  // Frozen at mount: the note's own edits flow back in through `markdown`,
-  // and swapping the editor for a warning mid-keystroke would be worse than
-  // waiting for the next open.
-  const [unsupportedHtml] = useState(() => findUnsupportedHtml(markdown));
+  // Freeze the safety check while typing, but reset it for each document.
+  // The editor now survives navigation, so mount is no longer a note boundary.
+  const safetyRef = useRef<{ noteId: string; html: string[] } | null>(null);
+  if (!safetyRef.current || safetyRef.current.noteId !== noteId) {
+    safetyRef.current = { noteId, html: findUnsupportedHtml(markdown) };
+  }
+  const unsupportedHtml = safetyRef.current.html;
   const editable = unsupportedHtml.length === 0;
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuIdx, setMenuIdx] = useState(0);
@@ -73,6 +76,7 @@ export function RichTextEditor({
 
   const editor = useEditor(
     {
+      immediatelyRender: false,
       extensions: [
         StarterKit,
         TaskList,
@@ -139,7 +143,7 @@ export function RichTextEditor({
         syncMenu(ed);
       },
     },
-    [editable]
+    []
   );
 
   // One editor instance serves every note. The document is only re-parsed when
@@ -148,10 +152,16 @@ export function RichTextEditor({
   // a reparse. `contentType` also has to be restated: TipTap needs it to set
   // markdown instead of html.
   useEffect(() => {
-    if (!editor) return;
-    if (editor.getMarkdown() === markdown) return;
+    if (!editor || editor.isDestroyed) return;
+    editor.setEditable(editable, false);
+    if (!editable || editor.getMarkdown() === markdown) return;
     editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
-  }, [editor, markdown]);
+  }, [editor, markdown, editable]);
+
+  useEffect(() => {
+    setMenu(null);
+    setMenuIdx(0);
+  }, [noteId]);
 
   function matchesFor(prefix: string): NoteSummary[] {
     const p = prefix.toLowerCase();

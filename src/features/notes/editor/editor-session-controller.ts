@@ -27,7 +27,7 @@ export interface EditorSessionEffects {
     patch: UpdateNoteInput,
     full: Omit<CreateNoteInput, "properties">,
   ): Promise<Note>;
-  onSaved(note: Note, created: boolean): void;
+  onSaved(note: Note, created: boolean, switching?: boolean): void;
   onError(error: unknown): void;
   /** A switch away from a note was refused because its edits could not be saved. */
   onSwitchBlocked?(noteTitle: string): void;
@@ -38,7 +38,7 @@ export interface EditorSessionController {
   subscribe(listener: () => void): () => void;
   patch(patch: UpdateNoteInput): void;
   persist(): Promise<void>;
-  replaceDocument(note: Note | null): Promise<void>;
+  replaceDocument(note: Note | null, draft?: Partial<Omit<EditorDocument, "note">>): Promise<void>;
   refreshFromServer(note: Note): void;
   shouldBlockUnload(): boolean;
   dispose(): Promise<void>;
@@ -57,14 +57,6 @@ function documentFor(note: Note | null, draft?: Partial<Omit<EditorDocument, "no
 
 function hasField(patch: UpdateNoteInput, field: keyof UpdateNoteInput): boolean {
   return patch[field] !== undefined;
-}
-
-/** Is `nextNote` the document whose unsaved text is being held? */
-function sameDocument(held: { note: Note | null; title: string }, nextNote: Note | null): boolean {
-  if (held.note && nextNote) return held.note.id === nextNote.id;
-  const heldTitle = held.title.trim();
-  const nextTitle = (nextNote?.title ?? "").trim();
-  return heldTitle.length > 0 && heldTitle === nextTitle;
 }
 
 function applyPatch(document: EditorDocument, patch: UpdateNoteInput): EditorDocument {
@@ -95,7 +87,6 @@ export function createEditorSessionController(
   // has to reach that note first, or the typed text is dropped by the server
   // copy that loads in its place. Keyed by the note the text belongs to so a
   // still-unsaved *draft* (no id yet) is held too.
-  let unsavedSwitch: { note: Note | null; title: string } | null = null;
   const listeners = new Set<() => void>();
   let snapshot: EditorSessionSnapshot = {
     ...document,
@@ -156,8 +147,10 @@ export function createEditorSessionController(
       document = { ...document, note: updated };
       dirty = Object.keys(pending).length > 0;
       setSaveState(dirty ? "unsaved" : "saved");
-      if (!replacing) try {
-        effects.onSaved(updated, current === null);
+      // A switch-flushed save still invalidates shared views. The adapter must
+      // not redirect a draft creation over the destination being selected.
+      try {
+        effects.onSaved(updated, current === null, replacing);
       } catch {
         // Navigation/toast side effects cannot invalidate a successful save.
       }
@@ -201,13 +194,8 @@ export function createEditorSessionController(
 
     persist,
 
-    async replaceDocument(nextNote: Note | null): Promise<void> {
+    async replaceDocument(nextNote: Note | null, draft?: Partial<Omit<EditorDocument, "note">>): Promise<void> {
       if (disposed) return;
-      const previous = document.note;
-      // An unflushable document keeps the route from moving on. Restoring the
-      // note it belonged to is cheaper than losing the keystrokes. A draft has
-      // no id to return to, so it matches on the title the user was typing.
-      if (unsavedSwitch && !sameDocument(unsavedSwitch, nextNote)) nextNote = unsavedSwitch.note;
       replacing = true;
       try {
         try {
@@ -215,11 +203,10 @@ export function createEditorSessionController(
         } catch {
           // Keep the pending patch: the retry path replays it instead of
           // letting the next note's server copy overwrite local content.
-          unsavedSwitch = { note: previous, title: previous?.title ?? document.title };
           saveState = "error";
           publish();
           try {
-            effects.onSwitchBlocked?.(unsavedSwitch.title);
+            effects.onSwitchBlocked?.(document.title);
           } catch {
             // Reporting the refused switch must not mask the save failure.
           }
@@ -228,12 +215,11 @@ export function createEditorSessionController(
       } finally {
         replacing = false;
       }
-      unsavedSwitch = null;
       version += 1;
       pending = {};
       inFlightPatch = null;
       dirty = false;
-      document = documentFor(nextNote);
+      document = documentFor(nextNote, draft);
       saveState = nextNote ? "saved" : "unsaved";
       publish();
     },

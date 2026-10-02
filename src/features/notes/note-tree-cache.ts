@@ -10,14 +10,9 @@ export interface NoteTreeNote {
   properties: Record<string, unknown>;
 }
 
-export interface NoteTreeFolder {
-  name: string;
-  [key: string]: unknown;
-}
-
 export interface NoteTreeData {
   notes: NoteTreeNote[];
-  folders: NoteTreeFolder[];
+  folders: string[];
 }
 
 const EMPTY: NoteTreeData = { notes: [], folders: [] };
@@ -38,15 +33,21 @@ export interface NoteTreeCache {
  */
 export function createNoteTreeCache(fetcher: TreeFetcher): NoteTreeCache {
   let cached: NoteTreeData | null = null;
+  let stale = true;
+  let generation = 0;
   let inFlight: Promise<NoteTreeData> | null = null;
 
   function fetchTree(): Promise<NoteTreeData> {
+    const startedAt = generation;
     const operation = (async () => {
       try {
-        const response = (await fetcher()) as { ok?: boolean; notes?: NoteTreeNote[]; folders?: NoteTreeFolder[] };
-        if (response.ok === false) throw new Error("notes request failed");
+        const response = (await fetcher()) as { ok?: boolean; notes?: NoteTreeNote[]; folders?: string[] } | null;
+        if (!response || response.ok === false) throw new Error("notes request failed");
         const data: NoteTreeData = { notes: response.notes ?? [], folders: response.folders ?? [] };
-        cached = data;
+        if (startedAt === generation) {
+          cached = data;
+          stale = false;
+        }
         return data;
       } catch {
         // Keep whatever is already on screen; a failed refresh is not a reason
@@ -64,13 +65,15 @@ export function createNoteTreeCache(fetcher: TreeFetcher): NoteTreeCache {
 
   return {
     read(): Promise<NoteTreeData> {
-      if (cached) return Promise.resolve(cached);
+      if (cached && !stale) return Promise.resolve(cached);
       if (inFlight) return inFlight;
       return fetchTree();
     },
 
     invalidate(): void {
-      cached = null;
+      stale = true;
+      generation += 1;
+      inFlight = null;
     },
   };
 }

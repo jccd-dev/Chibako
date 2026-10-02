@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { IconPlus, IconX } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { noteTreeCache } from "@/features/notes/note-tree-cache";
 
 const STORAGE_KEY = "chibako_note_tabs";
 
@@ -52,6 +53,11 @@ export function NoteTabs() {
   const [tabs, setTabs] = useState<NoteTab[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
+  const treeCache = useMemo(() => noteTreeCache(async () => {
+    const response = await fetch("/api/notes");
+    if (!response.ok) throw new Error("Could not load notes");
+    return response.json();
+  }), []);
 
   useEffect(() => {
     setTabs(readTabs());
@@ -59,16 +65,9 @@ export function NoteTabs() {
 
     // Prune tabs for notes that no longer exist (deleted to trash or purged).
     const onNotesChanged = () => {
-      void fetch("/api/notes")
-        .then((response) => response.json() as Promise<unknown>)
-        .then((data) => {
-          const notes = (data as { notes?: unknown }).notes;
-          if (!Array.isArray(notes)) return;
-          const ids = new Set(
-            notes
-              .map((note) => (note as { id?: unknown }).id)
-              .filter((id): id is string => typeof id === "string"),
-          );
+      void treeCache.read()
+        .then(({ notes }) => {
+          const ids = new Set(notes.map((note) => note.id));
           setTabs((current) => {
             const next = current.filter((tab) => tab.id === "new" || ids.has(tab.id));
             return next.length === current.length ? current : next;
@@ -96,7 +95,7 @@ export function NoteTabs() {
       window.removeEventListener("chibako:note-tab", onTab);
       window.removeEventListener("chibako:notes-changed", onNotesChanged);
     };
-  }, []);
+  }, [treeCache]);
 
   useEffect(() => {
     if (!loaded) return;
