@@ -9,9 +9,11 @@ import {
 import type { Note } from "../../../lib/notes";
 import type { EditorDocument } from "./editor-session-controller";
 
-export interface NoteEditorSessionEffects extends EditorSessionEffects {
+export interface NoteEditorSessionEffects extends Omit<EditorSessionEffects, "onSwitchBlocked"> {
   onOrganized?(): void;
   onOrganizationError?(): void;
+  /** A switch was refused. `id` is null when the text belongs to an unsaved draft. */
+  onSwitchBlocked?(note: { id: string | null; title: string }): void;
 }
 
 export function useNoteEditorSession(
@@ -27,6 +29,12 @@ export function useNoteEditorSession(
       save: (...args) => effectsRef.current.save(...args),
       onSaved: (...args) => effectsRef.current.onSaved(...args),
       onError: (error) => effectsRef.current.onError(error),
+      onSwitchBlocked: (title) => {
+        // The controller still holds the note that kept the text; the route
+        // has to be put back on it.
+        const held = controllerRef.current?.getSnapshot().note ?? null;
+        effectsRef.current.onSwitchBlocked?.(held ? { id: held.id, title } : { id: null, title });
+      },
     }, initialDraft);
   }
   const controller = controllerRef.current;
@@ -44,6 +52,8 @@ export function useNoteEditorSession(
     // server props. Do not erase that local document while the URL is still
     // transitioning from /new to the created note.
     if (initialId === null && currentId !== null && previousInitialIdRef.current === null) return;
+    // The controller owns the refusal decision: it either swaps the document
+    // or keeps the one holding unsaved text and reports onSwitchBlocked.
     previousInitialIdRef.current = initialId;
     void controller.replaceDocument(initial);
   }, [controller, initial]);

@@ -36,6 +36,9 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (source_id, target_title)
   );
   CREATE INDEX IF NOT EXISTS idx_links_target ON links (target_title);
+  -- Title lookups are case-insensitive, so the BINARY index above cannot serve
+  -- them. unlinkedMentions excludes already-linked notes with a NOCASE match.
+  CREATE INDEX IF NOT EXISTS idx_links_target_nocase ON links (target_title COLLATE NOCASE);
   `,
   `
   -- Full-text search over note title + content. id is stored (unindexed) so

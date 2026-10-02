@@ -29,12 +29,17 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { IconDotsVertical } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useNoteEditorSession } from "@/features/notes/editor/useNoteEditorSession";
+import { createNoteDetailClient, type MentionInfo } from "@/features/notes/note-detail-client";
+import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import { isNoteDate } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/components/DatedNotesCalendar";
 
 export type ViewMode = "write" | "edit" | "split" | "preview";
 /** Select sentinel for the "create a new bookmark group" option. */
 const NEW_GROUP_VALUE = "__new__";
+
+/** How long a save waits before its tree/sidebar refresh is worth the traffic. */
+const POST_SAVE_REFRESH_MS = 1500;
 
 // Kind colors match the graph view so a note reads as the same entity in both.
 const KIND_COLOR: Record<NoteKind, string> = {
@@ -47,7 +52,6 @@ interface LinkInfo {
   outlinks: Array<{ target: string; target_id: string | null; resolved: boolean }>;
   backlinks: Array<{ id: string; title: string; folder: string; snippet: string }>;
 }
-
 const VIEW_MODES: readonly ViewMode[] = ["write", "edit", "split", "preview"];
 
 function readLegacyView(): ViewMode | null {
@@ -104,13 +108,14 @@ function PropTextEditor({ initial, onCommit, placeholder, type, ariaLabel }: {
 
 export function NoteClient({ initial, allNotes: initialAll, draftDate, initialView }: {
   initial: Note | null;
-  allNotes: NoteSummary[];
+  /** Optional server-provided tree; the client cache fetches one when absent. */
+  allNotes?: NoteSummary[];
   draftDate?: string;
   initialView?: ViewMode;
 }) {
   const router = useRouter();
 
-  const [allNotes, setAllNotes] = useState<NoteSummary[]>(initialAll);
+  const [allNotes, setAllNotes] = useState<NoteSummary[]>(initialAll ?? []);
   const [bookmark, setBookmark] = useState<Bookmark | null>(null);
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
   const [bmGroups, setBmGroups] = useState<string[]>([]);
@@ -150,7 +155,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     setModKey(/mac/i.test(navigator.platform ?? "") ? "⌘" : "Ctrl+");
   }, []);
   const [links, setLinks] = useState<LinkInfo | null>(null);
-  const [mentions, setMentions] = useState<Array<{ id: string; title: string; folder: string; snippet: string }>>([]);
+  const [mentions, setMentions] = useState<MentionInfo[]>([]);
   const [showLinks, setShowLinks] = useState(false);
   const [wideLinks, setWideLinks] = useState(true);
   // TopBar owns the dedicated note details toggle;
@@ -183,14 +188,22 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
       return data.note as Note;
     },
     onSaved: (savedNote, created) => {
-      window.dispatchEvent(new Event("chibako:notes-changed"));
-      void refreshAllNotes();
-      void refreshLinks();
+      schedulePostSaveRefresh(savedNote, created);
       if (created) router.replace(`/app/note/${savedNote.id}`);
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Save failed"),
+    onSwitchBlocked: (unsavedNote) => {
+      // A draft has no id to navigate to, so the URL stays where it is.
+      if (unsavedNote.id) {
+        router.replace(`/app/note/${unsavedNote.id}`);
+        router.refresh();
+      }
+      toast.error(`“${unsavedNote.title}” has unsaved changes that could not be saved. They are still here — retry the save before switching.`);
+    },
     onOrganized: () => {
       void refreshAllNotes();
+      // The panel was just rewritten server-side, so its cached copy is stale.
+      detailClient.invalidate();
       void refreshLinks();
     },
     onOrganizationError: () => toast.error("Could not refresh the organized note."),
@@ -208,9 +221,6 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editWrapRef = useRef<HTMLDivElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
-  const [editorKey, setEditorKey] = useState(0);
-
-  useEffect(() => { void refreshAllNotes(); }, []);
 
   // ---- [[wikilink autocomplete ----
   const [suggest, setSuggest] = useState<{ prefix: string; top: number; left: number } | null>(null);
@@ -410,34 +420,70 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     return m;
   }, [allNotes]);
 
+  // Switching notes must not tear the editors down: the textarea is a
+  // controlled input over the session document, and the rich editor is driven
+  // by its markdown prop. Clearing the suggestion list is the only reset a
+  // switch needs.
   useEffect(() => {
-    setLinks(null);
-    setMentions([]);
     setSuggest(null);
-    setEditorKey((key) => key + 1);
   }, [initial?.id]);
 
-  async function refreshAllNotes() {
-    const res = await fetch("/api/notes");
-    if (res.ok) {
-      const data = await res.json();
-      setAllNotes(data.notes);
-    }
-  }
+  const treeCache = useMemo(() => noteTreeCache(async () => {
+    const response = await fetch("/api/notes");
+    return response.ok ? await response.json() : null;
+  }), []);
 
-  async function refreshLinks() {
-    if (!note) return;
-    const res = await fetch(`/api/notes/${note.id}/links`);
-    if (res.ok) {
-      const data = await res.json();
-      setLinks(data);
+  const refreshAllNotes = useCallback(async () => {
+    const data = await treeCache.read();
+    setAllNotes(data.notes as NoteSummary[]);
+  }, [treeCache]);
+
+  // The tree no longer rides along on every navigation; it is fetched once per
+  // tab and refreshed whenever something in the vault actually changes.
+  useEffect(() => {
+    if (initialAll) {
+      setAllNotes(initialAll);
+      return;
     }
-    const mres = await fetch(`/api/notes/${note.id}/mentions`);
-    if (mres.ok) {
-      const mdata = await mres.json();
-      setMentions(mdata.mentions ?? []);
-    }
-  }
+    void refreshAllNotes();
+  }, [initialAll, refreshAllNotes]);
+
+  // One cache per tab: a revisited note renders instantly, and links plus
+  // mentions cost a single parallel round trip the first time.
+  const detailClient = useMemo(() => createNoteDetailClient(async (url) => {
+    const response = await fetch(url);
+    return response.ok ? await response.json() : null;
+  }), []);
+
+  /** Show the detail panel for `noteId` as soon as it has data (cached or not). */
+  const currentNoteIdRef = useRef<string | null>(null);
+  currentNoteIdRef.current = note?.id ?? null;
+
+  const refreshLinks = useCallback(async (noteId?: string) => {
+    const id = noteId ?? currentNoteIdRef.current;
+    if (!id) return;
+    const data = await detailClient.load(id);
+    if (currentNoteIdRef.current !== id) return; // the user moved on mid-flight
+    setLinks(data.links);
+    setMentions(data.mentions);
+  }, [detailClient]);
+
+  // Autosave fires every ~700 ms of typing. The tree and sidebar refresh it
+  // triggers is coalesced onto the trailing edge so a burst of edits costs one
+  // refresh instead of one per save.
+  const postSaveRefreshTimer = useRef<number | null>(null);
+  const schedulePostSaveRefresh = useCallback((savedNote: Note, _created: boolean) => {
+    window.dispatchEvent(new Event("chibako:notes-changed"));
+    if (postSaveRefreshTimer.current !== null) window.clearTimeout(postSaveRefreshTimer.current);
+    postSaveRefreshTimer.current = window.setTimeout(() => {
+      postSaveRefreshTimer.current = null;
+      void refreshAllNotes();
+      // This note's own panel just changed under us, so its cached copy has to
+      // go: editing the body can add or remove links and mentions.
+      detailClient.invalidate(savedNote.id);
+      void refreshLinks(savedNote.id);
+    }, POST_SAVE_REFRESH_MS);
+  }, [detailClient, refreshAllNotes, refreshLinks]);
 
   async function linkMentionFrom(sourceId: string) {
     if (!note) return;
@@ -448,19 +494,25 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     });
     if (res.ok) {
       toast.success("Linked", { description: `[[${note.title}]] added.` });
-      refreshLinks();
-      refreshAllNotes();
+      detailClient.invalidate(note.id);
+      void refreshLinks(note.id);
+      void refreshAllNotes();
     } else {
       toast.error("Could not link that mention.");
     }
   }
 
   useEffect(() => {
-    if (!note) return;
-    const t = setTimeout(() => refreshLinks(), 400);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note?.id]);
+    const id = note?.id;
+    if (!id) {
+      setLinks(null);
+      setMentions([]);
+      return;
+    }
+    // A cached note resolves without a request; a first visit keeps showing the
+    // previous note's panel until the new data lands, rather than blanking it.
+    void refreshLinks(id);
+  }, [note?.id, refreshLinks]);
 
   // ---- bookmarks ----
   useEffect(() => {
@@ -747,7 +799,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     if ("fieldSizing" in ta) return;
     const next = `${ta.scrollHeight}px`;
     if (ta.style.height !== next) ta.style.height = next;
-  }, [content, view, showEdit, showProps, editorKey, note?.id]);
+  }, [content, view, showEdit, showProps, note?.id]);
 
   /** Collapsible "Properties" row shown above both editors. */
   function propsToggleJSX() {
@@ -1081,9 +1133,8 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
                 {propsToggleJSX()}
                 {showProps && renderPropertyEditor()}
                 <RichTextEditor
-                  key={`${note?.id ?? "new"}:${editorKey}`}
-                  initialMarkdown={fm.body}
                   noteId={note?.id ?? "new"}
+                  markdown={fm.body}
                   selfTitle={title}
                   allNotes={allNotes}
                   onBodyChange={handleWriteBody}
@@ -1104,7 +1155,6 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
                 {propsToggleJSX()}
                 {showProps && renderPropertyEditor()}
                 <textarea
-                key={editorKey}
                 ref={textareaRef}
                 className="editor"
                 value={content}

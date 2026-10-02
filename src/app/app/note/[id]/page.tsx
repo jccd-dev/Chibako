@@ -20,12 +20,14 @@ export default async function NotePage({ params, searchParams }: {
   if (id === "new") {
     const requestedDate = (await searchParams).date;
     const draftDate = typeof requestedDate === "string" && isNoteDate(requestedDate) ? requestedDate : undefined;
-    return <NoteClient initial={null} allNotes={listNotes()} draftDate={draftDate} initialView={initialView} />;
+    // The note tree is not a navigation concern — it is fetched once and cached
+    // on the client, so switching notes costs only this note's own payload.
+    return <NoteClient initial={null} allNotes={undefined} draftDate={draftDate} initialView={initialView} />;
   }
   const note = getNote(id);
   if (!note) {
     const home = listNotes().find((n) => n.kind === "index");
     redirect(home ? `/app/note/${home.id}` : "/app");
   }
-  return <NoteClient initial={note} allNotes={listNotes()} initialView={initialView} />;
+  return <NoteClient initial={note} allNotes={undefined} initialView={initialView} />;
 }

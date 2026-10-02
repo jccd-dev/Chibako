@@ -14,8 +14,8 @@ import { findUnsupportedHtml } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 
 interface RichTextEditorProps {
-  /** Body markdown (frontmatter already stripped). */
-  initialMarkdown: string;
+  /** Body markdown (frontmatter already stripped), kept in sync as the note changes. */
+  markdown: string;
   noteId: string;
   /** Title of the note being edited (excluded from link suggestions). */
   selfTitle: string;
@@ -35,7 +35,7 @@ interface MenuState {
 }
 
 export function RichTextEditor({
-  initialMarkdown,
+  markdown,
   noteId,
   selfTitle,
   allNotes,
@@ -43,10 +43,10 @@ export function RichTextEditor({
   onNavigate,
   onViewShortcut,
 }: RichTextEditorProps) {
-  // Frozen at mount: the note's own edits flow back in through initialMarkdown,
+  // Frozen at mount: the note's own edits flow back in through `markdown`,
   // and swapping the editor for a warning mid-keystroke would be worse than
   // waiting for the next open.
-  const [unsupportedHtml] = useState(() => findUnsupportedHtml(initialMarkdown));
+  const [unsupportedHtml] = useState(() => findUnsupportedHtml(markdown));
   const editable = unsupportedHtml.length === 0;
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuIdx, setMenuIdx] = useState(0);
@@ -101,7 +101,7 @@ export function RichTextEditor({
         }),
         Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
       ],
-      content: initialMarkdown,
+      content: markdown,
       contentType: "markdown",
       editable,
       editorProps: {
@@ -139,8 +139,19 @@ export function RichTextEditor({
         syncMenu(ed);
       },
     },
-    [noteId, editable]
+    [editable]
   );
+
+  // One editor instance serves every note. The document is only re-parsed when
+  // the incoming markdown differs from what the editor already holds, so
+  // switching notes does not rebuild TipTap and typing does not echo back into
+  // a reparse. `contentType` also has to be restated: TipTap needs it to set
+  // markdown instead of html.
+  useEffect(() => {
+    if (!editor) return;
+    if (editor.getMarkdown() === markdown) return;
+    editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
+  }, [editor, markdown]);
 
   function matchesFor(prefix: string): NoteSummary[] {
     const p = prefix.toLowerCase();

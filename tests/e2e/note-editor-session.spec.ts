@@ -96,7 +96,31 @@ test("editor saves a create, queues edits, and retains a failed patch for Retry"
   await expect(page.getByRole("textbox", { name: "Note content" })).toHaveValue("retry body");
 });
 
-test("switching Notes ignores a stale save failure from the previous Note", async ({ page }) => {
+test("switching Notes preserves the text saved to the previous note", async ({ page }) => {
+  await authenticate(page);
+  await page.evaluate(() => localStorage.setItem("chibako_view", "edit"));
+  const first = await createNote(page, "Durability first note", "first body");
+  const second = await createNote(page, "Durability second note", "second body");
+  await page.goto(`/app/note/${first.id}`);
+  const content = page.getByRole("textbox", { name: "Note content" });
+  await expect(content).toHaveValue(first.content);
+
+  await content.fill("saved first edit");
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/notes/${first.id}`);
+    return ((await response.json()) as { note: { content: string } }).note.content;
+  }, { timeout: 15_000 }).toBe("saved first edit");
+
+  await page.getByRole("link", { name: second.title, exact: true }).click();
+  await expect(page).toHaveURL(`/app/note/${second.id}`);
+  await expect(content).toHaveValue(second.content);
+
+  await page.getByRole("link", { name: first.title, exact: true }).click();
+  await expect(page).toHaveURL(`/app/note/${first.id}`);
+  await expect(content).toHaveValue("saved first edit", { timeout: 15_000 });
+});
+
+test("a failed save keeps the text and sends the route back to the note that holds it", async ({ page }) => {
   await authenticate(page);
   await page.evaluate(() => localStorage.setItem("chibako_view", "edit"));
   const first = await createNote(page, "Stale source note", "source body");
@@ -105,8 +129,10 @@ test("switching Notes ignores a stale save failure from the previous Note", asyn
 
   let releaseFailure!: () => void;
   const failureGate = new Promise<void>((resolve) => { releaseFailure = resolve; });
+  let failedOnce = false;
   await page.route(`**/api/notes/${first.id}`, async (route) => {
-    if (route.request().method() === "PATCH") {
+    if (route.request().method() === "PATCH" && !failedOnce) {
+      failedOnce = true;
       await failureGate;
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "offline" }) });
       return;
@@ -119,14 +145,12 @@ test("switching Notes ignores a stale save failure from the previous Note", asyn
   await content.fill("local source edit");
   await saveRequest;
 
-  const navigation = page.getByRole("link", { name: second.title, exact: true }).click();
-  await expect(page).toHaveURL(`/app/note/${second.id}`);
+  await page.getByRole("link", { name: second.title, exact: true }).click();
   releaseFailure();
-  await navigation;
-  await expect(page.getByRole("textbox", { name: "Note title" })).toHaveValue(second.title);
-  await expect(page.getByRole("textbox", { name: "Note content" })).toHaveValue(second.content);
-  await expect(page.getByRole("status")).toHaveText("Saved");
-  await expect(page.getByRole("button", { name: "Retry" })).not.toBeVisible();
+  // The unsaved text outlives the switch, so the route comes back to its note.
+  await expect(page).toHaveURL(`/app/note/${first.id}`);
+  await expect(page.getByRole("textbox", { name: "Note title" })).toHaveValue(first.title);
+  await expect(content).toHaveValue("local source edit");
 });
 
 test("a dirty editor blocks unload and persists after the save completes", async ({ page }) => {

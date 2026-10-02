@@ -29,6 +29,8 @@ export interface EditorSessionEffects {
   ): Promise<Note>;
   onSaved(note: Note, created: boolean): void;
   onError(error: unknown): void;
+  /** A switch away from a note was refused because its edits could not be saved. */
+  onSwitchBlocked?(noteTitle: string): void;
 }
 
 export interface EditorSessionController {
@@ -57,6 +59,14 @@ function hasField(patch: UpdateNoteInput, field: keyof UpdateNoteInput): boolean
   return patch[field] !== undefined;
 }
 
+/** Is `nextNote` the document whose unsaved text is being held? */
+function sameDocument(held: { note: Note | null; title: string }, nextNote: Note | null): boolean {
+  if (held.note && nextNote) return held.note.id === nextNote.id;
+  const heldTitle = held.title.trim();
+  const nextTitle = (nextNote?.title ?? "").trim();
+  return heldTitle.length > 0 && heldTitle === nextTitle;
+}
+
 function applyPatch(document: EditorDocument, patch: UpdateNoteInput): EditorDocument {
   const next = { ...document };
   if (patch.title !== undefined) next.title = patch.title;
@@ -81,6 +91,11 @@ export function createEditorSessionController(
   let persistPromise: Promise<void> | null = null;
   let replacing = false;
   let disposed = false;
+  // Set when a switch away from a note could not be flushed. The next switch
+  // has to reach that note first, or the typed text is dropped by the server
+  // copy that loads in its place. Keyed by the note the text belongs to so a
+  // still-unsaved *draft* (no id yet) is held too.
+  let unsavedSwitch: { note: Note | null; title: string } | null = null;
   const listeners = new Set<() => void>();
   let snapshot: EditorSessionSnapshot = {
     ...document,
@@ -188,24 +203,39 @@ export function createEditorSessionController(
 
     async replaceDocument(nextNote: Note | null): Promise<void> {
       if (disposed) return;
+      const previous = document.note;
+      // An unflushable document keeps the route from moving on. Restoring the
+      // note it belonged to is cheaper than losing the keystrokes. A draft has
+      // no id to return to, so it matches on the title the user was typing.
+      if (unsavedSwitch && !sameDocument(unsavedSwitch, nextNote)) nextNote = unsavedSwitch.note;
       replacing = true;
       try {
         try {
           await persist();
         } catch {
-          // The old session has been attempted; replacement must not carry its
-          // failed patch into the newly selected Note.
+          // Keep the pending patch: the retry path replays it instead of
+          // letting the next note's server copy overwrite local content.
+          unsavedSwitch = { note: previous, title: previous?.title ?? document.title };
+          saveState = "error";
+          publish();
+          try {
+            effects.onSwitchBlocked?.(unsavedSwitch.title);
+          } catch {
+            // Reporting the refused switch must not mask the save failure.
+          }
+          return;
         }
       } finally {
-        version += 1;
-        pending = {};
-        inFlightPatch = null;
-        dirty = false;
-        document = documentFor(nextNote);
-        saveState = nextNote ? "saved" : "unsaved";
         replacing = false;
-        publish();
       }
+      unsavedSwitch = null;
+      version += 1;
+      pending = {};
+      inFlightPatch = null;
+      dirty = false;
+      document = documentFor(nextNote);
+      saveState = nextNote ? "saved" : "unsaved";
+      publish();
     },
 
     refreshFromServer(serverNote: Note): void {
