@@ -320,7 +320,8 @@ from ordinary writes, and embedding indexing is intentionally local-only.
 
 When the client runs on the Chibako host and can read the Vault directory, it
 can launch `dist/mcp/server.mjs` with `CHIBAKO_DATA_DIR`. An optional
-`CHIBAKO_API_KEY` restricts its tools; without one, stdio has full local access.
+`CHIBAKO_API_KEY` restricts its tools. Only an unset variable grants full local
+stdio access; an empty or invalid configured key grants no access.
 Do not copy a VPS or Docker filesystem path into a client running on your
 laptop—the path is local to the machine that starts Node.
 

@@ -27,6 +27,7 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconListDetails,
+  IconWallet,
 } from "@tabler/icons-react";
 
 export function TopBar({
@@ -118,6 +119,10 @@ export function TopBar({
             <IconDotsVertical />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onClick={() => router.push("/app/finance")}>
+              <IconWallet />
+              Finance
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/app/calendar")}>
               <IconCalendarMonth />
               Calendar

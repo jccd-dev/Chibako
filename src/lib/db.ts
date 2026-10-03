@@ -119,6 +119,41 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_bookmarks_note ON bookmarks (note_id);
   `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_accounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('money', 'asset')),
+    currency TEXT NOT NULL CHECK (currency = 'PHP'),
+    opening_balance_cents INTEGER NOT NULL CHECK (typeof(opening_balance_cents) = 'integer' AND opening_balance_cents BETWEEN -9007199254740991 AND 9007199254740991),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_accounts_list ON finance_accounts (archived, created_at, id);
+  CREATE TABLE IF NOT EXISTS finance_requests (
+    actor_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    result TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (actor_id, request_id)
+  );
+  CREATE TABLE IF NOT EXISTS finance_audit (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    affected_ids TEXT NOT NULL,
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (actor_id, request_id) REFERENCES finance_requests (actor_id, request_id) DEFERRABLE INITIALLY DEFERRED
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_audit_created ON finance_audit (created_at, id);
+  `,
 ];
 
 export function getDb(): Database.Database {

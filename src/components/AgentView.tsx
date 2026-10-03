@@ -186,6 +186,16 @@ bearer_token_env_var = "CHIBAKO_API_KEY"`;
       </section>
 
       <section className="mt-7 pb-8">
+        <h2 className="text-sm font-semibold tracking-tight">Finance account preview</h2>
+        <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-muted-foreground">
+          Add <code className="font-mono text-xs">finance:read</code> to read accounts and balances, and <code className="font-mono text-xs">finance:manage</code> to create, rename, or archive accounts. Neither manage nor write grants read access. Existing keys gain no finance access automatically.
+        </p>
+        <p className="mt-2 max-w-prose text-sm leading-relaxed text-muted-foreground">
+          Use <code className="font-mono text-xs">list_finance_accounts</code>, <code className="font-mono text-xs">get_finance_account</code>, and <code className="font-mono text-xs">get_finance_summary</code> for reads. Mutations use <code className="font-mono text-xs">create_finance_account</code> or <code className="font-mono text-xs">update_finance_account</code>, a unique request_id, and the current version for edits. Amounts are PHP decimal strings on creation and integer cents in results. Activity tools are not available yet.
+        </p>
+      </section>
+
+      <section className="mt-7 pb-8">
         <h2 className="text-sm font-semibold tracking-tight">Plain REST (optional)</h2>
         <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-muted-foreground">
           Use the HTTP API directly with the same bearer-token authentication.

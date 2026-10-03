@@ -1,0 +1,179 @@
+"use client";
+
+import { useEffect, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
+import { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
+import type { FinanceAccount } from "@/features/finance/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+
+const tabs = ["overview", "activity", "planning", "manage"] as const;
+type FinanceTab = typeof tabs[number];
+const isTab = (value: string | undefined): value is FinanceTab => tabs.some(tab => tab === value);
+const money = (cents: number) => {
+  const absolute = BigInt(cents < 0 ? -cents : cents);
+  return `${cents < 0 ? "-" : ""}PHP ${new Intl.NumberFormat("en-PH").format(absolute / 100n)}.${String(absolute % 100n).padStart(2, "0")}`;
+};
+const decimal = (cents: number) => `${cents < 0 ? "-" : ""}${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
+const control = "min-h-11 text-sm transition-none focus-visible:ring-2 focus-visible:ring-ring";
+
+export function FinanceView({ initialTab }: { initialTab?: string }) {
+  const router = useRouter();
+  const finance = useFinanceAccounts();
+  const [tab, setTab] = useState<FinanceTab>(isTab(initialTab) ? initialTab : "overview");
+  const [panel, setPanel] = useState<"create" | FinanceAccount | null>(null);
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState("money");
+  const [opening, setOpening] = useState("0.00");
+  const editing = typeof panel === "object" ? panel : null;
+  useEffect(() => { setTab(isTab(initialTab) ? initialTab : "overview"); }, [initialTab]);
+
+  function changeTab(value: FinanceTab) {
+    setTab(value);
+    router.replace(`/app/finance?tab=${value}`, { scroll: false });
+  }
+
+  function open(account?: FinanceAccount) {
+    finance.resetSave();
+    setName(account?.name ?? "");
+    setKind(account?.kind ?? "money");
+    setOpening(decimal(account?.opening_balance_cents ?? 0));
+    setPanel(account ?? "create");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const saved = await finance.save(editing?.id ?? null, editing
+      ? { name, version: editing.version }
+      : { name, kind, currency: "PHP", opening_balance: opening }, editing ? "Account updated." : "Account created.");
+    if (saved) setPanel(null);
+  }
+
+  async function archive() {
+    if (!editing) return;
+    if (await finance.save(editing.id, { version: editing.version, archived: !editing.archived }, editing.archived ? "Account restored." : "Account archived. Its balance is retained.")) setPanel(null);
+  }
+
+  const overviewAccounts = finance.accounts.filter(account => !account.archived);
+  const accountRows = (accounts: FinanceAccount[], editable = false) => accounts.length ? (
+    <ul className="divide-y divide-border">
+      {accounts.map(account => <li key={account.id} className="flex min-w-0 items-center justify-between gap-4 py-4">
+        <div className="min-w-0">
+          <p className="break-words text-sm font-medium">{account.name}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{account.archived ? "Archived account" : account.kind === "asset" ? "Asset account" : "Money account"}</p>
+          {account.balance_cents < 0 && <p className="mt-1 flex items-start gap-1.5 text-xs font-medium"><IconAlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />Negative balance. Review this account.</p>}
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-sm font-medium tabular-nums">{money(account.balance_cents)}</p>
+          {editable && <Button variant="ghost" className={control} onClick={() => open(account)} aria-label={`Manage ${account.name}`}>Manage</Button>}
+        </div>
+      </li>)}
+    </ul>
+  ) : <p className="py-5 text-sm text-muted-foreground">No accounts yet. Create one in Manage with its opening balance.</p>;
+
+  return <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
+    <header className="mb-6">
+      <h1 className="font-heading text-2xl font-semibold tracking-tight">Finance</h1>
+      <p className="mt-2 max-w-prose text-sm text-muted-foreground">Your accounts, in PHP. Cash and assets stay separate.</p>
+    </header>
+    <Tabs value={tab} onValueChange={value => { if (isTab(value)) changeTab(value); }}>
+      <TabsList variant="line" className="mb-6 grid h-auto w-full grid-cols-4 justify-start border-b border-border pb-2 sm:flex sm:w-fit" aria-label="Finance views">
+        {tabs.map(value => <TabsTrigger key={value} value={value} className={`${control} px-2 text-muted-foreground sm:px-5`}>{value[0].toUpperCase() + value.slice(1)}</TabsTrigger>)}
+      </TabsList>
+      {finance.notice && <p role="status" className="mb-4 text-sm">{finance.notice}</p>}
+      {finance.loadError && <div role="alert" className="mb-5 rounded-md border border-border bg-muted p-4">
+        <p className="text-sm">{finance.loadError}</p>
+        <Button variant="outline" className={`${control} mt-3`} onClick={() => void finance.refresh()}>Retry loading</Button>
+      </div>}
+      <TabsContent value="overview">
+        {finance.loading && !finance.summary ? <div role="status" aria-label="Loading balances" className="grid gap-6 sm:grid-cols-2">
+          {[0, 1].map(item => <div key={item} className="h-36 rounded-lg bg-muted" />)}
+        </div> : finance.summary && <>
+          <div className="grid gap-8 border-b border-border pb-8 sm:grid-cols-[1.6fr_1fr]">
+            <section aria-label="Money accounts">
+              <h2 className="text-sm font-medium">Money accounts</h2>
+              <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums sm:text-4xl" data-testid="finance-money-total">{money(finance.summary.money.balance_cents)}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{finance.summary.money.account_count} {finance.summary.money.account_count === 1 ? "account" : "accounts"}, including archived accounts. Assets are excluded.</p>
+            </section>
+            <section aria-label="Asset value" className="sm:border-l sm:border-border sm:pl-8">
+              <h2 className="text-sm font-medium">Asset value</h2>
+              <p className="mt-3 text-2xl font-semibold tabular-nums" data-testid="finance-asset-total">{money(finance.summary.assets.balance_cents)}</p>
+              <p className="mt-2 text-sm text-muted-foreground">Tracked value, separate from spendable cash.</p>
+            </section>
+          </div>
+          <div className="grid gap-8 py-8 lg:grid-cols-[1.6fr_1fr]">
+            <section aria-label="Account balances">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold">Account balances</h2>
+                <Button variant="outline" className={control} onClick={() => changeTab("manage")}>Manage accounts</Button>
+              </div>
+              {accountRows(overviewAccounts.filter(account => account.kind === "money"))}
+              {overviewAccounts.some(account => account.kind === "asset") && <div className="mt-6">
+                <h3 className="text-sm font-semibold">Assets</h3>
+                {accountRows(overviewAccounts.filter(account => account.kind === "asset"))}
+              </div>}
+              {finance.total > finance.accounts.length && <p className="mt-3 text-sm text-muted-foreground">Showing the current account page. Review all accounts in Manage.</p>}
+              <p className="mt-3 text-xs text-muted-foreground">Archived balances are retained in totals. Review them in Manage.</p>
+            </section>
+            <section className="self-start rounded-lg bg-muted p-5">
+              <h2 className="text-base font-semibold">Account setup preview</h2>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Openings establish your starting position. They do not count as income or spending.</p>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Monthly activity, budgets, and attention items will appear as the remaining finance features are added.</p>
+            </section>
+          </div>
+        </>}
+      </TabsContent>
+      <TabsContent value="activity"><Preview title="Activity is coming next" text="Income, expenses, transfers, and corrections will appear here. Opening balances are account setup, not income or spending." onManage={() => changeTab("manage")} /></TabsContent>
+      <TabsContent value="planning"><Preview title="Planning is not available yet" text="Budgets, planned activity, goals, debts, and receivables will live here. Start by setting up your money and asset accounts." onManage={() => changeTab("manage")} /></TabsContent>
+      <TabsContent value="manage">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div><h2 className="text-lg font-semibold">Accounts</h2><p className="mt-1 text-sm text-muted-foreground">Opening balances are fixed. Rename or archive accounts here.</p></div>
+          <Button className={control} onClick={() => open()}><IconPlus aria-hidden="true" />Add account</Button>
+        </div>
+        <label className="my-5 flex min-h-11 w-fit cursor-pointer items-center gap-3 text-sm">
+          <input type="checkbox" className="size-4 accent-primary" checked={finance.includeArchived} onChange={event => finance.showArchived(event.target.checked)} />Show archived accounts
+        </label>
+        {finance.loading ? <p role="status" className="py-6 text-sm text-muted-foreground">Loading accounts…</p> : accountRows(finance.accounts, true)}
+        {finance.total > 50 && <nav aria-label="Account pages" className="mt-5 flex flex-wrap items-center gap-4">
+          <Button variant="outline" className={control} disabled={finance.offset === 0 || finance.loading} onClick={() => finance.setOffset(Math.max(0, finance.offset - 50))}>Previous</Button>
+          <span className="text-sm">{finance.offset + 1}-{Math.min(finance.offset + 50, finance.total)} of {finance.total}</span>
+          <Button variant="outline" className={control} disabled={finance.offset + 50 >= finance.total || finance.loading} onClick={() => finance.setOffset(finance.offset + 50)}>Next</Button>
+        </nav>}
+        <section className="mt-8 border-t border-border pt-6">
+          <h3 className="text-sm font-semibold">More management tools are coming</h3>
+          <p className="mt-2 text-sm text-muted-foreground">Categories, tags, and Tarsi import are not available in this account setup preview.</p>
+        </section>
+      </TabsContent>
+    </Tabs>
+    <Sheet open={panel !== null} onOpenChange={value => { if (!value && !finance.busy) setPanel(null); }}>
+      <SheetContent showCloseButton={false} className="data-[side=right]:w-full gap-0 overflow-y-auto p-0 text-sm data-[side=right]:sm:max-w-md motion-reduce:transition-none">
+        <SheetHeader className="border-b border-border p-6">
+          <SheetTitle className="text-lg">{editing ? "Manage account" : "Add account"}</SheetTitle>
+          <SheetDescription className="text-sm">{editing ? "Rename or archive without changing the recorded opening." : "Set the balance before any recorded activity. PHP only."}</SheetDescription>
+        </SheetHeader>
+        <form onSubmit={submit} className="flex flex-1 flex-col gap-6 p-6">
+          <div className="grid gap-2"><label htmlFor="finance-name" className="font-medium">Account name</label><Input id="finance-name" required maxLength={120} value={name} disabled={finance.busy} onChange={event => setName(event.target.value)} className={control} /></div>
+          <div className="grid gap-2"><label htmlFor="finance-kind" className="font-medium">Account type</label><select id="finance-kind" value={kind} disabled={!!editing || finance.busy} onChange={event => setKind(event.target.value)} className={`${control} rounded-md border border-input bg-popover px-3 text-foreground disabled:opacity-70`}><option value="money">Money</option><option value="asset">Asset</option></select><p className="text-sm text-muted-foreground">Assets track value and are excluded from cash totals.</p></div>
+          <div className="grid gap-2"><label htmlFor="finance-opening" className="font-medium">Opening balance (PHP)</label><Input id="finance-opening" type="text" inputMode="decimal" required pattern="-?\d+(\.\d{1,2})?" value={opening} disabled={!!editing || finance.busy} aria-describedby="finance-opening-help" onChange={event => setOpening(event.target.value)} className={`${control} tabular-nums`} /><p id="finance-opening-help" className="text-sm text-muted-foreground">Use up to two decimal places. Openings do not count as income or spending.</p></div>
+          {editing && <p className="text-sm">Current balance: <strong className="tabular-nums">{money(editing.balance_cents)}</strong></p>}
+          {finance.saveError && <div role="alert" className="rounded-md border border-border bg-muted p-3 text-sm">{finance.saveError} Close and reopen the account if it has changed.</div>}
+          <div className="mt-auto flex flex-wrap justify-end gap-3 pt-4">
+            <Button type="button" variant="outline" className={control} disabled={finance.busy} onClick={() => setPanel(null)}>Cancel</Button>
+            <Button type="submit" className={control} disabled={finance.busy || !name.trim()}>{finance.busy ? "Saving…" : editing ? "Save changes" : "Create account"}</Button>
+          </div>
+          {editing && <section className="border-t border-border pt-5">
+            <p className="mb-3 text-sm text-muted-foreground">Archiving removes the account from active lists. Its balance and history are kept in your totals.</p>
+            <Button type="button" variant="outline" className={control} disabled={finance.busy} onClick={() => void archive()}>{editing.archived ? "Restore account" : "Archive account"}</Button>
+          </section>}
+        </form>
+      </SheetContent>
+    </Sheet>
+  </div>;
+}
+
+function Preview({ title, text, onManage }: { title: string; text: string; onManage: () => void }) {
+  return <section className="max-w-xl py-8"><h2 className="text-lg font-semibold">{title}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{text}</p><Button variant="outline" className={`${control} mt-5`} onClick={onManage}>Manage accounts</Button></section>;
+}

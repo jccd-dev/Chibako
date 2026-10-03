@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { IconCalendarMonth, IconDotsVertical, IconFolderPlus, IconUpload } from "@tabler/icons-react";
+import { IconCalendarMonth, IconDotsVertical, IconFolderPlus, IconUpload, IconWallet } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import type { Bookmark } from "@/lib/bookmarks";
@@ -764,6 +764,18 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
       >
         <IconCalendarMonth size={16} />
+      </Link>
+      <Link
+        href="/app/finance"
+        aria-label="Finance"
+        title="Finance"
+        aria-current={pathname === "/app/finance" ? "page" : undefined}
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+          pathname === "/app/finance" && "bg-accent text-foreground"
+        )}
+      >
+        <IconWallet size={16} />
       </Link>
       <Link
         href="/app/agent"

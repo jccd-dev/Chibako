@@ -66,7 +66,11 @@ export async function POST(request: Request) {
     return jsonError(400, "Invalid JSON body");
   }
 
-  const server = createMcpServer({ scopes: principal.scopes, exposure: "remote" });
+  const server = createMcpServer({
+    scopes: principal.scopes,
+    exposure: "remote",
+    financeActor: { kind: "api-key", id: principal.id, scopes: principal.scopes },
+  });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   try {
     await server.connect(transport);

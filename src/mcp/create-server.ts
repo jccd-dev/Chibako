@@ -29,10 +29,14 @@ import { reindexEmbeddings, embeddingStatus } from "../lib/embedding-index";
 import { getKnowledgeSchema } from "../features/schema/knowledge-schema";
 import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
+import { authorizeFinance } from "../server/auth/finance-authorization";
+import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
+import { createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema, FinanceError, type FinanceActor, type FinanceScope } from "../features/finance/types";
 
 export interface McpServerOptions {
   scopes: readonly string[] | null;
   exposure: "local" | "remote";
+  financeActor?: FinanceActor;
 }
 function deny(): { content: [{ type: "text"; text: string }]; isError: true } {
   return { content: [{ type: "text", text: "unauthorized: API key lacks the required scope" }], isError: true };
@@ -76,7 +80,7 @@ const MUTATING = { readOnlyHint: false, destructiveHint: false, idempotentHint: 
 const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
 
 export function createMcpServer(options: McpServerOptions): McpServer {
-  const authorized = (required: readonly string[]) => options.scopes === null || hasAnyScope(options.scopes, required);
+  const authorized = (required: readonly string[]) => (options.exposure === "local" && options.scopes === null) || (options.scopes !== null && hasAnyScope(options.scopes, required));
   const server = new McpServer(
     { name: "chibako", version: "0.1.0" },
     { instructions: "Start with get_knowledge_schema. Use recall or search_notes before loading full notes, prefer ingest_note for context, and only use write tools when the user intends to change the Vault." },
@@ -359,5 +363,47 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   return ok(getVaultStats());
 });
 
+  const financeActor: FinanceActor | undefined = options.scopes === null
+    ? options.exposure === "local" ? { kind: "trusted-local" } : undefined
+    : options.financeActor?.kind === "api-key"
+      ? { kind: "api-key", id: options.financeActor.id, scopes: options.scopes }
+      : undefined;
+  const financeAuthorized = (scope: FinanceScope) => {
+    if (!financeActor) return false;
+    try { authorizeFinance(financeActor, scope); return true; } catch { return false; }
+  };
+  const financeResult = (scope: FinanceScope, operation: (actor: FinanceActor) => object) => {
+    if (!financeActor || !financeAuthorized(scope)) return deny();
+    try { return ok(operation(financeActor)); } catch (error) {
+      if (error instanceof FinanceError) return fail(`${error.code}: ${error.message}`);
+      console.error(error);
+      return fail("internal_error: Finance operation failed");
+    }
+  };
+  if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_accounts", {
+      title: "List finance accounts", description: "Bounded PHP accounts with exact cent balances. Defaults to active accounts, 50 per page; filter archived or kind explicitly.",
+      inputSchema: listAccountsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listAccounts(actor, args) })));
+    server.registerTool("get_finance_account", {
+      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version.",
+      inputSchema: getAccountSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ account: getAccount(actor, args.id) })));
+    server.registerTool("get_finance_summary", {
+      title: "Finance summary", description: "Separate money and asset totals in PHP integer cents, including archived holdings. Openings do not count as income or spending.",
+      inputSchema: z.object({}).strict(), annotations: READ_ONLY,
+    }, () => financeResult("finance:read", actor => ({ ...getFinanceSummary(actor) })));
+  }
+  if (financeAuthorized("finance:manage")) {
+    const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("create_finance_account", {
+      title: "Create finance account", description: "Create a PHP money or asset account with an exact decimal-string opening_balance. Requires request_id; identical retries return the original account.",
+      inputSchema: createAccountSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createAccount(actor, args)));
+    server.registerTool("update_finance_account", {
+      title: "Manage finance account", description: "Rename or archive an account. Requires request_id and current version; opening, currency and kind cannot change. Archive preserves holdings.",
+      inputSchema: updateAccountSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateAccount(actor, id, args)));
+  }
   return server;
 }

@@ -35,6 +35,9 @@ const ALL_SCOPES = [
   "schema:write",
   "keys:read",
   "keys:write",
+  "finance:read",
+  "finance:write",
+  "finance:manage",
 ];
 
 interface ApiKey {
@@ -385,6 +388,7 @@ export function SettingsView() {
                       <ToggleGroupItem key={s} value={s}>{s}</ToggleGroupItem>
                     ))}
                   </ToggleGroup>
+                  <p className="text-xs leading-relaxed text-muted-foreground">Finance scopes are independent. Reading balances requires finance:read; managing accounts requires finance:manage. Existing keys keep their current permissions.</p>
                 </Field>
                 <div><Button onClick={createKey}>Generate key</Button></div>
               </CardContent>
