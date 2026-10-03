@@ -6,6 +6,7 @@ import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
 import { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
 import { useFinanceActivity } from "@/features/finance/use-finance-activity";
 import { FinanceActivityList, FinanceMonthlyTotals, FinanceTransactionEntry } from "./FinanceActivity";
+import { FinanceAdjustment } from "./FinanceAdjustment";
 import { FinanceClassifications } from "./FinanceClassifications";
 import { formatPHP as money } from "@/features/finance/presentation";
 import type { FinanceAccount } from "@/features/finance/types";
@@ -25,6 +26,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   const finance = useFinanceAccounts();
   const activity = useFinanceActivity(finance.refresh);
   const [transactionOpen, setTransactionOpen] = useState(false);
+  const [adjusting, setAdjusting] = useState<FinanceAccount | null>(null);
   useEffect(() => { if (finance.notice) void activity.refreshOptions(); }, [finance.notice, activity.refreshOptions]);
   const [tab, setTab] = useState<FinanceTab>(isTab(initialTab) ? initialTab : "overview");
   const [panel, setPanel] = useState<"create" | FinanceAccount | null>(null);
@@ -63,7 +65,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   const overviewAccounts = finance.accounts.filter(account => !account.archived);
   const accountRows = (accounts: FinanceAccount[], editable = false) => accounts.length ? (
     <ul className="divide-y divide-border">
-      {accounts.map(account => <li key={account.id} className="flex min-w-0 items-center justify-between gap-4 py-4">
+      {accounts.map(account => <li key={account.id} className="flex min-w-0 flex-wrap items-center justify-between gap-4 py-4">
         <div className="min-w-0">
           <p className="break-words text-sm font-medium">{account.name}</p>
           <p className="mt-1 text-xs text-muted-foreground">{account.archived ? "Archived account" : account.kind === "asset" ? "Asset account" : "Money account"}</p>
@@ -71,7 +73,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         </div>
         <div className="shrink-0 text-right">
           <p className="text-sm font-medium tabular-nums">{money(account.balance_cents)}</p>
-          {editable && <Button variant="ghost" className={control} onClick={() => open(account)} aria-label={`Manage ${account.name}`}>Manage</Button>}
+          {editable && <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" className={control} onClick={() => open(account)} aria-label={`Manage ${account.name}`}>Manage</Button>{!account.archived && <Button variant="outline" className={control} onClick={() => { activity.resetSave(); setAdjusting(account); }} aria-label={`${account.kind === "asset" ? "Adjust value for" : "Reconcile"} ${account.name}`}>{account.kind === "asset" ? "Adjust value" : "Reconcile"}</Button>}</div>}
         </div>
       </li>)}
     </ul>
@@ -127,7 +129,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
             <section className="self-start rounded-lg bg-muted p-5">
               <h2 className="text-base font-semibold">Finance preview</h2>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Openings establish your starting position. They do not count as income or spending.</p>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Income and expenses are ready to record. Transfers, budgets, and attention items arrive in later previews.</p>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Income, expenses and transfers are ready to record. Reconcile balances and adjust asset values in Manage. Budgets and attention items arrive in later previews.</p>
             </section>
           </div>
         </>}
@@ -151,6 +153,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         <FinanceClassifications activity={activity} />
       </TabsContent>
     </Tabs>
+    <FinanceAdjustment selected={adjusting} activity={activity} onClose={() => setAdjusting(null)} />
     <FinanceTransactionEntry activity={activity} open={transactionOpen} onClose={() => setTransactionOpen(false)} />
     <Sheet open={panel !== null} onOpenChange={value => { if (!value && !finance.busy) setPanel(null); }}>
       <SheetContent showCloseButton={false} className="data-[side=right]:w-full gap-0 overflow-y-auto p-0 text-sm data-[side=right]:sm:max-w-md motion-reduce:transition-none">

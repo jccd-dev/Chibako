@@ -32,6 +32,8 @@ import { hasAnyScope } from "../server/auth/api-key-authorization";
 import { authorizeFinance } from "../server/auth/finance-authorization";
 import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
 import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
+import { postTransfer, reconcileAccount, valueAsset } from "../features/finance/movements";
+import { postTransferSchema, postAdjustmentSchema } from "../features/finance/movement-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
 import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
 import { createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema, FinanceError, type FinanceActor, type FinanceScope } from "../features/finance/types";
@@ -414,9 +416,22 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, () => financeResult("finance:read", actor => ({ ...getFinanceSummary(actor) })));
   }
   if (financeAuthorized("finance:write")) {
+    const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("post_finance_transfer", {
+      title: "Transfer money", description: "Atomically move a positive PHP amount between two active money accounts. Optional categorized fee is a linked expense deducted from the source. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
+      inputSchema: postTransferSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...postTransfer(actor, args) })));
+    server.registerTool("reconcile_finance_account", {
+      title: "Reconcile money account", description: "Compare actual_balance (signed PHP decimal) to expected_balance_cents from a recent read. Append the dated difference, never overwrite the opening. Reject a changed balance. Requires request_id and transaction_date. Excluded from income/spending.",
+      inputSchema: postAdjustmentSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...reconcileAccount(actor, args) })));
+    server.registerTool("value_finance_asset", {
+      title: "Adjust asset valuation", description: "Record actual_balance as the new tracked asset value by appending a dated difference from expected_balance_cents. Active asset accounts only, no cash or income/spending effects. Requires request_id and transaction_date.",
+      inputSchema: postAdjustmentSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...valueAsset(actor, args) })));
     server.registerTool("post_finance_transaction", {
       title: "Record income or expense", description: "Post actual PHP activity to an active money account. Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Returns original balance on retries and warns on negative balances without blocking.",
-      inputSchema: postTransactionSchema, annotations: { ...MUTATING, idempotentHint: true },
+      inputSchema: postTransactionSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
   }
   if (financeAuthorized("finance:manage")) {

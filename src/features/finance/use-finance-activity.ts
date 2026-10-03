@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FinanceAccount, FinanceAccountList } from "./types";
 import type { ActivityPage, ActivityTotals, ClassificationPage, FinanceClassification, FinanceTransaction, PostedTransaction } from "./activity-types";
-import { localCalendarDate } from "./presentation";
+import type { PostedMovement } from "./movement-types";
+import { formatPHP, localCalendarDate } from "./presentation";
 
 export interface ActivityFilters { q: string; date_from: string; date_to: string; account_id: string; category_id: string; type: string }
 const emptyFilters: ActivityFilters = { q: "", date_from: "", date_to: "", account_id: "", category_id: "", type: "" };
@@ -60,7 +61,7 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
     setOptionsError("");
     try {
       const [accountPage, classificationPage] = await Promise.all([
-        fetch("/api/finance/accounts?kind=money&archived=all&limit=100").then(json<FinanceAccountList>),
+        fetch("/api/finance/accounts?archived=all&limit=100").then(json<FinanceAccountList>),
         fetch("/api/finance/classifications?archived=all&limit=100").then(json<ClassificationPage>),
       ]);
       setAccounts(accountPage.accounts); setAccountTotal(accountPage.total);
@@ -77,7 +78,7 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
     setOptionsError("");
     try {
       if (kind === "accounts") {
-        const result = await fetch(`/api/finance/accounts?kind=money&archived=all&limit=100&offset=${accounts.length}`).then(json<FinanceAccountList>);
+        const result = await fetch(`/api/finance/accounts?archived=all&limit=100&offset=${accounts.length}`).then(json<FinanceAccountList>);
         setAccounts(current => [...current, ...result.accounts.filter(row => !current.some(item => item.id === row.id))]); setAccountTotal(result.total);
       } else {
         const result = await fetch(`/api/finance/classifications?archived=all&limit=100&offset=${classifications.length}`).then(json<ClassificationPage>);
@@ -102,7 +103,14 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   async function post(input: object) {
     return save<PostedTransaction>("activity", input, "POST", async result => {
       setNotice(result.warnings.includes("negative_balance") ? "Transaction saved. Negative balance: review this account." : "Transaction saved.");
-      await Promise.all([refreshHistory(), refreshTotals(), onPosted()]);
+      await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
+    });
+  }
+  async function postMovement(path: "transfers" | "reconciliations" | "valuations", input: object) {
+    return save<PostedMovement>(`activity/${path}`, input, "POST", async result => {
+      const balances = result.balances.map(balance => `${accounts.find(account => account.id === balance.account_id)?.name ?? "Account"}: ${formatPHP(balance.balance_cents)}`).join("; ");
+      setNotice(`Saved. ${balances}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}`);
+      await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
   async function saveClassification(id: string | null, input: object) {
@@ -116,6 +124,6 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   }
   function applyFilters(value: ActivityFilters) { setOffset(0); setFilters(value); }
   function resetSave() { pending.current = null; setSaveError(""); }
-  return { filters, applyFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, loadMoreOptions, resetSave };
+  return { filters, applyFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, loadMoreOptions, resetSave };
 }
 export type FinanceActivityController = ReturnType<typeof useFinanceActivity>;

@@ -61,6 +61,16 @@ try {
     const detailed = await client.callTool({ name: "list_finance_activity", arguments: { include_details: true } });
     assert.equal((detailed.structuredContent as { transactions: { text: string }[] }).transactions[0].text, "Private receipt");
     assert.equal(getDb().prepare<[], { actor_id: string }>("SELECT actor_id FROM finance_audit LIMIT 1").get()?.actor_id, "trusted-local-mcp");
+    const destination = await client.callTool({ name: "create_finance_account", arguments: { ...opening, request_id: "stdio-destination", name: "Bank", opening_balance: "0" } });
+    const destinationId = (destination.structuredContent as { account: FinanceAccount }).account.id;
+    const movement = { request_id: "stdio-transfer", source_account_id: postedAccountId, destination_account_id: destinationId, amount: "1.01", transaction_date: "2026-10-03" };
+    const moved = await client.callTool({ name: "post_finance_transfer", arguments: movement });
+    assert.equal(moved.isError, undefined);
+    assert.deepEqual((moved.structuredContent as { balances: object[] }).balances, [{ account_id: postedAccountId, balance_cents: 12143 }, { account_id: destinationId, balance_cents: 101 }]);
+    assert.deepEqual((await client.callTool({ name: "post_finance_transfer", arguments: movement })).structuredContent, moved.structuredContent);
+    assert.equal((await client.callTool({ name: "reconcile_finance_account", arguments: { request_id: "stdio-reconcile", account_id: postedAccountId, actual_balance: "121.43", expected_balance_cents: 12143, transaction_date: "2026-10-03" } })).isError, undefined);
+    const asset = await client.callTool({ name: "create_finance_account", arguments: { ...opening, request_id: "stdio-asset", name: "Asset", kind: "asset", opening_balance: "0" } });
+    assert.equal((await client.callTool({ name: "value_finance_asset", arguments: { request_id: "stdio-value", account_id: (asset.structuredContent as { account: FinanceAccount }).account.id, actual_balance: "5", expected_balance_cents: 0, transaction_date: "2026-10-03" } })).isError, undefined);
   });
   await connect(manager.key, async client => {
     const names = (await client.listTools()).tools.map(tool => tool.name);
@@ -71,6 +81,9 @@ try {
   await connect(writer.key, async client => {
     const names = (await client.listTools()).tools.map(tool => tool.name);
     assert.ok(names.includes("post_finance_transaction"));
+    assert.ok(names.includes("post_finance_transfer"));
+    assert.ok(names.includes("reconcile_finance_account"));
+    assert.ok(names.includes("value_finance_asset"));
     assert.ok(!names.includes("list_finance_activity"));
     assert.ok(!names.includes("create_finance_classification"));
     assert.equal((await client.callTool({ name: "post_finance_transaction", arguments: { request_id: "keyed-post", account_id: postedAccountId, amount: "0.01", type: "income", transaction_date: "2026-10-04" } })).isError, undefined);

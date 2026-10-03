@@ -15,6 +15,9 @@ function accountFromRow(row: AccountRow): FinanceAccount {
   const effects = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE account_id = ?").safeIntegers()
     .iterate(row.id) as Iterable<{ type: string; amount_cents: bigint }>;
   for (const effect of effects) balance += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
+  const movements = getDb().prepare("SELECT account_id, type, amount_cents FROM finance_movements WHERE account_id = ? OR destination_account_id = ?").safeIntegers()
+    .iterate(row.id, row.id) as Iterable<{ account_id: string; type: string; amount_cents: bigint }>;
+  for (const effect of movements) balance += effect.type === "transfer" && effect.account_id === row.id ? -effect.amount_cents : effect.amount_cents;
   return { ...row, archived: row.archived === 1, balance_cents: exactCents(balance) };
 }
 
@@ -69,6 +72,9 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
   const effects = db.prepare("SELECT a.kind, t.type, t.amount_cents FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id")
     .safeIntegers().iterate() as Iterable<{ kind: string; type: string; amount_cents: bigint }>;
   for (const effect of effects) totals[effect.kind === "money" ? "money" : "assets"] += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
+  const adjustments = db.prepare("SELECT a.kind, m.amount_cents FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.type != 'transfer'")
+    .safeIntegers().iterate() as Iterable<{ kind: string; amount_cents: bigint }>;
+  for (const effect of adjustments) totals[effect.kind === "money" ? "money" : "assets"] += effect.amount_cents;
   if (Object.values(totals).some((total) => total > BigInt(Number.MAX_SAFE_INTEGER) || total < -BigInt(Number.MAX_SAFE_INTEGER))) {
     throw new FinanceError("Combined balances exceed the supported exact-cent range", 422, "balance_out_of_range");
   }

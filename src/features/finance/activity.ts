@@ -11,15 +11,23 @@ import {
   type FinanceTransaction, type ActivityPage, type ActivityTotals, type PostedTransaction,
 } from "./activity-types";
 
-const transactionSelect = "SELECT t.*, a.name AS account_name, c.name AS category_name, s.name AS subcategory_name FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id";
+const activityRows = `WITH activity AS (
+  SELECT t.*, NULL AS destination_account_id, m.id AS linked_record_id, NULL AS fee_transaction_id,
+    NULL AS compared_balance_cents, NULL AS actual_balance_cents
+  FROM finance_transactions t LEFT JOIN finance_movements m ON m.fee_transaction_id = t.id
+  UNION ALL
+  SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at,
+    destination_account_id, NULL, fee_transaction_id, compared_balance_cents, actual_balance_cents FROM finance_movements
+)`;
+const transactionSelect = "SELECT t.*, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id";
 
 type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids"> & { text: string; tag_ids: string; created_at: number; updated_at: number };
 function transactionFromRow(row: TransactionRow, details: boolean): FinanceTransaction {
   const { text, tag_ids, created_at, updated_at, ...compact } = row;
   return { ...compact, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
 }
-function readTransaction(id: string, details: boolean): FinanceTransaction {
-  const row = getDb().prepare(`${transactionSelect} WHERE t.id = ?`).get(id) as TransactionRow | undefined;
+export function readTransaction(id: string, details: boolean): FinanceTransaction {
+  const row = getDb().prepare(`${activityRows} ${transactionSelect} WHERE t.id = ?`).get(id) as TransactionRow | undefined;
   if (!row) throw new FinanceError("Transaction not found", 404, "not_found");
   return transactionFromRow(row, details);
 }
@@ -36,6 +44,15 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
   return financeMutation(actor, request_id, "transaction.post", payload, () => {
     const account = readAccountBalance(payload.account_id);
     if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
+    validateTransactionClassifications(payload);
+    const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)));
+    const id = insertTransaction({ ...payload, amount_cents: amount });
+    const result: PostedTransaction = { transaction: readTransaction(id, false), balance_cents: balance, warnings: balance < 0 ? ["negative_balance"] : [] };
+    return { result, affectedIds: [id, account.id], before: null, after: readTransaction(id, true) };
+  });
+}
+
+export function validateTransactionClassifications(payload: { type: "income" | "expense"; category_id: string | null; subcategory_id: string | null; tag_ids: string[] }) {
     if (payload.category_id) {
       const category = readClassification(payload.category_id);
       if (category.kind !== "category" || category.type !== payload.type || category.parent_id || category.archived) {
@@ -52,13 +69,12 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
       const tag = readClassification(id);
       if (tag.kind !== "tag" || tag.archived) throw new FinanceError("Choose active tags", 400, "invalid_tag");
     }
-    const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)));
-    const id = randomUUID(), timestamp = now();
-    getDb().prepare("INSERT INTO finance_transactions (id,type,account_id,amount_cents,transaction_date,category_id,subcategory_id,text,tag_ids,version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,?,?)")
-      .run(id, payload.type, account.id, amount, payload.transaction_date, payload.category_id, payload.subcategory_id, payload.text, JSON.stringify(payload.tag_ids), timestamp, timestamp);
-    const result: PostedTransaction = { transaction: readTransaction(id, false), balance_cents: balance, warnings: balance < 0 ? ["negative_balance"] : [] };
-    return { result, affectedIds: [id, account.id], before: null, after: readTransaction(id, true) };
-  });
+}
+export function insertTransaction(payload: { type: "income" | "expense"; account_id: string; amount_cents: number; transaction_date: string; category_id: string | null; subcategory_id: string | null; text: string; tag_ids: string[] }): string {
+  const id = randomUUID(), timestamp = now();
+  getDb().prepare("INSERT INTO finance_transactions (id,type,account_id,amount_cents,transaction_date,category_id,subcategory_id,text,tag_ids,version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,?,?)")
+    .run(id, payload.type, payload.account_id, payload.amount_cents, payload.transaction_date, payload.category_id, payload.subcategory_id, payload.text, JSON.stringify(payload.tag_ids), timestamp, timestamp);
+  return id;
 }
 export function listTransactions(actor: FinanceActor, input: unknown = {}): ActivityPage {
   authorizeFinance(actor, "finance:read");
@@ -67,7 +83,8 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
   for (const [key, operator] of [["date_from", ">="], ["date_to", "<="]] as const) {
     if (query[key]) { clauses.push(`t.transaction_date ${operator} ?`); values.push(query[key]); }
   }
-  for (const key of ["account_id", "type"] as const) if (query[key]) { clauses.push(`t.${key} = ?`); values.push(query[key]); }
+  if (query.account_id) { clauses.push("(t.account_id = ? OR t.destination_account_id = ?)"); values.push(query.account_id, query.account_id); }
+  if (query.type) { clauses.push("t.type = ?"); values.push(query.type); }
   if (query.category_id) { clauses.push("(t.category_id = ? OR t.subcategory_id = ?)"); values.push(query.category_id, query.category_id); }
   if (query.q) {
     const needle = `%${query.q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -77,8 +94,8 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const db = getDb();
   return db.transaction(() => {
-    const { total } = db.prepare(`SELECT COUNT(*) AS total FROM finance_transactions t ${where}`).get(...values) as { total: number };
-    const rows = db.prepare(`${transactionSelect} ${where} ORDER BY t.transaction_date DESC, t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`)
+    const { total } = db.prepare(`${activityRows} SELECT COUNT(*) AS total FROM activity t ${where}`).get(...values) as { total: number };
+    const rows = db.prepare(`${activityRows} ${transactionSelect} ${where} ORDER BY t.transaction_date DESC, t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`)
       .all(...values, query.limit, query.offset) as TransactionRow[];
     return { transactions: rows.map(row => transactionFromRow(row, query.include_details)), total, limit: query.limit, offset: query.offset };
   })();

@@ -186,6 +186,29 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_finance_transactions_account ON finance_transactions (account_id, transaction_date);
   CREATE INDEX IF NOT EXISTS idx_finance_transactions_category ON finance_transactions (category_id, transaction_date);
   `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_movements (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('transfer', 'reconciliation', 'valuation')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    destination_account_id TEXT REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN -9007199254740991 AND 9007199254740991),
+    transaction_date TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    tag_ids TEXT NOT NULL DEFAULT '[]',
+    fee_transaction_id TEXT UNIQUE REFERENCES finance_transactions(id),
+    compared_balance_cents INTEGER,
+    actual_balance_cents INTEGER,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((type = 'transfer' AND destination_account_id IS NOT NULL AND destination_account_id != account_id AND amount_cents > 0 AND compared_balance_cents IS NULL AND actual_balance_cents IS NULL)
+      OR (type != 'transfer' AND destination_account_id IS NULL AND fee_transaction_id IS NULL AND compared_balance_cents IS NOT NULL AND actual_balance_cents IS NOT NULL))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_movements_date ON finance_movements (transaction_date DESC, created_at DESC, id);
+  CREATE INDEX IF NOT EXISTS idx_finance_movements_account ON finance_movements (account_id, transaction_date);
+  CREATE INDEX IF NOT EXISTS idx_finance_movements_destination ON finance_movements (destination_account_id, transaction_date);
+  `,
 ];
 
 export function getDb(): Database.Database {
