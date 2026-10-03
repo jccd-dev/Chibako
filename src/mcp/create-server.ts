@@ -31,6 +31,9 @@ import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
 import { authorizeFinance } from "../server/auth/finance-authorization";
 import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
+import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
+import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
+import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
 import { createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema, FinanceError, type FinanceActor, type FinanceScope } from "../features/finance/types";
 
 export interface McpServerOptions {
@@ -381,6 +384,22 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }
   };
   if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_activity", {
+      title: "Finance activity", description: "Bounded income/expense history with date, account, category, type and text/tag search. Compact by default; explicitly request include_details for text, tags and timestamps.",
+      inputSchema: listTransactionsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listTransactions(actor, args) })));
+    server.registerTool("get_finance_transaction", {
+      title: "Inspect finance transaction", description: "Inspect one posted transaction. Personal text and tags require include_details: true.",
+      inputSchema: getTransactionSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ transaction: getTransaction(actor, id, args) })));
+    server.registerTool("get_finance_activity_totals", {
+      title: "Monthly finance totals", description: "Exact PHP income and spending by transaction calendar month (YYYY-MM), defaulting to this month. Excludes openings and assets.",
+      inputSchema: activityTotalsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...getActivityTotals(actor, args) })));
+    server.registerTool("list_finance_classifications", {
+      title: "Finance categories and tags", description: "Bounded categories, subcategories and tags. Income and expense types remain separate; archived entries require an explicit filter.",
+      inputSchema: listClassificationsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listClassifications(actor, args) })));
     server.registerTool("list_finance_accounts", {
       title: "List finance accounts", description: "Bounded PHP accounts with exact cent balances. Defaults to active accounts, 50 per page; filter archived or kind explicitly.",
       inputSchema: listAccountsSchema, annotations: READ_ONLY,
@@ -394,8 +413,22 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: z.object({}).strict(), annotations: READ_ONLY,
     }, () => financeResult("finance:read", actor => ({ ...getFinanceSummary(actor) })));
   }
+  if (financeAuthorized("finance:write")) {
+    server.registerTool("post_finance_transaction", {
+      title: "Record income or expense", description: "Post actual PHP activity to an active money account. Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Returns original balance on retries and warns on negative balances without blocking.",
+      inputSchema: postTransactionSchema, annotations: { ...MUTATING, idempotentHint: true },
+    }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
+  }
   if (financeAuthorized("finance:manage")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("create_finance_classification", {
+      title: "Create category or tag", description: "Create a typed income/expense category, one-level subcategory or untyped tag. Requires request_id.",
+      inputSchema: createClassificationSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createClassification(actor, args)));
+    server.registerTool("update_finance_classification", {
+      title: "Manage category or tag", description: "Rename or archive a classification, preserving history. Requires request_id and current version.",
+      inputSchema: updateClassificationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateClassification(actor, id, args)));
     server.registerTool("create_finance_account", {
       title: "Create finance account", description: "Create a PHP money or asset account with an exact decimal-string opening_balance. Requires request_id; identical retries return the original account.",
       inputSchema: createAccountSchema, annotations,

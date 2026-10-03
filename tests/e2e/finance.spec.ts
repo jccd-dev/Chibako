@@ -94,3 +94,104 @@ for (const device of ["desktop", "mobile"]) test(device + " finance account work
   }
   expect(errors).toEqual([]);
 });
+
+for (const device of ["desktop", "mobile"]) test(device + " income/expense entry retains Activity filters and inspectable context", async ({ page }) => {
+  await page.setViewportSize(device === "mobile" ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await authenticate(page);
+  await page.goto("/app/finance?tab=manage");
+  const cash = device + " posting cash";
+  const category = device + " travel";
+  const tag = device + " receipt";
+  const text = device + " station ticket";
+  await addAccount(page, cash, "100.00");
+  async function classification(name: string, kind: string, parent?: string) {
+    await page.getByRole("button", { name: "Add category or tag", exact: true }).click();
+    await page.getByLabel("Classification name", { exact: true }).fill(name);
+    await page.getByLabel("Classification kind", { exact: true }).selectOption(kind);
+    if (parent) await page.getByLabel("Parent category", { exact: true }).selectOption({ label: parent });
+    await page.getByRole("button", { name: "Save classification", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+  await classification(category, "expense");
+  await classification(category + " rail", "expense", category);
+  await classification(tag, "tag");
+  await classification(device + " wages", "income");
+  const before = await (await page.request.get("/api/finance/activity/totals?month=2026-10")).json();
+  await page.getByRole("tab", { name: "Activity", exact: true }).click();
+  await page.getByLabel("Search activity", { exact: true }).fill(text);
+  await page.getByLabel("Filter account", { exact: true }).selectOption({ label: cash });
+  await page.getByLabel("Filter type", { exact: true }).selectOption("expense");
+  await page.getByLabel("From date", { exact: true }).fill("2026-10-01");
+  await page.getByLabel("To date", { exact: true }).fill("2026-10-31");
+  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await expect(page.getByLabel("Transaction type", { exact: true })).toHaveValue("expense");
+  if (device === "mobile") expect((await page.getByRole("dialog").boundingBox())?.width).toBe(390);
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByLabel("Amount (PHP)", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("7.25");
+  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await page.getByLabel("Transaction date", { exact: true }).fill("2026-10-03");
+  await page.getByLabel("Category", { exact: true }).selectOption({ label: category });
+  await page.getByLabel("Subcategory", { exact: true }).selectOption({ label: category + " rail" });
+  await page.getByText("Additional details", { exact: true }).click();
+  await page.getByLabel("Transaction text", { exact: true }).fill(text);
+  await page.getByLabel(tag, { exact: true }).check();
+  await page.getByRole("button", { name: "Save and add another", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByLabel("Amount (PHP)", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Account", { exact: true })).toHaveValue(/.+/);
+  await expect(page.getByLabel("Transaction date", { exact: true })).toHaveValue("2026-10-03");
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("1.25");
+  await page.getByLabel("Transaction text", { exact: true }).fill(text);
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Activity", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("Search activity", { exact: true })).toHaveValue(text);
+  await expect(page.getByLabel("Filter type", { exact: true })).toHaveValue("expense");
+  await page.getByRole("button", { name: "Inspect expense PHP 7.25 on 2026-10-03", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText(text);
+  await expect(page.getByRole("dialog")).toContainText(tag);
+  await page.getByRole("button", { name: "Close details", exact: true }).click();
+
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByLabel("Transaction type", { exact: true }).selectOption("income");
+  await expect(page.getByLabel("Category", { exact: true }).locator("option").allTextContents()).resolves.not.toContain(category);
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("12.01");
+  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await page.getByLabel("Transaction date", { exact: true }).fill("2026-10-04");
+  await page.getByLabel("Category", { exact: true }).selectOption({ label: device + " wages" });
+  await page.route("**/api/finance/activity", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fetch();
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Response lost after posting" }) });
+  });
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Response lost after posting");
+  await page.unroute("**/api/finance/activity");
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByLabel("Search activity", { exact: true })).toHaveValue(text);
+  const accounts = await (await page.request.get("/api/finance/accounts")).json();
+  const account = accounts.accounts.find((row: { name: string }) => row.name === cash);
+  expect(account.balance_cents).toBe(10351);
+  const after = await (await page.request.get("/api/finance/activity/totals?month=2026-10")).json();
+  expect(after.income_cents).toBe(before.income_cents + 1201);
+  expect(after.expense_cents).toBe(before.expense_cents + 850);
+  await page.getByRole("tab", { name: "Overview", exact: true }).click();
+  await page.getByLabel("Report month", { exact: true }).fill("2026-10");
+  await expect(page.getByTestId("finance-income-total")).toBeVisible();
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate(value => document.documentElement.classList.toggle("dark", value === "dark"), theme);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.getByRole("button", { name: "Add transaction", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+  expect(errors).toEqual([]);
+});

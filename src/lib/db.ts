@@ -154,6 +154,38 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_finance_audit_created ON finance_audit (created_at, id);
   `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_classifications (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('category', 'tag')),
+    type TEXT CHECK (type IN ('income', 'expense')),
+    name TEXT NOT NULL,
+    parent_id TEXT REFERENCES finance_classifications(id),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((kind = 'category' AND type IS NOT NULL) OR (kind = 'tag' AND type IS NULL AND parent_id IS NULL))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_classifications_list ON finance_classifications (kind, type, parent_id, name, id);
+  CREATE TABLE IF NOT EXISTS finance_transactions (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    transaction_date TEXT NOT NULL,
+    category_id TEXT REFERENCES finance_classifications(id),
+    subcategory_id TEXT REFERENCES finance_classifications(id),
+    text TEXT NOT NULL DEFAULT '',
+    tag_ids TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_transactions_date ON finance_transactions (transaction_date DESC, created_at DESC, id);
+  CREATE INDEX IF NOT EXISTS idx_finance_transactions_account ON finance_transactions (account_id, transaction_date);
+  CREATE INDEX IF NOT EXISTS idx_finance_transactions_category ON finance_transactions (category_id, transaction_date);
+  `,
 ];
 
 export function getDb(): Database.Database {

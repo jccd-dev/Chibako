@@ -12,6 +12,8 @@ const vault = mkdtempSync(join(tmpdir(), "chibako-finance-stdio-"));
 process.env.CHIBAKO_DATA_DIR = vault;
 const manager = createApiKey("Manage only", ["finance:manage"]);
 const reader = createApiKey("Read only", ["finance:read"]);
+const writer = createApiKey("Write only", ["finance:write"]);
+let postedAccountId = "";
 const opening = { request_id: "stdio-create", name: "Cash", kind: "money", currency: "PHP", opening_balance: "123.45" };
 
 async function connect(configuredKey: string | undefined, check: (client: Client) => Promise<void>) {
@@ -47,6 +49,17 @@ try {
       assert.equal(account.archived, archived);
     }
     assert.deepEqual((await client.callTool({ name: "create_finance_account", arguments: opening })).structuredContent, original);
+    postedAccountId = original.account.id;
+    const payload = { request_id: "stdio-post", account_id: postedAccountId, amount: "1.01", transaction_date: "2026-10-03", text: "Private receipt" };
+    const posted = await client.callTool({ name: "post_finance_transaction", arguments: payload });
+    assert.equal(posted.isError, undefined);
+    assert.equal((posted.structuredContent as { balance_cents: number }).balance_cents, 12244);
+    assert.deepEqual((await client.callTool({ name: "post_finance_transaction", arguments: payload })).structuredContent, posted.structuredContent);
+    const history = await client.callTool({ name: "list_finance_activity", arguments: {} });
+    const compact = (history.structuredContent as { transactions: object[] }).transactions[0];
+    assert.equal("text" in compact, false);
+    const detailed = await client.callTool({ name: "list_finance_activity", arguments: { include_details: true } });
+    assert.equal((detailed.structuredContent as { transactions: { text: string }[] }).transactions[0].text, "Private receipt");
     assert.equal(getDb().prepare<[], { actor_id: string }>("SELECT actor_id FROM finance_audit LIMIT 1").get()?.actor_id, "trusted-local-mcp");
   });
   await connect(manager.key, async client => {
@@ -55,18 +68,25 @@ try {
     assert.ok(!names.includes("get_finance_summary"));
     assert.equal((await client.callTool({ name: "create_finance_account", arguments: opening })).isError, undefined);
   });
+  await connect(writer.key, async client => {
+    const names = (await client.listTools()).tools.map(tool => tool.name);
+    assert.ok(names.includes("post_finance_transaction"));
+    assert.ok(!names.includes("list_finance_activity"));
+    assert.ok(!names.includes("create_finance_classification"));
+    assert.equal((await client.callTool({ name: "post_finance_transaction", arguments: { request_id: "keyed-post", account_id: postedAccountId, amount: "0.01", type: "income", transaction_date: "2026-10-04" } })).isError, undefined);
+  });
   await connect(reader.key, async client => {
     const names = (await client.listTools()).tools.map(tool => tool.name);
     assert.ok(names.includes("get_finance_summary"));
     assert.ok(!names.includes("create_finance_account"));
     const result = await client.callTool({ name: "get_finance_summary", arguments: {} });
-    assert.equal((result.structuredContent as { money: { balance_cents: number } }).money.balance_cents, 24690);
+    assert.equal((result.structuredContent as { money: { balance_cents: number } }).money.balance_cents, 24590);
   });
   for (const key of ["", "invalid"]) await connect(key, async client => {
     assert.equal(client.getServerCapabilities()?.tools, undefined);
     await assert.rejects(client.listTools(), /Method not found/);
   });
-  console.log("PASS finance stdio: trusted, scoped, invalid/empty key, exact cents, retry, archive/restore");
+  console.log("PASS finance stdio: trusted, independent read/write/manage, invalid/empty key, exact cents, post/retry, compact/details, archive/restore");
 } finally { getDb().close(); rmSync(vault, { recursive: true, force: true }); }
 }
 

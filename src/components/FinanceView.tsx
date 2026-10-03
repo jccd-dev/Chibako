@@ -4,6 +4,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
 import { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
+import { useFinanceActivity } from "@/features/finance/use-finance-activity";
+import { FinanceActivityList, FinanceMonthlyTotals, FinanceTransactionEntry } from "./FinanceActivity";
+import { FinanceClassifications } from "./FinanceClassifications";
+import { formatPHP as money } from "@/features/finance/presentation";
 import type { FinanceAccount } from "@/features/finance/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,16 +17,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 const tabs = ["overview", "activity", "planning", "manage"] as const;
 type FinanceTab = typeof tabs[number];
 const isTab = (value: string | undefined): value is FinanceTab => tabs.some(tab => tab === value);
-const money = (cents: number) => {
-  const absolute = BigInt(cents < 0 ? -cents : cents);
-  return `${cents < 0 ? "-" : ""}PHP ${new Intl.NumberFormat("en-PH").format(absolute / 100n)}.${String(absolute % 100n).padStart(2, "0")}`;
-};
 const decimal = (cents: number) => `${cents < 0 ? "-" : ""}${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
 const control = "min-h-11 text-sm transition-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function FinanceView({ initialTab }: { initialTab?: string }) {
   const router = useRouter();
   const finance = useFinanceAccounts();
+  const activity = useFinanceActivity(finance.refresh);
+  const [transactionOpen, setTransactionOpen] = useState(false);
+  useEffect(() => { if (finance.notice) void activity.refreshOptions(); }, [finance.notice, activity.refreshOptions]);
   const [tab, setTab] = useState<FinanceTab>(isTab(initialTab) ? initialTab : "overview");
   const [panel, setPanel] = useState<"create" | FinanceAccount | null>(null);
   const [name, setName] = useState("");
@@ -75,15 +78,17 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   ) : <p className="py-5 text-sm text-muted-foreground">No accounts yet. Create one in Manage with its opening balance.</p>;
 
   return <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
-    <header className="mb-6">
-      <h1 className="font-heading text-2xl font-semibold tracking-tight">Finance</h1>
-      <p className="mt-2 max-w-prose text-sm text-muted-foreground">Your accounts, in PHP. Cash and assets stay separate.</p>
+    <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div><h1 className="font-heading text-2xl font-semibold tracking-tight">Finance</h1>
+      <p className="mt-2 max-w-prose text-sm text-muted-foreground">Your accounts and activity, in PHP. Cash and assets stay separate.</p></div>
+      <Button className={control} onClick={() => setTransactionOpen(true)}><IconPlus aria-hidden="true" data-icon="inline-start" />Add transaction</Button>
     </header>
     <Tabs value={tab} onValueChange={value => { if (isTab(value)) changeTab(value); }}>
       <TabsList variant="line" className="mb-6 grid h-auto w-full grid-cols-4 justify-start border-b border-border pb-2 sm:flex sm:w-fit" aria-label="Finance views">
         {tabs.map(value => <TabsTrigger key={value} value={value} className={`${control} px-2 text-muted-foreground sm:px-5`}>{value[0].toUpperCase() + value.slice(1)}</TabsTrigger>)}
       </TabsList>
       {finance.notice && <p role="status" className="mb-4 text-sm">{finance.notice}</p>}
+      {activity.notice && <p role="status" className="mb-4 text-sm">{activity.notice}</p>}
       {finance.loadError && <div role="alert" className="mb-5 rounded-md border border-border bg-muted p-4">
         <p className="text-sm">{finance.loadError}</p>
         <Button variant="outline" className={`${control} mt-3`} onClick={() => void finance.refresh()}>Retry loading</Button>
@@ -104,6 +109,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
               <p className="mt-2 text-sm text-muted-foreground">Tracked value, separate from spendable cash.</p>
             </section>
           </div>
+          <FinanceMonthlyTotals activity={activity} />
           <div className="grid gap-8 py-8 lg:grid-cols-[1.6fr_1fr]">
             <section aria-label="Account balances">
               <div className="flex items-center justify-between gap-3">
@@ -119,14 +125,14 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
               <p className="mt-3 text-xs text-muted-foreground">Archived balances are retained in totals. Review them in Manage.</p>
             </section>
             <section className="self-start rounded-lg bg-muted p-5">
-              <h2 className="text-base font-semibold">Account setup preview</h2>
+              <h2 className="text-base font-semibold">Finance preview</h2>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Openings establish your starting position. They do not count as income or spending.</p>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Monthly activity, budgets, and attention items will appear as the remaining finance features are added.</p>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Income and expenses are ready to record. Transfers, budgets, and attention items arrive in later previews.</p>
             </section>
           </div>
         </>}
       </TabsContent>
-      <TabsContent value="activity"><Preview title="Activity is coming next" text="Income, expenses, transfers, and corrections will appear here. Opening balances are account setup, not income or spending." onManage={() => changeTab("manage")} /></TabsContent>
+      <TabsContent value="activity"><FinanceActivityList activity={activity} /></TabsContent>
       <TabsContent value="planning"><Preview title="Planning is not available yet" text="Budgets, planned activity, goals, debts, and receivables will live here. Start by setting up your money and asset accounts." onManage={() => changeTab("manage")} /></TabsContent>
       <TabsContent value="manage">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -142,12 +148,10 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           <span className="text-sm">{finance.offset + 1}-{Math.min(finance.offset + 50, finance.total)} of {finance.total}</span>
           <Button variant="outline" className={control} disabled={finance.offset + 50 >= finance.total || finance.loading} onClick={() => finance.setOffset(finance.offset + 50)}>Next</Button>
         </nav>}
-        <section className="mt-8 border-t border-border pt-6">
-          <h3 className="text-sm font-semibold">More management tools are coming</h3>
-          <p className="mt-2 text-sm text-muted-foreground">Categories, tags, and Tarsi import are not available in this account setup preview.</p>
-        </section>
+        <FinanceClassifications activity={activity} />
       </TabsContent>
     </Tabs>
+    <FinanceTransactionEntry activity={activity} open={transactionOpen} onClose={() => setTransactionOpen(false)} />
     <Sheet open={panel !== null} onOpenChange={value => { if (!value && !finance.busy) setPanel(null); }}>
       <SheetContent showCloseButton={false} className="data-[side=right]:w-full gap-0 overflow-y-auto p-0 text-sm data-[side=right]:sm:max-w-md motion-reduce:transition-none">
         <SheetHeader className="border-b border-border p-6">
