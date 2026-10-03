@@ -33,7 +33,11 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    "/Users/jccd/My-Projects/Chibako/.next-abs-probe/types/**/*.ts",
+    "/Users/jccd/My-Projects/Chibako/.next-abs-probe/dev/types/**/*.ts",
+    ".next-abs-probe/types/**/*.ts",
+    ".next-abs-probe/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

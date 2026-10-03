@@ -68,6 +68,26 @@ test("importing a Markdown file creates a note with its content", async ({ page 
   expect((full.note as { content: string }).content).toContain("imported body");
 });
 
+test("Markdown import keeps successful Notes when another import fails", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  const good = `Good import ${stamp}`;
+  const bad = `Bad import ${stamp}`;
+  await page.route("**/api/notes", route => {
+    if (route.request().method() === "POST" && route.request().postDataJSON().title === bad) {
+      return route.fulfill({ status: 400, json: { error: "Cannot import this Note" } });
+    }
+    return route.continue();
+  });
+  await page.getByRole("complementary", { name: "Sidebar" }).locator('input[type="file"]').setInputFiles(
+    [bad, good].map(title => ({ name: `${title}.md`, mimeType: "text/markdown", buffer: Buffer.from(title) })),
+  );
+  await expect.poll(async () => {
+    const { notes } = await (await page.request.get("/api/notes")).json();
+    return notes.filter((note: { title: string }) => [bad, good].includes(note.title)).map((note: { title: string }) => note.title);
+  }).toEqual([good]);
+});
+
 test("cmd-click multi-select deletes several files at once", async ({ page }) => {
   await authenticate(page);
   const stamp = Date.now().toString(36);
@@ -107,6 +127,11 @@ test("dragging a multi-selected file moves all selected files", async ({ page })
   await row(titles[1]).click({ modifiers: ["Meta"] });
   await expect(page.getByText("2 selected")).toBeVisible();
 
+  const batchRequests: string[] = [];
+  page.on("request", request => {
+    if (request.url().endsWith("/api/notes/batch")) batchRequests.push(request.postData() ?? "");
+  });
+
   const source = row(titles[0]).locator("xpath=ancestor::div[@draggable='true'][1]");
   await source.dragTo(root.getByRole("button", { name: folder, exact: true }));
 
@@ -117,6 +142,51 @@ test("dragging a multi-selected file moves all selected files", async ({ page })
       .every(n => n.folder === folder);
   }).toBe(true);
   await expect(page.getByText("2 selected")).toBeHidden();
+  expect(batchRequests).toHaveLength(1);
+});
+
+test("a conflicting multi-Note drag leaves the entire selection unchanged", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  const folder = `Conflict target ${stamp}`;
+  const titles = [`Can move ${stamp}`, `Cannot move ${stamp}`];
+  const ids = await Promise.all(titles.map(title => createNote(page.request, title).then(note => note.id)));
+  await createNote(page.request, titles[1], folder);
+  await page.goto("/app");
+  const root = page.getByRole("navigation", { name: "Files and folders" }).locator("xpath=./div").last();
+  for (const title of titles) await root.getByRole("link", { name: title, exact: true }).click({ modifiers: ["Meta"] });
+  const result = page.waitForResponse(response => response.url().endsWith("/api/notes/batch"));
+  await root.getByRole("link", { name: titles[0], exact: true })
+    .locator("xpath=ancestor::div[@draggable='true'][1]")
+    .dragTo(root.getByRole("button", { name: folder, exact: true }));
+  expect((await result).status()).toBe(409);
+  for (const id of ids) {
+    const data = await (await page.request.get(`/api/notes/${id}`)).json();
+    expect(data.note.folder).toBe("");
+  }
+  await expect(page.getByText("2 selected")).toBeVisible();
+});
+
+test("Note batches validate input and require the action's scope", async ({ page, request }) => {
+  await authenticate(page);
+  const note = await createNote(page.request, `Scoped batch ${Date.now()}`);
+  const key = async (scope: string): Promise<string> => {
+    const response = await page.request.post("/api/keys", { data: { name: "Batch test", scopes: [scope] } });
+    expect(response.status()).toBe(201);
+    return (await response.json()).key;
+  };
+  const writeHeaders = { Authorization: `Bearer ${await key("notes:write")}` };
+  const purgeHeaders = { Authorization: `Bearer ${await key("notes:purge")}` };
+  const readHeaders = { Authorization: `Bearer ${await key("notes:read")}` };
+  const deleted = { action: "delete", ids: [note.id] };
+  expect((await request.post("/api/notes/batch", { data: deleted })).status()).toBe(401);
+  expect((await request.post("/api/notes/batch", { headers: readHeaders, data: deleted })).status()).toBe(403);
+  expect((await request.post("/api/notes/batch", { headers: writeHeaders, data: { action: "delete", ids: [] } })).status()).toBe(400);
+  expect((await request.post("/api/notes/batch", { headers: writeHeaders, data: deleted })).status()).toBe(200);
+  const purged = { action: "purge", ids: [note.id] };
+  expect((await request.post("/api/notes/batch", { headers: writeHeaders, data: purged })).status()).toBe(403);
+  expect((await request.post("/api/notes/batch", { headers: purgeHeaders, data: { action: "restore", ids: [note.id] } })).status()).toBe(403);
+  expect((await request.post("/api/notes/batch", { headers: purgeHeaders, data: purged })).status()).toBe(200);
 });
 
 test("plain clicks and open space clear multi-selection", async ({ page }) => {
@@ -193,7 +263,7 @@ test("cmd-click multi-select purges several trashed files at once", async ({ pag
   await page.getByRole("button", { name: "Trash", exact: true }).click();
   await page.getByTitle(titles[0]).click();
   await page.getByTitle(titles[1]).click({ modifiers: ["Meta"] });
-  await expect(page.getByText("2 selected")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear selection" }).locator("..")).toContainText("2");
 
   await page.getByRole("button", { name: "Delete forever", exact: true }).click();
   await page.locator('[role="alertdialog"]').getByRole("button", { name: "Delete forever", exact: true }).click();

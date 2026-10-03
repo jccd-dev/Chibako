@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { IconCalendarMonth, IconDotsVertical, IconFolderPlus, IconUpload, IconWallet } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
+import { notifyOrganizationChanged as notifyChanged, requestOrganizationChange as request } from "@/features/organization/organization-client";
+import type { NoteBatchInput } from "@/features/organization/note-batch";
 import type { Bookmark } from "@/lib/bookmarks";
 import { cn } from "@/lib/utils";
 import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
@@ -215,29 +217,13 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     });
   }
   function clearSelection() { setSelected(prev => (prev.size ? new Set() : prev)); }
-  function notifyChanged() {
-    window.dispatchEvent(new Event("chibako:notes-changed"));
-    window.dispatchEvent(new Event("chibako:organized"));
-  }
-  async function request(url: string, method: string, body?: object, quiet = false) {
-    const saves: Promise<void>[] = [];
-    window.dispatchEvent(new CustomEvent("chibako:before-organize", { detail: saves }));
-    await Promise.all(saves);
-    const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not save changes.");
-    if (!quiet) notifyChanged();
-    return data;
-  }
-  /** Runs one request per selected note, then refreshes listeners once. */
-  async function bulk(ids: string[], url: (id: string) => string, method: string, body?: object, failure = "Could not complete the action.", navigateAway = true) {
-    if (!ids.length || busy) return false;
+  async function bulk(input: NoteBatchInput, failure = "Could not complete the action.", navigateAway = true) {
+    if (!input.ids.length || busy) return false;
     setBusy(true);
     try {
-      await Promise.all(ids.map(id => request(url(id), method, body, true)));
-      notifyChanged();
+      await request("/api/notes/batch", "POST", input);
       setSelected(new Set());
-      if (navigateAway && ids.some(id => pathname === `/app/note/${id}`)) router.push("/app");
+      if (navigateAway && input.ids.some(id => pathname === `/app/note/${id}`)) router.push("/app");
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : failure);
@@ -255,6 +241,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       for (const file of markdown) {
         try {
           const data = await request("/api/notes", "POST", { title: file.name.replace(/\.(md|markdown)$/i, ""), content: await file.text(), folder: selectedFolder ?? "" }, true);
+          if (!data.note) throw new Error("Could not create Note.");
           created.push(data.note.id);
         } catch { failed.push(file.name); }
       }
@@ -286,7 +273,10 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       } else {
         const data = await request(mode === "create" ? "/api/notes" : `/api/notes/${item.id}`,
           mode === "create" ? "POST" : "PATCH", mode === "create" ? { title: name.trim(), folder: parent } : { title: name.trim() });
-        if (mode === "create") router.push(`/app/note/${data.note.id}`);
+        if (mode === "create") {
+          if (!data.note) throw new Error("Could not create Note.");
+          router.push(`/app/note/${data.note.id}`);
+        }
       }
       setAction(null);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save changes."); }
@@ -316,7 +306,12 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           const group = dragging.type === "note" && selected.has(dragging.id)
             ? notes.filter(n => selected.has(n.id)).map(n => ({ type: "note" as const, id: n.id, name: n.title, parent: n.folder }))
             : [dragging];
-          for (const item of group) await move(item, path);
+          if (dragging.type === "note") {
+            await request("/api/notes/batch", "POST", { action: "move", ids: group.map(item => item.id), folder: path });
+            setExpanded(prev => new Set(prev).add(path));
+          } else {
+            await move(dragging, path);
+          }
           if (group.length > 1) setSelected(new Set());
         } catch (e) { toast.error(e instanceof Error ? e.message : "Could not move item."); }
         finally { setBusy(false); setDragging(null); }
@@ -641,7 +636,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       {selected.size > 0 && (
         <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
           <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{selected.size}</span>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void bulk([...selected], id => `/api/notes/${id}/restore`, "POST", undefined, "Could not restore files.", false)}>Restore</Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void bulk({ action: "restore", ids: [...selected] }, "Could not restore files.", false)}>Restore</Button>
           <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => setBulkPurgeOpen(true)}>Delete forever</Button>
           <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={clearSelection}><IconX /></Button>
         </div>
@@ -841,7 +836,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     <Dialog open={bulkMoveOpen} onOpenChange={open => { if (!open && !busy) setBulkMoveOpen(false); }}>
       <DialogContent><form onSubmit={async e => {
         e.preventDefault();
-        if (await bulk([...selected], id => `/api/notes/${id}`, "PATCH", { folder: bulkMoveParent }, "Could not move files.")) setBulkMoveOpen(false);
+        if (await bulk({ action: "move", ids: [...selected], folder: bulkMoveParent }, "Could not move files.")) setBulkMoveOpen(false);
       }} className="flex flex-col gap-4">
         <DialogHeader><DialogTitle>Move {selected.size} files</DialogTitle></DialogHeader>
         <FieldGroup><Field><FieldLabel htmlFor="bulk-parent">Folder</FieldLabel>{folderPicker(bulkMoveParent, setBulkMoveParent, undefined, "bulk-parent")}</Field></FieldGroup>
@@ -891,10 +886,10 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       try { await request(`/api/trash/${purgeTarget.id}`, "DELETE"); setPurgeTarget(null); } catch { toast.error("Could not delete file."); }
     }} />
     <ConfirmDialog open={bulkDeleteOpen} onOpenChange={open => !open && setBulkDeleteOpen(false)} title={`Delete ${selected.size} files?`} description="The files move to Trash. You can restore them from there for 30 days." confirmLabel="Delete" destructive onConfirm={async () => {
-      if (await bulk([...selected], id => `/api/notes/${id}`, "DELETE", undefined, "Could not delete files.")) setBulkDeleteOpen(false);
+      if (await bulk({ action: "delete", ids: [...selected] }, "Could not delete files.")) setBulkDeleteOpen(false);
     }} />
     <ConfirmDialog open={bulkPurgeOpen} onOpenChange={open => !open && setBulkPurgeOpen(false)} title={`Delete ${selected.size} files forever?`} description="This cannot be undone." confirmLabel="Delete forever" destructive onConfirm={async () => {
-      if (await bulk([...selected], id => `/api/trash/${id}`, "DELETE", undefined, "Could not delete files.")) setBulkPurgeOpen(false);
+      if (await bulk({ action: "purge", ids: [...selected] }, "Could not delete files.")) setBulkPurgeOpen(false);
     }} />
     <ConfirmDialog open={deleteFolderTarget !== null} onOpenChange={open => !open && setDeleteFolderTarget(null)} title={`Delete folder "${deleteFolderTarget?.name}"?`} description={deleteFolderTarget ? `Files inside will move up to "${deleteFolderTarget.parent || "Files (root)"}" and keep their subfolders. The folder itself and its empty subfolders are removed.` : ""} confirmLabel="Delete folder" destructive onConfirm={async () => {
       if (!deleteFolderTarget) return;
