@@ -33,6 +33,8 @@ import { authorizeFinance } from "../server/auth/finance-authorization";
 import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
 import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
 import { postTransfer, reconcileAccount, valueAsset } from "../features/finance/movements";
+import { correctActivity, hideActivity, revertActivity, recordRefund } from "../features/finance/corrections";
+import { correctActivitySchema, activityActionSchema, recordRefundSchema } from "../features/finance/correction-types";
 import { postTransferSchema, postAdjustmentSchema } from "../features/finance/movement-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
 import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
@@ -387,7 +389,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   };
   if (financeAuthorized("finance:read")) {
     server.registerTool("list_finance_activity", {
-      title: "Finance activity", description: "Bounded income/expense history with date, account, category, type and text/tag search. Compact by default; explicitly request include_details for text, tags and timestamps.",
+      title: "Finance activity", description: "Bounded dated activity including refunds, transfers and adjustments. Hidden and reverted records require explicit hidden/reverted filters (false, true, all). Search by date, account, category, type or text/tag. Compact by default; explicitly request include_details for text, tags and timestamps.",
       inputSchema: listTransactionsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listTransactions(actor, args) })));
     server.registerTool("get_finance_transaction", {
@@ -417,6 +419,22 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   }
   if (financeAuthorized("finance:write")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("correct_finance_activity", {
+      title: "Correct finance activity", description: "Replace mistaken amount, account, date or details atomically. Amount is a PHP decimal; adjustments accept a signed difference, not a new target balance. Transfer source is account_id, destination is destination_account_id; a linked fee moves with it. Optional fee correction requires its version. Refunds retain their expense/category link. Requires current version and request_id; returns affected balances.",
+      inputSchema: correctActivitySchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...correctActivity(actor, id, args) })));
+    server.registerTool("hide_finance_activity", {
+      title: "Delete finance activity (hide only)", description: "Hide a record from default Activity without cancelling balances or reports. Transfer fee hides with its transfer. Requires current version and request_id. Inspect with hidden filters.",
+      inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...hideActivity(actor, id, args) })));
+    server.registerTool("revert_finance_activity", {
+      title: "Revert mistaken finance activity", description: "Cancel financial/reporting effects once, including a transfer's linked fee. Revert active refunds before their expense (including fees). Refund reversion cancels its own credit and spending reduction. Requires current version and request_id; identical retries return the original result.",
+      inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...revertActivity(actor, id, args) })));
+    server.registerTool("record_finance_refund", {
+      title: "Record a dated expense refund", description: "Link a full/partial positive PHP refund to expense id, credit its receiving money account, and reduce spending in the expense category on transaction_date, never as income. Active totals cannot exceed the expense. Requires expense version and request_id; increments expense version.",
+      inputSchema: recordRefundSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...recordRefund(actor, id, args) })));
     server.registerTool("post_finance_transfer", {
       title: "Transfer money", description: "Atomically move a positive PHP amount between two active money accounts. Optional categorized fee is a linked expense deducted from the source. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
       inputSchema: postTransferSchema, annotations,

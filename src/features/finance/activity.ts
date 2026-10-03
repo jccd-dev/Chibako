@@ -12,19 +12,26 @@ import {
 } from "./activity-types";
 
 const activityRows = `WITH activity AS (
-  SELECT t.*, NULL AS destination_account_id, m.id AS linked_record_id, NULL AS fee_transaction_id,
-    NULL AS compared_balance_cents, NULL AS actual_balance_cents
+  SELECT t.id, t.type, t.account_id, t.amount_cents, t.transaction_date, t.category_id, t.subcategory_id, t.text, t.tag_ids,
+    t.version, t.created_at, t.updated_at, t.hidden, t.reverted,
+    NULL AS destination_account_id, m.id AS linked_record_id, NULL AS fee_transaction_id,
+    NULL AS compared_balance_cents, NULL AS actual_balance_cents, NULL AS expense_id,
+    COALESCE((SELECT SUM(r.amount_cents) FROM finance_refunds r WHERE r.expense_id = t.id AND r.reverted = 0), 0) AS refunded_cents
   FROM finance_transactions t LEFT JOIN finance_movements m ON m.fee_transaction_id = t.id
   UNION ALL
-  SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at,
-    destination_account_id, NULL, fee_transaction_id, compared_balance_cents, actual_balance_cents FROM finance_movements
+  SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at, hidden, reverted,
+    destination_account_id, NULL, fee_transaction_id, compared_balance_cents, actual_balance_cents, NULL, 0 FROM finance_movements
+  UNION ALL
+  SELECT r.id, 'refund', r.account_id, r.amount_cents, r.transaction_date, t.category_id, t.subcategory_id, r.text, r.tag_ids,
+    r.version, r.created_at, r.updated_at, r.hidden, r.reverted, NULL, NULL, NULL, NULL, NULL, r.expense_id, 0
+  FROM finance_refunds r JOIN finance_transactions t ON t.id = r.expense_id
 )`;
 const transactionSelect = "SELECT t.*, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id";
 
-type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids"> & { text: string; tag_ids: string; created_at: number; updated_at: number };
+type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids" | "hidden" | "reverted"> & { hidden: number; reverted: number; text: string; tag_ids: string; created_at: number; updated_at: number };
 function transactionFromRow(row: TransactionRow, details: boolean): FinanceTransaction {
   const { text, tag_ids, created_at, updated_at, ...compact } = row;
-  return { ...compact, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
+  return { ...compact, hidden: row.hidden === 1, reverted: row.reverted === 1, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
 }
 export function readTransaction(id: string, details: boolean): FinanceTransaction {
   const row = getDb().prepare(`${activityRows} ${transactionSelect} WHERE t.id = ?`).get(id) as TransactionRow | undefined;
@@ -80,6 +87,9 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
   authorizeFinance(actor, "finance:read");
   const query = parseFinance(listTransactionsSchema, input);
   const clauses: string[] = [], values: (string | number)[] = [];
+  for (const flag of ["hidden", "reverted"] as const) {
+    if (query[flag] !== "all") { clauses.push(`t.${flag} = ?`); values.push(query[flag] === "true" ? 1 : 0); }
+  }
   for (const [key, operator] of [["date_from", ">="], ["date_to", "<="]] as const) {
     if (query[key]) { clauses.push(`t.transaction_date ${operator} ?`); values.push(query[key]); }
   }
@@ -106,8 +116,11 @@ export function getActivityTotals(actor: FinanceActor, input: unknown = {}): Act
   const date = new Date();
   const month = query.month ?? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   const totals = { income: 0n, expense: 0n };
-  const rows = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE transaction_date >= ? AND transaction_date <= ?")
+  const rows = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE reverted = 0 AND transaction_date >= ? AND transaction_date <= ?")
     .safeIntegers().iterate(`${month}-01`, `${month}-31`) as Iterable<{ type: "income" | "expense"; amount_cents: bigint }>;
   for (const row of rows) totals[row.type] += row.amount_cents;
+  const refunds = getDb().prepare("SELECT amount_cents FROM finance_refunds WHERE reverted = 0 AND transaction_date >= ? AND transaction_date <= ?")
+    .safeIntegers().iterate(`${month}-01`, `${month}-31`) as Iterable<{ amount_cents: bigint }>;
+  for (const refund of refunds) totals.expense -= refund.amount_cents;
   return { currency: "PHP", month, income_cents: exactCents(totals.income), expense_cents: exactCents(totals.expense) };
 }

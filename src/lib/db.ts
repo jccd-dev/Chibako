@@ -240,6 +240,20 @@ export function getDb(): Database.Database {
     if (!embNames.has("content_hash")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`);
     if (!embNames.has("dim")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN dim INTEGER NOT NULL DEFAULT 0`);
     if (!embNames.has("input_version")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN input_version INTEGER NOT NULL DEFAULT 1`);
+    for (const table of ["finance_transactions", "finance_movements"]) {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      const existing = new Set(columns.map(column => column.name));
+      if (!existing.has("hidden")) db.exec(`ALTER TABLE ${table} ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))`);
+      if (!existing.has("reverted")) db.exec(`ALTER TABLE ${table} ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0, 1))`);
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_refunds (
+      id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES finance_transactions(id),
+      account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+      transaction_date TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+      hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0, 1)),
+      version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS idx_finance_refunds_expense ON finance_refunds(expense_id);`);
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

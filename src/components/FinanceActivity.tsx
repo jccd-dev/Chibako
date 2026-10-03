@@ -8,12 +8,13 @@ import { Field, FieldGroup, FieldLabel, FieldDescription, FieldError, FieldSet, 
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { FinanceTransaction } from "@/features/finance/activity-types";
+import { FinanceCorrection } from "./FinanceCorrection";
 import { FinanceTransferFields } from "./FinanceTransferFields";
 import { useFinanceEntry } from "@/features/finance/use-finance-entry";
 import type { ActivityFilters, FinanceActivityController } from "@/features/finance/use-finance-activity";
 import { financeControl as control, financeSelect as select, financeSheet, formatPHP } from "@/features/finance/presentation";
 
-const activityLabel = (type: FinanceTransaction["type"]) => ({ income: "Income", expense: "Expense", transfer: "Transfer", reconciliation: "Reconciliation", valuation: "Asset valuation" })[type];
+const activityLabel = (type: FinanceTransaction["type"]) => ({ income: "Income", expense: "Expense", transfer: "Transfer", reconciliation: "Reconciliation", valuation: "Asset valuation", refund: "Refund" })[type];
 
 export function FinanceMonthlyTotals({ activity }: { activity: FinanceActivityController }) {
   return <section aria-label="Monthly income and spending" className="border-b border-border py-6">
@@ -25,7 +26,7 @@ export function FinanceMonthlyTotals({ activity }: { activity: FinanceActivityCo
       <div><dt className="text-sm text-muted-foreground">Income</dt><dd className="mt-2 break-words text-2xl font-semibold tabular-nums" data-testid="finance-income-total">{formatPHP(activity.totals.income_cents)}</dd></div>
       <div><dt className="text-sm text-muted-foreground">Spending</dt><dd className="mt-2 break-words text-2xl font-semibold tabular-nums" data-testid="finance-expense-total">{formatPHP(activity.totals.expense_cents)}</dd></div>
     </dl> : <p role="status" className="py-5 text-sm text-muted-foreground">Loading monthly totals…</p>}
-    <p className="mt-3 text-sm text-muted-foreground">By the calendar day money moved. Openings, transfers, reconciliation and asset valuations are excluded. Transfer fees count as spending.</p>
+    <p className="mt-3 text-sm text-muted-foreground">By the calendar day money moved. Refunds reduce spending on their refund date, never income. Openings, transfers and adjustments are excluded; transfer fees count as spending.</p>
   </section>;
 }
 
@@ -38,44 +39,51 @@ export function FinanceActivityList({ activity }: { activity: FinanceActivityCon
   useEffect(() => { setDraft(activity.filters); }, [activity.filters]);
   async function inspect(id: string) {
     const sequence = ++inspectSequence.current;
-    setInspectionId(id); setSelected(null); setInspectionError("");
+    activity.resetSave(); setInspectionId(id); setSelected(null); setInspectionError("");
     try { const detail = await activity.inspect(id); if (sequence === inspectSequence.current) setSelected(detail); }
     catch (error) { if (sequence === inspectSequence.current) setInspectionError(error instanceof Error ? error.message : "Could not inspect transaction."); }
   }
-  const change = (key: keyof ActivityFilters, value: string) => setDraft(current => ({ ...current, [key]: value }));
+  function change(key: keyof ActivityFilters, value: string) {
+    if (key === "hidden" || key === "reverted") {
+      if (value === "false" || value === "true" || value === "all") setDraft(current => ({ ...current, [key]: value }));
+    } else setDraft(current => ({ ...current, [key]: value }));
+  }
   return <section aria-label="Activity history">
     <h2 className="text-lg font-semibold">Activity</h2>
-    <p className="mt-1 text-sm text-muted-foreground">Find the transactions behind your balances. Select a record to inspect it.</p>
+    <p className="mt-1 text-sm text-muted-foreground">Find the transactions behind your balances. Select a record to inspect or correct it.</p>
     <form onSubmit={event => { event.preventDefault(); activity.applyFilters(draft); }} className="my-6">
       <FieldGroup className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Field><FieldLabel htmlFor="activity-search">Search activity</FieldLabel><Input id="activity-search" value={draft.q} maxLength={200} onChange={event => change("q", event.target.value)} className={control} /><FieldDescription>Search transaction text, categories and tags.</FieldDescription></Field>
         <Field><FieldLabel htmlFor="activity-account">Filter account</FieldLabel><select id="activity-account" className={select} value={draft.account_id} onChange={event => change("account_id", event.target.value)}><option value="">All accounts</option>{activity.accounts.map(account => <option key={account.id} value={account.id}>{account.name}{account.archived ? " (archived)" : ""}</option>)}</select></Field>
-        <Field><FieldLabel htmlFor="activity-type">Filter type</FieldLabel><select id="activity-type" className={select} value={draft.type} onChange={event => change("type", event.target.value)}><option value="">All activity</option><option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option><option value="reconciliation">Reconciliation</option><option value="valuation">Asset valuation</option></select></Field>
+        <Field><FieldLabel htmlFor="activity-type">Filter type</FieldLabel><select id="activity-type" className={select} value={draft.type} onChange={event => change("type", event.target.value)}><option value="">All activity</option><option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option><option value="reconciliation">Reconciliation</option><option value="valuation">Asset valuation</option><option value="refund">Refund</option></select></Field>
         <Field><FieldLabel htmlFor="activity-from">From date</FieldLabel><Input id="activity-from" type="date" min="1000-01-01" max="9999-12-31" value={draft.date_from} onChange={event => change("date_from", event.target.value)} className={control} /></Field>
         <Field><FieldLabel htmlFor="activity-to">To date</FieldLabel><Input id="activity-to" type="date" min={draft.date_from || "1000-01-01"} max="9999-12-31" value={draft.date_to} onChange={event => change("date_to", event.target.value)} className={control} /></Field>
-        <Field><FieldLabel htmlFor="activity-category">Filter category</FieldLabel><select id="activity-category" className={select} value={draft.category_id} onChange={event => change("category_id", event.target.value)}><option value="">All categories</option>{activity.classifications.filter(item => item.kind === "category" && (!draft.type || item.type === draft.type)).map(item => <option key={item.id} value={item.id}>{item.type === "income" ? "Income" : "Expense"}: {item.name}{item.parent_id ? " (subcategory)" : ""}{item.archived ? " (archived)" : ""}</option>)}</select></Field>
+        <Field><FieldLabel htmlFor="activity-category">Filter category</FieldLabel><select id="activity-category" className={select} value={draft.category_id} onChange={event => change("category_id", event.target.value)}><option value="">All categories</option>{activity.classifications.filter(item => item.kind === "category" && (!draft.type || item.type === (draft.type === "refund" ? "expense" : draft.type))).map(item => <option key={item.id} value={item.id}>{item.type === "income" ? "Income" : "Expense"}: {item.name}{item.parent_id ? " (subcategory)" : ""}{item.archived ? " (archived)" : ""}</option>)}</select></Field>
+        <Field><FieldLabel htmlFor="activity-hidden">Hidden records</FieldLabel><select id="activity-hidden" className={select} value={draft.hidden} onChange={event => change("hidden", event.target.value)}><option value="false">Visible only</option><option value="true">Hidden only</option><option value="all">Visible and hidden</option></select></Field>
+        <Field><FieldLabel htmlFor="activity-reverted">Reverted records</FieldLabel><select id="activity-reverted" className={select} value={draft.reverted} onChange={event => change("reverted", event.target.value)}><option value="false">Active effects only</option><option value="true">Reverted only</option><option value="all">Active and reverted</option></select></Field>
       </FieldGroup>
-      <div className="mt-4 flex flex-wrap gap-3"><Button type="submit" className={control}>Apply filters</Button><Button type="button" variant="outline" className={control} onClick={() => activity.applyFilters({ q: "", date_from: "", date_to: "", account_id: "", category_id: "", type: "" })}>Clear filters</Button></div>
+      <div className="mt-4 flex flex-wrap gap-3"><Button type="submit" className={control}>Apply filters</Button><Button type="button" variant="outline" className={control} onClick={activity.clearFilters}>Clear filters</Button></div>
     </form>
     <FinanceOptionStatus activity={activity} />
     {activity.loadError ? <Alert><AlertDescription>{activity.loadError}<Button variant="outline" className={control} onClick={() => void activity.refreshHistory()}>Retry activity</Button></AlertDescription></Alert> : activity.loading ? <p role="status" className="py-6 text-sm text-muted-foreground">Loading activity…</p> : activity.page?.transactions.length ? <ul className="divide-y divide-border">
       {activity.page.transactions.map(row => <li key={row.id}><button type="button" className="flex w-full flex-wrap items-center justify-between gap-3 rounded-md px-1 py-4 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted" onClick={() => void inspect(row.id)} aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${row.transaction_date}`}>
-        <div className="min-w-0 flex-1 basis-40"><p className="break-words text-sm font-medium">{row.type === "income" || row.type === "expense" ? row.category_name ?? "Uncategorized" : activityLabel(row.type)}{row.subcategory_name ? ` / ${row.subcategory_name}` : ""}</p><p className="mt-1 break-words text-sm text-muted-foreground">{row.transaction_date} · {row.account_name}{row.destination_account_name ? ` to ${row.destination_account_name}` : ""}{row.linked_record_id ? " · Transfer fee" : ""}</p></div>
+        <div className="min-w-0 flex-1 basis-40"><p className="break-words text-sm font-medium">{row.type === "income" || row.type === "expense" ? row.category_name ?? "Uncategorized" : activityLabel(row.type)}{row.subcategory_name ? ` / ${row.subcategory_name}` : ""}</p><p className="mt-1 break-words text-sm text-muted-foreground">{row.transaction_date} · {row.account_name}{row.destination_account_name ? ` to ${row.destination_account_name}` : ""}{row.linked_record_id ? " · Transfer fee" : ""}{row.hidden ? " · Hidden" : ""}{row.reverted ? " · Reverted" : ""}</p></div>
         <p className="text-right text-sm"><span className="block">{activityLabel(row.type)}</span><strong className="tabular-nums">{formatPHP(row.amount_cents)}</strong></p>
       </button></li>)}
     </ul> : <p className="py-8 text-sm text-muted-foreground">No matching activity. Add a transaction or clear your filters.</p>}
     {activity.page && activity.page.total > 25 && <nav aria-label="Activity pages" className="mt-5 flex flex-wrap items-center gap-3"><Button variant="outline" className={control} disabled={activity.offset === 0 || activity.loading} onClick={() => activity.setOffset(Math.max(0, activity.offset - 25))}>Previous activity</Button><span className="text-sm">{activity.offset + 1}-{Math.min(activity.offset + 25, activity.page.total)} of {activity.page.total}</span><Button variant="outline" className={control} disabled={activity.offset + 25 >= activity.page.total || activity.loading} onClick={() => activity.setOffset(activity.offset + 25)}>Next activity</Button></nav>}
-    <Sheet open={inspectionId !== null} onOpenChange={open => { if (!open) { inspectSequence.current++; setInspectionId(null); } }}>
+    <Sheet open={inspectionId !== null} onOpenChange={open => { if (!open && !activity.busy) { inspectSequence.current++; setInspectionId(null); } }}>
       <SheetContent className={financeSheet} showCloseButton={false}>
-        <SheetHeader className="border-b border-border p-6"><SheetTitle>Transaction details</SheetTitle><SheetDescription>Dated financial activity. Transfers and adjustments are excluded from income and spending. Corrections arrive in a later preview.</SheetDescription></SheetHeader>
+        <SheetHeader className="border-b border-border p-6"><SheetTitle>Transaction details</SheetTitle><SheetDescription>Dated financial activity. Correct mistakes together. Delete hides without cancelling effects; Revert cancels once. Refunds reduce spending on the date money returns.</SheetDescription></SheetHeader>
         <div className="flex flex-1 flex-col gap-5 p-6">
           {inspectionError ? <Alert><AlertDescription>{inspectionError}<Button variant="outline" className={control} onClick={() => { if (inspectionId) void inspect(inspectionId); }}>Retry inspection</Button></AlertDescription></Alert> : selected ? <dl className="grid gap-4 text-sm">
             <div><dt className="text-muted-foreground">Type</dt><dd>{activityLabel(selected.type)}</dd></div>
             <div><dt className="text-muted-foreground">Amount</dt><dd className="text-xl font-semibold tabular-nums">{formatPHP(selected.amount_cents)}</dd></div>
             <div><dt className="text-muted-foreground">Account</dt><dd className="break-words">{selected.account_name}</dd></div>
             {selected.destination_account_name && <div><dt className="text-muted-foreground">Destination account</dt><dd className="break-words">{selected.destination_account_name}</dd></div>}
-            {selected.fee_transaction_id && <div><dt className="text-muted-foreground">Separate transfer fee</dt><dd><Button variant="outline" className={control} onClick={() => void inspect(selected.fee_transaction_id!)}>Inspect fee</Button></dd></div>}
-            {selected.linked_record_id && <div><dt className="text-muted-foreground">Linked transfer</dt><dd><Button variant="outline" className={control} onClick={() => void inspect(selected.linked_record_id!)}>Inspect transfer</Button></dd></div>}
+            {selected.fee_transaction_id && <div><dt className="text-muted-foreground">Separate transfer fee</dt><dd><Button variant="outline" className={control} disabled={activity.busy} onClick={() => void inspect(selected.fee_transaction_id!)}>Inspect fee</Button></dd></div>}
+            {selected.expense_id && <div><dt className="text-muted-foreground">Original expense</dt><dd><Button variant="outline" className={control} disabled={activity.busy} onClick={() => void inspect(selected.expense_id!)}>Inspect original expense</Button></dd></div>}
+            {selected.linked_record_id && <div><dt className="text-muted-foreground">Linked transfer</dt><dd><Button variant="outline" className={control} disabled={activity.busy} onClick={() => void inspect(selected.linked_record_id!)}>Inspect transfer</Button></dd></div>}
             {selected.compared_balance_cents != null && <div><dt className="text-muted-foreground">Derived balance before adjustment</dt><dd>{formatPHP(selected.compared_balance_cents)}</dd></div>}
             {selected.actual_balance_cents != null && <div><dt className="text-muted-foreground">Actual balance / value</dt><dd>{formatPHP(selected.actual_balance_cents)}</dd></div>}
             <div><dt className="text-muted-foreground">Transaction date</dt><dd>{selected.transaction_date}</dd></div>
@@ -84,7 +92,9 @@ export function FinanceActivityList({ activity }: { activity: FinanceActivityCon
             <div><dt className="text-muted-foreground">Tags</dt><dd className="break-words">{selected.tag_ids?.map(id => activity.classifications.find(tag => tag.id === id)?.name ?? "Saved tag").join(", ") || "No tags."}</dd></div>
             <div><dt className="text-muted-foreground">Recorded at</dt><dd>{selected.created_at ? new Date(selected.created_at * 1000).toLocaleString() : "Unavailable"}</dd></div>
           </dl> : <p role="status">Loading transaction…</p>}
-          <Button variant="outline" className={`${control} mt-auto self-end`} onClick={() => { inspectSequence.current++; setInspectionId(null); }}>Close details</Button>
+          {selected && <FinanceOptionStatus activity={activity} />}
+          {selected && <FinanceCorrection key={`${selected.id}:${selected.version}`} record={selected} activity={activity} onSaved={id => void inspect(id)} />}
+          <Button variant="outline" disabled={activity.busy} className={`${control} mt-auto self-end`} onClick={() => { inspectSequence.current++; setInspectionId(null); }}>Close details</Button>
         </div>
       </SheetContent>
     </Sheet>

@@ -12,12 +12,15 @@ type AccountRow = Omit<FinanceAccount, "archived" | "balance_cents"> & { archive
 
 function accountFromRow(row: AccountRow): FinanceAccount {
   let balance = BigInt(row.opening_balance_cents);
-  const effects = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE account_id = ?").safeIntegers()
+  const effects = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE reverted = 0 AND account_id = ?").safeIntegers()
     .iterate(row.id) as Iterable<{ type: string; amount_cents: bigint }>;
   for (const effect of effects) balance += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
-  const movements = getDb().prepare("SELECT account_id, type, amount_cents FROM finance_movements WHERE account_id = ? OR destination_account_id = ?").safeIntegers()
+  const movements = getDb().prepare("SELECT account_id, type, amount_cents FROM finance_movements WHERE reverted = 0 AND (account_id = ? OR destination_account_id = ?)").safeIntegers()
     .iterate(row.id, row.id) as Iterable<{ account_id: string; type: string; amount_cents: bigint }>;
   for (const effect of movements) balance += effect.type === "transfer" && effect.account_id === row.id ? -effect.amount_cents : effect.amount_cents;
+  const refunds = getDb().prepare("SELECT amount_cents FROM finance_refunds WHERE account_id = ? AND reverted = 0").safeIntegers()
+    .iterate(row.id) as Iterable<{ amount_cents: bigint }>;
+  for (const refund of refunds) balance += refund.amount_cents;
   return { ...row, archived: row.archived === 1, balance_cents: exactCents(balance) };
 }
 
@@ -69,12 +72,15 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
     totals[kind] += row.opening_balance_cents;
     summary[kind].account_count++;
   }
-  const effects = db.prepare("SELECT a.kind, t.type, t.amount_cents FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id")
+  const effects = db.prepare("SELECT a.kind, t.type, t.amount_cents FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id WHERE t.reverted = 0")
     .safeIntegers().iterate() as Iterable<{ kind: string; type: string; amount_cents: bigint }>;
   for (const effect of effects) totals[effect.kind === "money" ? "money" : "assets"] += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
-  const adjustments = db.prepare("SELECT a.kind, m.amount_cents FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.type != 'transfer'")
+  const adjustments = db.prepare("SELECT a.kind, m.amount_cents FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.type != 'transfer' AND m.reverted = 0")
     .safeIntegers().iterate() as Iterable<{ kind: string; amount_cents: bigint }>;
   for (const effect of adjustments) totals[effect.kind === "money" ? "money" : "assets"] += effect.amount_cents;
+  const refunds = db.prepare("SELECT a.kind, r.amount_cents FROM finance_refunds r JOIN finance_accounts a ON a.id = r.account_id WHERE r.reverted = 0")
+    .safeIntegers().iterate() as Iterable<{ kind: string; amount_cents: bigint }>;
+  for (const refund of refunds) totals[refund.kind === "money" ? "money" : "assets"] += refund.amount_cents;
   if (Object.values(totals).some((total) => total > BigInt(Number.MAX_SAFE_INTEGER) || total < -BigInt(Number.MAX_SAFE_INTEGER))) {
     throw new FinanceError("Combined balances exceed the supported exact-cent range", 422, "balance_out_of_range");
   }

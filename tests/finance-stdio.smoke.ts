@@ -37,6 +37,7 @@ try {
     assert.ok(names.includes("list_notes"));
     assert.ok(names.includes("create_finance_account"));
     assert.ok(names.includes("get_finance_summary"));
+    for (const name of ["correct_finance_activity", "hide_finance_activity", "revert_finance_activity", "record_finance_refund"]) assert.ok(names.includes(name));
     const result = await client.callTool({ name: "create_finance_account", arguments: opening });
     assert.equal(result.isError, undefined);
     const original = result.structuredContent as { account: FinanceAccount };
@@ -84,6 +85,7 @@ try {
     assert.ok(names.includes("post_finance_transfer"));
     assert.ok(names.includes("reconcile_finance_account"));
     assert.ok(names.includes("value_finance_asset"));
+    for (const name of ["correct_finance_activity", "hide_finance_activity", "revert_finance_activity", "record_finance_refund"]) assert.ok(names.includes(name));
     assert.ok(!names.includes("list_finance_activity"));
     assert.ok(!names.includes("create_finance_classification"));
     assert.equal((await client.callTool({ name: "post_finance_transaction", arguments: { request_id: "keyed-post", account_id: postedAccountId, amount: "0.01", type: "income", transaction_date: "2026-10-04" } })).isError, undefined);
@@ -92,6 +94,7 @@ try {
     const names = (await client.listTools()).tools.map(tool => tool.name);
     assert.ok(names.includes("get_finance_summary"));
     assert.ok(!names.includes("create_finance_account"));
+    for (const name of ["correct_finance_activity", "hide_finance_activity", "revert_finance_activity", "record_finance_refund"]) assert.ok(!names.includes(name));
     const result = await client.callTool({ name: "get_finance_summary", arguments: {} });
     assert.equal((result.structuredContent as { money: { balance_cents: number } }).money.balance_cents, 24590);
   });
