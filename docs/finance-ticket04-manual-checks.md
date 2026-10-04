@@ -1,11 +1,11 @@
-# Ticket 04 manual owner-flow checks
+# Ticket 04 owner-flow checks
 
 Use your existing dev server at `/app/finance`, not a new server or vault.
 These actions persist in that dev vault. Back up valuable data first. Use new
 synthetic accounts **TEST 04 Cash**, **TEST 04 Bank**, **TEST 04 Other** (each
 PHP 100.00) and expense categories **TEST 04 Food** and **TEST 04 Fees**. Do not
 use personal accounts, directly delete ledger rows, or assume archiving undoes
-activity. Agents/automated checks are not authorized to mutate this vault.
+activity.
 
 Existing history affects global totals. Record starting September/October 2026
 income/spending and money totals; compare the deltas below. Use account/category

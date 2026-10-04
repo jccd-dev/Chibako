@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -64,6 +64,10 @@ async function stopServer(server: ChildProcess): Promise<void> {
 
 test("setup, login, password change, and session invalidation preserve route contracts", async () => {
   const vault = mkdtempSync(join(tmpdir(), "chibako-password-routes-"));
+  // Stable path: next rewrites next-env.d.ts and tsconfig.json with the distDir it used,
+  // so a per-run temp name would churn those tracked files on every test run.
+  const buildDir = join(process.cwd(), ".next", "test-builds", "password-routes");
+  mkdirSync(buildDir, { recursive: true });
   const port = 3200 + (process.pid % 700);
   const baseUrl = `http://127.0.0.1:${port}`;
   const server = spawn(
@@ -71,7 +75,7 @@ test("setup, login, password change, and session invalidation preserve route con
     [join(process.cwd(), "node_modules/next/dist/bin/next"), "dev", "--hostname", "127.0.0.1", "--port", String(port)],
     {
       cwd: process.cwd(),
-      env: { ...process.env, CHIBAKO_DATA_DIR: vault },
+      env: { ...process.env, CHIBAKO_DATA_DIR: vault, CHIBAKO_BUILD_DIR: buildDir },
       stdio: "ignore",
     },
   );

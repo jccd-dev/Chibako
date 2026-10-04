@@ -38,6 +38,8 @@ import { correctActivitySchema, activityActionSchema, recordRefundSchema } from 
 import { postTransferSchema, postAdjustmentSchema } from "../features/finance/movement-types";
 import { getActivityNoteLinks, setActivityNoteLinks, getFinanceNoteChoices } from "../features/finance/note-links";
 import { getActivityNoteLinksSchema, setActivityNoteLinksSchema, financeNoteChoicesSchema } from "../features/finance/note-link-types";
+import { createPlan, getPlan, listPlans, updatePlan, cancelPlan, postPlan, matchPlan } from "../features/finance/planning";
+import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema } from "../features/finance/planning-types";
 import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
@@ -412,8 +414,16 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
   }
   if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_plans", {
+      title: "Review one-time finance plans", description: "Bounded income/expense plans, pending by default, ordered by due date including overdue and upcoming. Filter due-date range, account, type or status. Plans have no cash effects; text/tags require include_details.",
+      inputSchema: listPlansSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listPlans(actor, args) })));
+    server.registerTool("get_finance_plan", {
+      title: "Inspect finance plan", description: "Read one plan and satisfaction link. Personal text/tags require include_details: true.",
+      inputSchema: getPlanSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ plan: getPlan(actor, id, args) })));
     server.registerTool("get_finance_report", {
-      title: "Spending and budget report", description: "Exact PHP category spending, monthly income/spending trends and unbudgeted spending across all accounts. Date range defaults to this month, at most 12 calendar months; categories paginated up to 100. Hidden activity counts, reverted does not; refunds reduce spending on refund dates. Budget totals are full calendar-month limits even for partial date ranges. Forecast is explicitly unavailable until pending activity exists.",
+      title: "Spending and budget report", description: "Exact PHP category spending, monthly income/spending trends and unbudgeted spending across all accounts. Date range defaults to this month, at most 12 calendar months; categories paginated up to 100. Hidden activity counts, reverted does not; refunds reduce spending on refund dates. Budget totals are full calendar-month limits even for partial date ranges. Pending forecasts follow due dates, separate from actuals and budget consumption.",
       inputSchema: financeReportSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...getFinanceReport(actor, args) })));
     server.registerTool("get_finance_budget", {
@@ -451,16 +461,36 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   }
   if (financeAuthorized("finance:write")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("create_finance_plan", {
+      title: "Plan one-time income or expense", description: "Create pending PHP activity with due_date and expected amount/account, without changing balances or actual spending. Requires finance:write and request_id.",
+      inputSchema: createPlanSchema, annotations,
+    }, args => financeResult("finance:write", actor => createPlan(actor, args)));
+    server.registerTool("update_finance_plan", {
+      title: "Edit or reschedule pending plan", description: "Change expected fields or due_date while pending. No cash effect. Requires request_id and current plan version.",
+      inputSchema: updatePlanSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => updatePlan(actor, id, args)));
+    server.registerTool("cancel_finance_plan", {
+      title: "Cancel pending plan", description: "Cancel expected activity without cash movement. Cancelled plans remain inspectable. Requires request_id and current plan version.",
+      inputSchema: planActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => cancelPlan(actor, id, args)));
+    server.registerTool("post_finance_plan", {
+      title: "Post actual activity from a plan", description: "Explicitly confirm actual positive PHP amount, active money account and transaction_date. Post once atomically and satisfy the plan; request retries return original results. Requires current plan version. Revert reopens it; Delete preserves satisfaction.",
+      inputSchema: postPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...postPlan(actor, id, args) })));
+    server.registerTool("match_finance_plan", {
+      title: "Match manually recorded activity", description: "Explicitly select same-type unreverted income/expense not linked to a plan or transfer fee. Actual amount/account/date may differ. No new cash effect. Requires request_id, current plan version and transaction_version. One transaction satisfies one plan; Revert reopens and Delete preserves satisfaction.",
+      inputSchema: matchPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...matchPlan(actor, id, args) })));
     server.registerTool("correct_finance_activity", {
       title: "Correct finance activity", description: "Replace mistaken amount, account, date or details atomically. Amount is a PHP decimal; adjustments accept a signed difference, not a new target balance. Transfer source is account_id, destination is destination_account_id; a linked fee moves with it. Optional fee correction requires its version. Refunds retain their expense/category link. Requires current version and request_id; returns affected balances.",
       inputSchema: correctActivitySchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...correctActivity(actor, id, args) })));
     server.registerTool("hide_finance_activity", {
-      title: "Delete finance activity (hide only)", description: "Hide a record from default Activity without cancelling balances or reports. Transfer fee hides with its transfer. Requires current version and request_id. Inspect with hidden filters.",
+      title: "Delete finance activity (hide only)", description: "Hide a record from default Activity without cancelling balances or reports. Transfer fee hides with its transfer. Requires current version and request_id. Inspect with hidden filters. Linked plan satisfaction is retained.",
       inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...hideActivity(actor, id, args) })));
     server.registerTool("revert_finance_activity", {
-      title: "Revert mistaken finance activity", description: "Cancel financial/reporting effects once, including a transfer's linked fee. Revert active refunds before their expense (including fees). Refund reversion cancels its own credit and spending reduction. Requires current version and request_id; identical retries return the original result.",
+      title: "Revert mistaken finance activity", description: "Cancel financial/reporting effects once, including a transfer's linked fee. Revert active refunds before their expense (including fees). Refund reversion cancels its own credit and spending reduction. Linked plans reopen when their transaction is reverted. Requires current version and request_id; identical retries return the original result.",
       inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...revertActivity(actor, id, args) })));
     server.registerTool("record_finance_refund", {

@@ -210,6 +210,24 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_finance_movements_destination ON finance_movements (destination_account_id, transaction_date);
   `,
   `
+  CREATE TABLE IF NOT EXISTS finance_plans (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    due_date TEXT NOT NULL,
+    category_id TEXT REFERENCES finance_classifications(id),
+    subcategory_id TEXT REFERENCES finance_classifications(id),
+    text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'satisfied', 'cancelled')),
+    transaction_id TEXT UNIQUE REFERENCES finance_transactions(id),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    CHECK ((status = 'satisfied' AND transaction_id IS NOT NULL) OR (status != 'satisfied' AND transaction_id IS NULL))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_plans_due ON finance_plans(status, due_date, id);
+  `,
+  `
   CREATE TABLE IF NOT EXISTS finance_budget_plans (
     category_id TEXT PRIMARY KEY REFERENCES finance_classifications(id),
     version INTEGER NOT NULL CHECK (version > 0)

@@ -18,5 +18,5 @@ export interface FinanceReport {
   currency: "PHP"; date_from: string; date_to: string; categories: CategoryReport[]; total: number; limit: number; offset: number;
   income_cents: number; spending_cents: number; unbudgeted_cents: number;
   months: { month: string; income_cents: number; spending_cents: number }[];
-  forecast: { available: false; spending_cents: null };
+  forecast: { available: true; spending_cents: number; income_cents: number };
 }

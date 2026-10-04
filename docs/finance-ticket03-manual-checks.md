@@ -1,8 +1,8 @@
-# Ticket 03 manual owner-flow checks
+# Ticket 03 owner-flow checks
 
-Browser E2E is owner-run for this ticket on your existing dev server. Open
-`/app/finance` at your usual dev URL; no new server, vault or build directory is
-needed for your manual pass.
+Browser E2E for this ticket runs in the T3 Code browser against your existing
+dev server. Open `/app/finance` at your usual dev URL; no new server, vault or
+build directory is needed.
 
 These actions persist real activity in that dev vault. Back it up first if its
 data matters. Use clearly named test accounts (for example, `TEST 03 Cash`,

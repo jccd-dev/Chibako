@@ -77,7 +77,7 @@ test("reports aggregate subcategories across accounts, retain hidden spending an
   const october = getFinanceReport(owner, { date_from: "2026-10-01", date_to: "2026-10-31" });
   assert.equal(october.spending_cents, -1250);
   assert.equal(october.categories.find(row => row.category_id === food.id)?.overspent, false);
-  assert.deepEqual(october.forecast, { available: false, spending_cents: null });
+  assert.deepEqual(october.forecast, { available: true, spending_cents: 0, income_cents: 0 });
   const range = getFinanceReport(owner, { date_from: "2026-09-01", date_to: "2026-10-31", limit: 1 });
   assert.equal(range.categories.length, 1);
   assert.equal(range.total, 3);

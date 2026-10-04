@@ -24,9 +24,9 @@ Income/expense, transfer and adjustment posting also accept optional `note_ids`;
 
 Keyless local stdio remains trusted. Configured invalid or empty keys never fall back to trusted access. Remote MCP retains stateless per-request authentication.
 
-## Manual owner check (pending)
+## Browser owner-flow check
 
-Run on your existing dev server only. **Synthetic test activity and Notes persist in your vault.** Agents must not run these mutations. Use clearly named fixtures, such as an existing synthetic account and a new Note named `Ticket 05 synthetic Note`, rather than personal finance activity.
+Run in the T3 Code browser against your existing dev server. **Synthetic test activity and Notes persist in your vault.** Use clearly named fixtures, such as an existing synthetic account and a new Note named `Ticket 05 synthetic Note`, rather than personal finance activity.
 
 On desktop and phone-sized viewports, in light and dark themes:
 
@@ -38,4 +38,4 @@ On desktop and phone-sized viewports, in light and dark themes:
 6. Check keyboard Find/Inspect/Select/Remove/Save and Escape to close the sheet. Long titles/content must wrap; mobile stays full-screen without horizontal overflow.
 7. Check no-match search, loading feedback, failure/retry (e.g. offline read), and refresh-details recovery for a stale Activity version. Confirm no browser console errors.
 
-Automated checks use disposable real SQLite and cover capability invariants, keyed REST/remote MCP scope combinations, and trusted-local/keyed stdio. `tests/e2e/finance-note-links.spec.ts` drives this owner workflow (desktop and phone-sized views) against a disposable vault (`npx playwright test --config playwright.finance.config.ts`), covering select/inspect/attach/remove, Save and add another, failure/retry, and stale-version recovery. It does not replace the pending owner browser check on a real vault.
+Automated checks use disposable real SQLite and cover capability invariants, keyed REST/remote MCP scope combinations, and trusted-local/keyed stdio. `tests/e2e/finance-note-links.spec.ts` drives this owner workflow (desktop and phone-sized views) against a disposable vault (`npx playwright test --config playwright.finance.config.ts`), covering select/inspect/attach/remove, Save and add another, failure/retry, and stale-version recovery. It does not replace the live dev-instance browser run in the T3 Code browser.

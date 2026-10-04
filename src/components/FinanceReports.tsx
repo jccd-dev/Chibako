@@ -42,7 +42,7 @@ export function FinanceReports({ reports, onCategory }: { reports: FinanceReport
       {report.total > 50 && <nav aria-label="Report category pages" className="my-4 flex flex-wrap items-center gap-3"><Button variant="outline" className={control} disabled={reports.offset === 0} onClick={() => reports.setOffset(Math.max(0, reports.offset - 50))}>Previous categories</Button><span className="text-sm">{reports.offset + 1}-{Math.min(reports.offset + 50, report.total)} of {report.total}</span><Button variant="outline" className={control} disabled={reports.offset + 50 >= report.total} onClick={() => reports.setOffset(reports.offset + 50)}>Next categories</Button></nav>}
       <h3 className="mt-6 text-base font-semibold">Monthly income and spending</h3>
       <ul className="mt-3 divide-y divide-border">{report.months.map(row => <li key={row.month} className="flex flex-wrap justify-between gap-3 py-3 text-sm"><span>{row.month}</span><span className="flex flex-wrap gap-x-5 gap-y-2 tabular-nums"><span>Income {money(row.income_cents)}</span><span>Spending {money(row.spending_cents)}</span></span></li>)}</ul>
-      <section aria-label="Planned forecast" className="mt-6"><h3 className="text-base font-semibold">Planned forecast</h3><p className="mt-2 text-sm text-muted-foreground">Not available yet. Pending activity will appear here separately and will never consume actual budgets.</p></section>
+      <section aria-label="Planned forecast" className="mt-6"><h3 className="text-base font-semibold">Planned forecast</h3><p className="mt-2 text-sm text-muted-foreground">Pending one-time plans due in this range. Forecasts never change balances or consume actual budgets.</p><dl className="mt-4 grid gap-4 sm:grid-cols-2"><div><dt className="text-sm text-muted-foreground">Planned income</dt><dd className="mt-2 break-words text-xl font-semibold tabular-nums">{money(report.forecast.income_cents)}</dd></div><div><dt className="text-sm text-muted-foreground">Planned spending</dt><dd className="mt-2 break-words text-xl font-semibold tabular-nums">{money(report.forecast.spending_cents)}</dd></div></dl></section>
     </>}
   </section>;
 }
@@ -55,7 +55,6 @@ export function FinanceBudgets({ budget, activity }: { budget: FinanceBudgetCont
     <p className="mt-5 text-sm text-muted-foreground">Review spending against limits in Overview. Forward changes preserve earlier months. Use an explicit correction for one month.</p>
     {budget.notice && <p role="status" className="mt-4 text-sm">{budget.notice}</p>}
     <FinanceOptionStatus activity={activity} />
-    <section className="mt-8 border-t border-border pt-6"><h3 className="text-base font-semibold">Planned activity</h3><p className="mt-2 text-sm text-muted-foreground">Plans, recurrence, goals, debts and receivables are not available yet. Planned forecasts stay separate from recorded spending.</p></section>
     <Sheet open={open} onOpenChange={value => { if (!busy) setOpen(value); }}><SheetContent showCloseButton={false} className={financeSheet}>
       <SheetHeader className="border-b border-border p-6"><SheetTitle>Set monthly budget</SheetTitle><SheetDescription>Choose a forward limit or an explicit correction to one month.</SheetDescription></SheetHeader>
       <form onSubmit={event => { event.preventDefault(); void budget.save(); }} className="flex flex-1 flex-col gap-6 p-6">

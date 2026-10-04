@@ -36,6 +36,7 @@ export const listTransactionsSchema = z.object({
   account_id: id.optional(),
   category_id: id.optional(),
   type: activityTypeSchema.optional(),
+  matchable: z.boolean().default(false),
   hidden: z.enum(["false", "true", "all"]).default("false"),
   reverted: z.enum(["false", "true", "all"]).default("false"),
   include_details: z.boolean().default(false),

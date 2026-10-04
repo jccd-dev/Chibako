@@ -96,6 +96,7 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
   for (const [key, operator] of [["date_from", ">="], ["date_to", "<="]] as const) {
     if (query[key]) { clauses.push(`t.transaction_date ${operator} ?`); values.push(query[key]); }
   }
+  if (query.matchable) clauses.push("t.type IN ('income','expense') AND t.reverted = 0 AND t.linked_record_id IS NULL AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id = t.id)");
   if (query.account_id) { clauses.push("(t.account_id = ? OR t.destination_account_id = ?)"); values.push(query.account_id, query.account_id); }
   if (query.type) { clauses.push("t.type = ?"); values.push(query.type); }
   if (query.category_id) { clauses.push("(t.category_id = ? OR t.subcategory_id = ?)"); values.push(query.category_id, query.category_id); }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getAccountSchema, createAccountSchema } from "./types";
 import { postTransactionSchema, calendarDateSchema } from "./activity-types";
+import type { FinancePlan } from "./planning-types";
 import type { PostedMovement } from "./movement-types";
 
 const version = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
@@ -27,5 +28,6 @@ export const correctActivitySchema = z.object({
   || value.transaction_date !== undefined || value.category_id !== undefined || value.subcategory_id !== undefined
   || value.text !== undefined || value.tag_ids !== undefined || value.fee !== undefined, "Provide a correction");
 export interface CorrectedActivity extends PostedMovement {
+  plan?: FinancePlan;
   expense?: { id: string; version: number; amount_cents: number; refunded_cents: number };
 }

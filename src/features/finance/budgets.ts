@@ -92,9 +92,13 @@ export function getFinanceReport(actor: FinanceActor, input: unknown = {}): Fina
       unbudgeted += withoutBudget;
       if (hasBudget || spending.has(category.id)) categoryRows.push({ category_id: category.id, name: category.name, spending_cents: exactCents(actual), budget_cents: hasBudget ? exactCents(limits) : null, budget_version: version, unbudgeted_cents: exactCents(withoutBudget), overspent });
     }
+    const forecast = { income: 0n, spending: 0n };
+    const pending = db.prepare("SELECT type, amount_cents FROM finance_plans WHERE status = 'pending' AND due_date BETWEEN ? AND ?")
+      .safeIntegers().iterate(query.from, query.to) as Iterable<{ type: string; amount_cents: bigint }>;
+    for (const plan of pending) forecast[plan.type === "income" ? "income" : "spending"] += plan.amount_cents;
     const totals = [...months.values()].reduce((sum, value) => ({ income: sum.income + value.income, spending: sum.spending + value.spending }), { income: 0n, spending: 0n });
     return { currency: "PHP", date_from: query.from, date_to: query.to, categories: categoryRows.slice(query.offset, query.offset + query.limit), total: categoryRows.length, limit: query.limit, offset: query.offset,
       income_cents: exactCents(totals.income), spending_cents: exactCents(totals.spending), unbudgeted_cents: exactCents(unbudgeted),
-      months: [...months].map(([month, value]) => ({ month, income_cents: exactCents(value.income), spending_cents: exactCents(value.spending) })), forecast: { available: false, spending_cents: null } };
+      months: [...months].map(([month, value]) => ({ month, income_cents: exactCents(value.income), spending_cents: exactCents(value.spending) })), forecast: { available: true, spending_cents: exactCents(forecast.spending), income_cents: exactCents(forecast.income) } };
   })();
 }

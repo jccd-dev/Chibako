@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
 import { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
@@ -8,10 +8,12 @@ import { useFinanceActivity } from "@/features/finance/use-finance-activity";
 import { FinanceActivityList, FinanceMonthlyTotals, FinanceTransactionEntry } from "./FinanceActivity";
 import { FinanceReports, FinanceBudgets } from "./FinanceReports";
 import { useFinanceBudget } from "@/features/finance/use-finance-budget";
+import { FinancePlans } from "./FinancePlans";
+import { useFinancePlanning } from "@/features/finance/use-finance-planning";
 import { useFinanceReports } from "@/features/finance/use-finance-reports";
 import { FinanceAdjustment } from "./FinanceAdjustment";
 import { FinanceClassifications } from "./FinanceClassifications";
-import { formatPHP as money } from "@/features/finance/presentation";
+import { decimalPHP as decimal, formatPHP as money } from "@/features/finance/presentation";
 import type { FinanceAccount } from "@/features/finance/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +23,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 const tabs = ["overview", "activity", "planning", "manage"] as const;
 type FinanceTab = typeof tabs[number];
 const isTab = (value: string | undefined): value is FinanceTab => tabs.some(tab => tab === value);
-const decimal = (cents: number) => `${cents < 0 ? "-" : ""}${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
 const control = "min-h-11 text-sm transition-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function FinanceView({ initialTab }: { initialTab?: string }) {
@@ -30,6 +31,10 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   const activity = useFinanceActivity(finance.refresh);
   const reports = useFinanceReports(activity.notice);
   const budget = useFinanceBudget(reports.refresh);
+  const refreshAfterPlan = useCallback(async () => {
+    await Promise.all([finance.refresh(), activity.refreshHistory(), activity.refreshTotals(), reports.refresh()]);
+  }, [finance.refresh, activity.refreshHistory, activity.refreshTotals, reports.refresh]);
+  const planning = useFinancePlanning(activity.notice, refreshAfterPlan);
   const [transactionOpen, setTransactionOpen] = useState(false);
   const [adjusting, setAdjusting] = useState<FinanceAccount | null>(null);
   useEffect(() => { if (finance.notice) void activity.refreshOptions(); }, [finance.notice, activity.refreshOptions]);
@@ -138,13 +143,13 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
             <section className="self-start rounded-lg bg-muted p-5">
               <h2 className="text-base font-semibold">Finance preview</h2>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Openings establish your starting position. They do not count as income or spending.</p>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Income, expenses and transfers are ready to record. Reconcile balances and adjust asset values in Manage. Set budgets in Planning and inspect spending reports above. Attention items arrive in a later preview.</p>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Income, expenses and transfers are ready to record. Reconcile balances and adjust asset values in Manage. Set budgets and review one-time plans in Planning. Inspect actual spending and separate forecasts above. Other attention items arrive in a later preview.</p>
             </section>
           </div>
         </>}
       </TabsContent>
       <TabsContent value="activity"><FinanceActivityList activity={activity} /></TabsContent>
-      <TabsContent value="planning"><FinanceBudgets budget={budget} activity={activity} /></TabsContent>
+      <TabsContent value="planning"><FinanceBudgets budget={budget} activity={activity} /><FinancePlans planning={planning} activity={activity} /></TabsContent>
       <TabsContent value="manage">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div><h2 className="text-lg font-semibold">Accounts</h2><p className="mt-1 text-sm text-muted-foreground">Opening balances are fixed. Rename or archive accounts here.</p></div>

@@ -146,9 +146,9 @@ and affected transaction/account IDs; raw API keys are never recorded.
 ## Verification safety
 
 Automated finance tests use synthetic disposable SQLite Vaults. Build checks
-use an isolated `CHIBAKO_BUILD_DIR` and temporary data directory. Agents must not
-mutate production or the running dev vault/build channel. Owner browser checks
-are manual on the existing dev server, using clearly named synthetic test
-accounts; those actions persist in that vault. See
-[Ticket 04 manual checks](finance-ticket04-manual-checks.md). No live import or
-deployment is authorized by this preview.
+use an isolated `CHIBAKO_BUILD_DIR` and temporary data directory. Browser E2E
+runs against the existing dev server and its dev Vault by default, in the T3
+Code browser, using clearly named synthetic accounts; those actions persist in
+that vault. Production and non-dev channels stay off-limits. See
+[Ticket 04 owner-flow checks](finance-ticket04-manual-checks.md). No live import
+or deployment is authorized by this preview.

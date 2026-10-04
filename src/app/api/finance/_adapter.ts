@@ -35,7 +35,7 @@ export function financeQuery(request: Request): Record<string, unknown> {
   const query: Record<string, unknown> = {};
   for (const [key, value] of new URL(request.url).searchParams) {
     if (key === "limit" || key === "offset") query[key] = value === "" ? NaN : Number(value);
-    else if (key === "include_details") query[key] = value === "true" ? true : value === "false" ? false : value;
+    else if (key === "include_details" || key === "matchable") query[key] = value === "true" ? true : value === "false" ? false : value;
     else query[key] = value;
   }
   return query;

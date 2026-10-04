@@ -11,7 +11,7 @@ Overview reports default to the current calendar month. Select an ordered date r
 
 Actual spending is posted expenses minus refunds on their refund dates. Hidden records count; reverted mistakes do not. Openings, transfers, reconciliations and asset valuations are excluded. A transfer fee is an expense. Existing category names, including imported `other`, are retained unchanged. Unbudgeted spending includes uncategorized activity and activity in category-months without a limit.
 
-Select a category to open Activity with that category, report dates, all accounts, visible and hidden activity, and active effects only. Report dates and filters remain in the mounted four-tab page. Planned forecasts have a distinct section but return `available: false` and `spending_cents: null` until pending activity is implemented; no forecast is guessed or mixed into actuals.
+Select a category to open Activity with that category, report dates, all accounts, visible and hidden activity, and active effects only. Report dates and filters remain in the mounted four-tab page. Planned forecasts have a distinct section with pending one-time income and spending due in the selected range. The response retains the `available` compatibility field, now `true`, and returns exact `income_cents` and `spending_cents`. Forecasts never consume actual budgets. See [one-time planned activity](finance-planning.md).
 
 ## REST
 

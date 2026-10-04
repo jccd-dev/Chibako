@@ -7,6 +7,7 @@ import type { FinanceTransaction } from "./activity-types";
 import { FinanceError, getAccountSchema, type FinanceActor } from "./types";
 import { exactCents, decimalCents } from "./money";
 import { financeMutation, parseFinance } from "./mutations";
+import { reopenPlanForTransaction } from "./planning";
 import { activityActionSchema, correctActivitySchema, recordRefundSchema, type CorrectedActivity } from "./correction-types";
 
 function table(record: FinanceTransaction) {
@@ -90,9 +91,10 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
       bump(entry);
     }
     if (expense) bump(expense);
+    const plan = operation === "revert" ? reopenPlanForTransaction(id) : null;
     const ids = accountIds([record, fee]);
-    const result = outcome(id, ids);
-    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : [])], before: { transaction: record, fee, expense }, after: { transaction: readTransaction(id, true), fee: linkedFee(readTransaction(id, true)), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances } };
+    const result: CorrectedActivity = { ...outcome(id, ids), ...(plan ? { plan: plan.after } : {}) };
+    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(plan ? [plan.after.id] : [])], before: { transaction: record, fee, expense, ...(plan ? { plan: plan.before } : {}) }, after: { transaction: readTransaction(id, true), fee: linkedFee(readTransaction(id, true)), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(plan ? { plan: plan.after } : {}) } };
   });
 }
 
