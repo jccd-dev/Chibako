@@ -7,6 +7,7 @@ const context = {
   currency: z.literal("PHP").default("PHP"),
   transaction_date: calendarDateSchema,
   text: postTransactionSchema.shape.text,
+  note_ids: postTransactionSchema.shape.note_ids,
   tag_ids: postTransactionSchema.shape.tag_ids,
 };
 export const postTransferSchema = z.object({

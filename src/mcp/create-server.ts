@@ -29,13 +29,15 @@ import { reindexEmbeddings, embeddingStatus } from "../lib/embedding-index";
 import { getKnowledgeSchema } from "../features/schema/knowledge-schema";
 import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
-import { authorizeFinance } from "../server/auth/finance-authorization";
+import { authorizeFinance, authorizeFinanceNotes } from "../server/auth/finance-authorization";
 import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
 import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
 import { postTransfer, reconcileAccount, valueAsset } from "../features/finance/movements";
 import { correctActivity, hideActivity, revertActivity, recordRefund } from "../features/finance/corrections";
 import { correctActivitySchema, activityActionSchema, recordRefundSchema } from "../features/finance/correction-types";
 import { postTransferSchema, postAdjustmentSchema } from "../features/finance/movement-types";
+import { getActivityNoteLinks, setActivityNoteLinks, getFinanceNoteChoices } from "../features/finance/note-links";
+import { getActivityNoteLinksSchema, setActivityNoteLinksSchema, financeNoteChoicesSchema } from "../features/finance/note-link-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
 import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
 import { createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema, FinanceError, type FinanceActor, type FinanceScope } from "../features/finance/types";
@@ -387,6 +389,26 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       return fail("internal_error: Finance operation failed");
     }
   };
+  const notesAuthorized = () => {
+    if (!financeActor) return false;
+    try { authorizeFinanceNotes(financeActor); return true; } catch { return false; }
+  };
+  if (notesAuthorized() && financeAuthorized("finance:read")) {
+    server.registerTool("get_finance_note_links", {
+      title: "Read finance Note links", description: "Explicitly read linked Note titles for one Activity record. Requires finance:read plus notes:read. Note content and editing use independent Note tools.",
+      inputSchema: getActivityNoteLinksSchema,
+    }, ({ id }) => financeResult("finance:read", actor => ({ ...getActivityNoteLinks(actor, id) })));
+    server.registerTool("list_finance_note_choices", {
+      title: "Choose a Note for finance", description: "Bounded title-only lookup outside Trash. Requires finance:read plus notes:read. Does not change Notes or create links automatically.",
+      inputSchema: financeNoteChoicesSchema,
+    }, args => financeResult("finance:read", actor => ({ ...getFinanceNoteChoices(actor, args) })));
+  }
+  if (notesAuthorized() && financeAuthorized("finance:write")) {
+    server.registerTool("set_finance_note_links", {
+      title: "Set finance Note links", description: "Replace the optional Note links on one Activity record, or remove all with note_ids: []. Requires finance:write plus notes:read, request_id and current version. Never changes Notes or balances. Up to 20 links.",
+      inputSchema: setActivityNoteLinksSchema.extend({ id: getActivityNoteLinksSchema.shape.id }),
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
+  }
   if (financeAuthorized("finance:read")) {
     server.registerTool("list_finance_activity", {
       title: "Finance activity", description: "Bounded dated activity including refunds, transfers and adjustments. Hidden and reverted records require explicit hidden/reverted filters (false, true, all). Search by date, account, category, type or text/tag. Compact by default; explicitly request include_details for text, tags and timestamps.",

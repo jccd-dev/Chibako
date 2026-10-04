@@ -14,6 +14,8 @@ const manager = createApiKey("Manage only", ["finance:manage"]);
 const reader = createApiKey("Read only", ["finance:read"]);
 const writer = createApiKey("Write only", ["finance:write"]);
 let postedAccountId = "";
+let linkedTransactionId = "";
+let linkedNoteId = "";
 const opening = { request_id: "stdio-create", name: "Cash", kind: "money", currency: "PHP", opening_balance: "123.45" };
 
 async function connect(configuredKey: string | undefined, check: (client: Client) => Promise<void>) {
@@ -59,6 +61,15 @@ try {
     const history = await client.callTool({ name: "list_finance_activity", arguments: {} });
     const compact = (history.structuredContent as { transactions: object[] }).transactions[0];
     assert.equal("text" in compact, false);
+    linkedTransactionId = (compact as { id: string }).id;
+    const noteResult = await client.callTool({ name: "create_note", arguments: { title: "Synthetic finance link", content: "Note must stay unchanged" } });
+    assert.equal(noteResult.isError, undefined);
+    linkedNoteId = (noteResult.structuredContent as { id: string }).id;
+    const attach = { id: linkedTransactionId, request_id: "stdio-link", version: 1, note_ids: [linkedNoteId] };
+    const linked = await client.callTool({ name: "set_finance_note_links", arguments: attach });
+    assert.equal(linked.isError, undefined);
+    assert.deepEqual((await client.callTool({ name: "set_finance_note_links", arguments: attach })).structuredContent, linked.structuredContent);
+    assert.deepEqual((await client.callTool({ name: "get_finance_note_links", arguments: { id: linkedTransactionId } })).structuredContent, { id: linkedTransactionId, version: 2, notes: [{ id: linkedNoteId, title: "Synthetic finance link" }] });
     const detailed = await client.callTool({ name: "list_finance_activity", arguments: { include_details: true } });
     assert.equal((detailed.structuredContent as { transactions: { text: string }[] }).transactions[0].text, "Private receipt");
     assert.equal(getDb().prepare<[], { actor_id: string }>("SELECT actor_id FROM finance_audit LIMIT 1").get()?.actor_id, "trusted-local-mcp");
@@ -87,6 +98,8 @@ try {
     assert.ok(names.includes("value_finance_asset"));
     for (const name of ["correct_finance_activity", "hide_finance_activity", "revert_finance_activity", "record_finance_refund"]) assert.ok(names.includes(name));
     assert.ok(!names.includes("list_finance_activity"));
+    assert.ok(!names.includes("set_finance_note_links"));
+    assert.equal((await client.callTool({ name: "post_finance_transaction", arguments: { request_id: "denied-note-link", account_id: postedAccountId, amount: "1", transaction_date: "2026-10-04", note_ids: [linkedNoteId] } })).isError, true);
     assert.ok(!names.includes("create_finance_classification"));
     assert.equal((await client.callTool({ name: "post_finance_transaction", arguments: { request_id: "keyed-post", account_id: postedAccountId, amount: "0.01", type: "income", transaction_date: "2026-10-04" } })).isError, undefined);
   });
@@ -94,6 +107,10 @@ try {
     const names = (await client.listTools()).tools.map(tool => tool.name);
     assert.ok(names.includes("get_finance_summary"));
     assert.ok(!names.includes("create_finance_account"));
+    assert.ok(!names.includes("get_finance_note_links"));
+    assert.equal((await client.callTool({ name: "get_finance_note_links", arguments: { id: linkedTransactionId } })).isError, true);
+    const detail = await client.callTool({ name: "get_finance_transaction", arguments: { id: linkedTransactionId, include_details: true } });
+    assert.equal(JSON.stringify(detail.structuredContent).includes("Synthetic finance link"), false);
     for (const name of ["correct_finance_activity", "hide_finance_activity", "revert_finance_activity", "record_finance_refund"]) assert.ok(!names.includes(name));
     const result = await client.callTool({ name: "get_finance_summary", arguments: {} });
     assert.equal((result.structuredContent as { money: { balance_cents: number } }).money.balance_cents, 24590);

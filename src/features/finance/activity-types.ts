@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createAccountSchema, getAccountSchema } from "./types";
+import { noteIdsSchema } from "./note-link-types";
 
 const id = getAccountSchema.shape.id;
 const requestId = createAccountSchema.shape.request_id;
@@ -24,6 +25,7 @@ export const postTransactionSchema = z.object({
   category_id: id.nullable().default(null),
   subcategory_id: id.nullable().default(null),
   text: z.string().max(2000).default(""),
+  note_ids: noteIdsSchema.default([]),
   tag_ids: z.array(id).max(20).default([]).refine(ids => new Set(ids).size === ids.length, "Tags must be unique"),
 }).strict();
 export const listTransactionsSchema = z.object({

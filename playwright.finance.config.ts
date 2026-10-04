@@ -9,7 +9,7 @@ process.env.CHIBAKO_FIN_E2E_DATA_DIR = dataDir;
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: "**/finance.spec.ts",
+  testMatch: "**/finance*.spec.ts",
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env.CI),

@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { getDb, now } from "../../lib/db";
-import { authorizeFinance } from "../../server/auth/finance-authorization";
+import { authorizeFinance, authorizeFinanceNotes } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
 import { readAccountBalance } from "./accounts";
 import { parseFinance, financeMutation } from "./mutations";
 import { decimalCents, exactCents } from "./money";
 import { readClassification } from "./classifications";
+import { replaceActivityNoteLinks } from "./note-link-storage";
 import {
   postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema,
   type FinanceTransaction, type ActivityPage, type ActivityTotals, type PostedTransaction,
@@ -45,17 +46,19 @@ export function getTransaction(actor: FinanceActor, id: string, input: unknown =
 }
 export function postTransaction(actor: FinanceActor, input: unknown): PostedTransaction {
   authorizeFinance(actor, "finance:write");
-  const { request_id, ...payload } = parseFinance(postTransactionSchema, input);
+  const { request_id, note_ids, ...payload } = parseFinance(postTransactionSchema, input);
+  if (note_ids.length) authorizeFinanceNotes(actor);
   const amount = decimalCents(payload.amount);
   if (amount <= 0) throw new FinanceError("Amount must be greater than zero", 400, "invalid_input");
-  return financeMutation(actor, request_id, "transaction.post", payload, () => {
+  return financeMutation(actor, request_id, "transaction.post", note_ids.length ? { ...payload, note_ids } : payload, () => {
     const account = readAccountBalance(payload.account_id);
     if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
     validateTransactionClassifications(payload);
     const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)));
     const id = insertTransaction({ ...payload, amount_cents: amount });
+    replaceActivityNoteLinks(id, note_ids);
     const result: PostedTransaction = { transaction: readTransaction(id, false), balance_cents: balance, warnings: balance < 0 ? ["negative_balance"] : [] };
-    return { result, affectedIds: [id, account.id], before: null, after: readTransaction(id, true) };
+    return { result, affectedIds: [id, account.id, ...note_ids], before: null, after: { ...readTransaction(id, true), note_ids } };
   });
 }
 

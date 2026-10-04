@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { FinanceTransaction } from "@/features/finance/activity-types";
 import { FinanceCorrection } from "./FinanceCorrection";
+import { FinanceNoteLinks, FinanceNotePicker } from "./FinanceNoteLinks";
 import { FinanceTransferFields } from "./FinanceTransferFields";
 import { useFinanceEntry } from "@/features/finance/use-finance-entry";
 import type { ActivityFilters, FinanceActivityController } from "@/features/finance/use-finance-activity";
@@ -93,6 +94,7 @@ export function FinanceActivityList({ activity }: { activity: FinanceActivityCon
             <div><dt className="text-muted-foreground">Recorded at</dt><dd>{selected.created_at ? new Date(selected.created_at * 1000).toLocaleString() : "Unavailable"}</dd></div>
           </dl> : <p role="status">Loading transaction…</p>}
           {selected && <FinanceOptionStatus activity={activity} />}
+          {selected && <FinanceNoteLinks key={`notes:${selected.id}:${selected.version}`} record={selected} activity={activity} onSaved={id => void inspect(id)} />}
           {selected && <FinanceCorrection key={`${selected.id}:${selected.version}`} record={selected} activity={activity} onSaved={id => void inspect(id)} />}
           <Button variant="outline" disabled={activity.busy} className={`${control} mt-auto self-end`} onClick={() => { inspectSequence.current++; setInspectionId(null); }}>Close details</Button>
         </div>
@@ -113,7 +115,7 @@ export function FinanceOptionStatus({ activity }: { activity: FinanceActivityCon
 
 export function FinanceTransactionEntry({ activity, open, onClose }: { activity: FinanceActivityController; open: boolean; onClose: () => void }) {
   const entry = useFinanceEntry(activity, open);
-  const { type, changeType, amount, setAmount, accountId, setAccountId, date, setDate, categoryId, changeCategory, subcategoryId, setSubcategoryId, text, setText, tagIds, setTagIds, errors, save } = entry;
+  const { type, changeType, amount, setAmount, accountId, setAccountId, date, setDate, categoryId, changeCategory, subcategoryId, setSubcategoryId, text, setText, tagIds, setTagIds, notes, setNotes, errors, save } = entry;
   const accountKey = type === "transfer" ? "source_account_id" : "account_id";
   const amountRef = useRef<HTMLInputElement>(null);
   const categories = activity.classifications.filter(item => item.kind === "category" && item.type === type && !item.parent_id && !item.archived);
@@ -146,6 +148,7 @@ export function FinanceTransactionEntry({ activity, open, onClose }: { activity:
         <details><summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:outline-2 focus-visible:outline-ring">Additional details</summary><FieldGroup className="mt-3">
           <Field><FieldLabel htmlFor="transaction-text">Transaction text</FieldLabel><Textarea id="transaction-text" value={text} maxLength={2000} disabled={activity.busy} onChange={event => setText(event.target.value)} className="min-h-24 text-sm" /></Field>
           <FieldSet><FieldLegend>Tags</FieldLegend>{activity.classifications.filter(item => item.kind === "tag" && !item.archived).map(tag => <label key={tag.id} className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" className="size-4 accent-primary" checked={tagIds.includes(tag.id)} disabled={activity.busy || (!tagIds.includes(tag.id) && tagIds.length >= 20)} onChange={event => setTagIds(current => event.target.checked ? [...current, tag.id] : current.filter(id => id !== tag.id))} />{tag.name}</label>)}<FieldDescription>Manage tags in the Manage tab. Up to 20 per transaction.</FieldDescription></FieldSet>
+          <FieldSet><FieldLegend>Optional Note links</FieldLegend><FinanceNotePicker notes={notes} onChange={setNotes} disabled={activity.busy} /></FieldSet>
         </FieldGroup></details>
         {activity.saveError && <Alert><AlertDescription>{activity.saveError} Your entries are kept. Retry to safely reuse the same request.</AlertDescription></Alert>}
         <div className="mt-auto flex flex-wrap justify-end gap-3 pt-4"><Button type="button" variant="outline" className={control} disabled={activity.busy} onClick={onClose}>Cancel</Button><Button type="submit" name="another" variant="outline" className={control} disabled={activity.busy}>Save and add another</Button><Button type="submit" className={control} disabled={activity.busy}>{activity.busy ? "Saving…" : "Save transaction"}</Button></div>

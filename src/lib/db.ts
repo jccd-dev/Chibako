@@ -254,6 +254,11 @@ export function getDb(): Database.Database {
       hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0, 1)),
       version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     ); CREATE INDEX IF NOT EXISTS idx_finance_refunds_expense ON finance_refunds(expense_id);`);
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_note_links (
+      activity_id TEXT NOT NULL,
+      note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+      PRIMARY KEY (activity_id, note_id)
+    ); CREATE INDEX IF NOT EXISTS idx_finance_note_links_note ON finance_note_links(note_id);`);
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

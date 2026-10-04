@@ -124,6 +124,13 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
+  async function setNoteLinks(id: string, input: object) {
+    return save<{ transaction: FinanceTransaction; note_ids: string[]; balances: { account_id: string; balance_cents: number }[] }>(`activity/${id}/notes`, input, "PUT", async result => {
+      const balances = result.balances.map(balance => `${accounts.find(account => account.id === balance.account_id)?.name ?? "Account"}: ${formatPHP(balance.balance_cents)}`).join("; ");
+      setNotice(`Note links saved. Notes and balances unchanged. ${balances}.`);
+      await refreshHistory();
+    });
+  }
   async function saveClassification(id: string | null, input: object) {
     return save<{ classification: FinanceClassification }>(id ? `classifications/${id}` : "classifications", input, id ? "PATCH" : "POST", async () => {
       setNotice("Classification saved.");
@@ -136,6 +143,6 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   function applyFilters(value: ActivityFilters) { setOffset(0); setFilters(value); }
   function clearFilters() { applyFilters(emptyFilters); }
   function resetSave() { pending.current = null; setSaveError(""); }
-  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, correct, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, loadMoreOptions, resetSave };
+  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, loadMoreOptions, resetSave };
 }
 export type FinanceActivityController = ReturnType<typeof useFinanceActivity>;
