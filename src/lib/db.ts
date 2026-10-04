@@ -240,6 +240,23 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (category_id, month, mode)
   );
   `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_schedules (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('income','expense')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    category_id TEXT REFERENCES finance_classifications(id), subcategory_id TEXT REFERENCES finance_classifications(id),
+    text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+    interval_count INTEGER NOT NULL CHECK (interval_count BETWEEN 1 AND 10000),
+    interval_unit TEXT NOT NULL CHECK (interval_unit IN ('day','week','month','year')),
+    start_date TEXT NOT NULL, end_date TEXT, paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0,1)),
+    next_index INTEGER NOT NULL DEFAULT 0 CHECK (next_index >= 0), generation INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    CHECK (end_date IS NULL OR end_date >= start_date)
+  );
+  `,
 ];
 
 export function getDb(): Database.Database {
@@ -290,6 +307,12 @@ export function getDb(): Database.Database {
       note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
       PRIMARY KEY (activity_id, note_id)
     ); CREATE INDEX IF NOT EXISTS idx_finance_note_links_note ON finance_note_links(note_id);`);
+    const planColumns = new Set((db.prepare("PRAGMA table_info(finance_plans)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!planColumns.has("schedule_id")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_id TEXT REFERENCES finance_schedules(id)");
+    if (!planColumns.has("occurrence_date")) db.exec("ALTER TABLE finance_plans ADD COLUMN occurrence_date TEXT");
+    if (!planColumns.has("schedule_generation")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_generation INTEGER");
+    if (!planColumns.has("cancel_reason")) db.exec("ALTER TABLE finance_plans ADD COLUMN cancel_reason TEXT");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_occurrence_identity ON finance_plans(schedule_id, schedule_generation, occurrence_date)");
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

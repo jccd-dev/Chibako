@@ -10,9 +10,12 @@ import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, pla
 
 const selection = `SELECT p.*, a.name AS account_name, c.name AS category_name FROM finance_plans p
   JOIN finance_accounts a ON a.id = p.account_id LEFT JOIN finance_classifications c ON c.id = p.category_id`;
-type PlanRow = Omit<FinancePlan, "currency" | "tag_ids"> & { text: string; tag_ids: string; created_at: number; updated_at: number };
+type PlanRow = Omit<FinancePlan, "currency" | "tag_ids"> & {
+  text: string; tag_ids: string; created_at: number; updated_at: number; schedule_generation: number | null;
+  cancel_reason: "skipped" | "boundary" | "cadence" | null;
+};
 function fromRow(row: PlanRow, details: boolean): FinancePlan {
-  const { text, tag_ids, created_at, updated_at, ...compact } = row;
+  const { text, tag_ids, created_at, updated_at, schedule_generation: _generation, cancel_reason: _cancelReason, ...compact } = row;
   return { ...compact, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
 }
 export function readPlan(id: string, details = false): FinancePlan {
@@ -28,7 +31,7 @@ export function getPlan(actor: FinanceActor, id: string, input: unknown = {}): F
 export function listPlans(actor: FinanceActor, input: unknown = {}): PlanPage {
   authorizeFinance(actor, "finance:read");
   const query = parseFinance(listPlansSchema, input), clauses: string[] = [], values: (string | number)[] = [];
-  for (const key of ["type", "account_id"] as const) if (query[key]) { clauses.push(`p.${key} = ?`); values.push(query[key]!); }
+  for (const key of ["type", "account_id", "schedule_id"] as const) if (query[key]) { clauses.push(`p.${key} = ?`); values.push(query[key]!); }
   if (query.status !== "all") { clauses.push("p.status = ?"); values.push(query.status); }
   if (query.date_from) { clauses.push("p.due_date >= ?"); values.push(query.date_from); }
   if (query.date_to) { clauses.push("p.due_date <= ?"); values.push(query.date_to); }
@@ -39,17 +42,17 @@ export function listPlans(actor: FinanceActor, input: unknown = {}): PlanPage {
     return { plans: rows.map(row => fromRow(row, query.include_details)), total, limit: query.limit, offset: query.offset };
   })();
 }
-function pendingPlan(id: string, version: number) {
+export function pendingPlan(id: string, version: number) {
   const plan = readPlan(id, true);
   if (plan.version !== version || plan.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Plan changed; refresh before editing", 409, "version_conflict");
   if (plan.status !== "pending") throw new FinanceError("Only pending plans can be changed or satisfied", 409, "not_pending");
   return plan;
 }
-function validatePlanAccount(id: string) {
+export function validatePlanAccount(id: string) {
   const account = readAccountBalance(id);
   if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
 }
-function positiveAmount(value: string) {
+export function positiveAmount(value: string) {
   const amount = decimalCents(value);
   if (amount <= 0) throw new FinanceError("Amount must be greater than zero", 400, "invalid_input");
   return amount;
@@ -123,7 +126,7 @@ export function cancelPlan(actor: FinanceActor, id: string, input: unknown): { p
   const { request_id, ...payload } = parseFinance(planActionSchema, input);
   return financeMutation(actor, request_id, "plan.cancel", { id, ...payload }, () => {
     const before = pendingPlan(id, payload.version);
-    getDb().prepare("UPDATE finance_plans SET status='cancelled',version=version+1,updated_at=? WHERE id=?").run(now(), id);
+    getDb().prepare("UPDATE finance_plans SET status='cancelled',cancel_reason='skipped',version=version+1,updated_at=? WHERE id=?").run(now(), id);
     return { result: { plan: readPlan(id) }, affectedIds: [id], before, after: readPlan(id, true) };
   });
 }

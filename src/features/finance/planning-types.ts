@@ -18,7 +18,7 @@ export const matchPlanSchema = planActionSchema.extend({ transaction_id: id, tra
 export const getPlanSchema = z.object({ id, include_details: z.boolean().default(false) }).strict();
 export const listPlansSchema = z.object({
   status: z.enum(["pending", "satisfied", "cancelled", "all"]).default("pending"),
-  type: transactionTypeSchema.optional(), account_id: id.optional(),
+  type: transactionTypeSchema.optional(), account_id: id.optional(), schedule_id: id.optional(),
   date_from: calendarDateSchema.optional(), date_to: calendarDateSchema.optional(),
   limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
   include_details: z.boolean().default(false),
@@ -26,6 +26,7 @@ export const listPlansSchema = z.object({
 export interface FinancePlan {
   id: string; type: "income" | "expense"; account_id: string; account_name: string; currency: "PHP"; amount_cents: number;
   due_date: string; category_id: string | null; subcategory_id: string | null; category_name: string | null;
+  schedule_id: string | null; occurrence_date: string | null;
   status: "pending" | "satisfied" | "cancelled"; transaction_id: string | null; version: number;
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;
 }

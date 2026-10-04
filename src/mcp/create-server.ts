@@ -39,6 +39,8 @@ import { postTransferSchema, postAdjustmentSchema } from "../features/finance/mo
 import { getActivityNoteLinks, setActivityNoteLinks, getFinanceNoteChoices } from "../features/finance/note-links";
 import { getActivityNoteLinksSchema, setActivityNoteLinksSchema, financeNoteChoicesSchema } from "../features/finance/note-link-types";
 import { createPlan, getPlan, listPlans, updatePlan, cancelPlan, postPlan, matchPlan } from "../features/finance/planning";
+import { createSchedule, getSchedule, listSchedules, updateSchedule, pauseSchedule, resumeSchedule, catchUpPlans, skipPlans } from "../features/finance/recurrence";
+import { createScheduleSchema, getScheduleSchema, listSchedulesSchema, updateScheduleSchema, scheduleActionSchema, catchUpPlansSchema, skipPlansSchema } from "../features/finance/recurrence-types";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema } from "../features/finance/planning-types";
 import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
@@ -414,8 +416,16 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
   }
   if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_schedules", {
+      title: "List recurring finance schedules", description: "Bounded recurrence definitions, active or paused, with calendar intervals and optional end dates. No automatic posting or generation. Text/tags require include_details.",
+      inputSchema: listSchedulesSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listSchedules(actor, args) })));
+    server.registerTool("get_finance_schedule", {
+      title: "Inspect recurring schedule", description: "Read one recurrence definition. Personal text/tags require include_details.",
+      inputSchema: getScheduleSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ schedule: getSchedule(actor, id, args) })));
     server.registerTool("list_finance_plans", {
-      title: "Review one-time finance plans", description: "Bounded income/expense plans, pending by default, ordered by due date including overdue and upcoming. Filter due-date range, account, type or status. Plans have no cash effects; text/tags require include_details.",
+      title: "Review finance plans and occurrences", description: "Bounded one-time and recurring income/expense plans, pending by default, ordered by due date including overdue and upcoming. Filter due-date range, schedule_id, account, type or status. Plans have no cash effects; text/tags require include_details.",
       inputSchema: listPlansSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listPlans(actor, args) })));
     server.registerTool("get_finance_plan", {
@@ -461,6 +471,14 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   }
   if (financeAuthorized("finance:write")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("catch_up_finance_plans", {
+      title: "Catch up recurring pending review", description: "Generate at most 1000 pending recurring occurrences through through_date (default today), plus one next upcoming per active schedule. No cash effects. Requires finance:write and request_id. Repeat with fresh request IDs while has_more; identical retries return the original result.",
+      inputSchema: catchUpPlansSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...catchUpPlans(actor, args) })));
+    server.registerTool("skip_finance_plans", {
+      title: "Bulk skip pending plans", description: "Skip up to 100 distinct pending plans/occurrences atomically, without cash effects. Supply plans [{id,version}], request_id. Any stale or non-pending entry rejects the entire batch.",
+      inputSchema: skipPlansSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...skipPlans(actor, args) })));
     server.registerTool("create_finance_plan", {
       title: "Plan one-time income or expense", description: "Create pending PHP activity with due_date and expected amount/account, without changing balances or actual spending. Requires finance:write and request_id.",
       inputSchema: createPlanSchema, annotations,
@@ -516,6 +534,22 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   }
   if (financeAuthorized("finance:manage")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("create_finance_schedule", {
+      title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. May start paused for reviewed imports. Requires finance:manage and request_id; no pending generation or cash effect.",
+      inputSchema: createScheduleSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createSchedule(actor, args)));
+    server.registerTool("update_finance_schedule", {
+      title: "Edit this and future occurrences", description: "Change a schedule from selected pending from_plan_id onward. Requires schedule version, from_plan_version and request_id. Earlier occurrences and satisfied history remain intact. For one occurrence use update_finance_plan. Cadence changes cancel obsolete future pending expectations and restart from selected/new start_date; catch up explicitly afterward.",
+      inputSchema: updateScheduleSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateSchedule(actor, id, args)));
+    server.registerTool("pause_finance_schedule", {
+      title: "Pause recurring schedule", description: "Stop new occurrences, retaining every existing pending occurrence for review. Requires finance:manage, request_id and current schedule version.",
+      inputSchema: scheduleActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => pauseSchedule(actor, id, args)));
+    server.registerTool("resume_finance_schedule", {
+      title: "Resume recurring schedule", description: "Explicitly resume a paused schedule from its next future anchored due date, skipping dates while paused. Existing pending review and history remain. Requires finance:manage, request_id and current version.",
+      inputSchema: scheduleActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => resumeSchedule(actor, id, args)));
     server.registerTool("set_finance_budget", {
       title: "Set monthly expense budget", description: "Set a non-negative PHP decimal limit for a top-level expense category. Includes subcategories across all accounts, no rollover. Requires request_id and current category schedule version (0 to create). Mode forward replaces limits/corrections from chosen YYYY-MM onward, preserving earlier months; correction changes only that month. Overspending never blocks posting.",
       inputSchema: setBudgetSchema, annotations,

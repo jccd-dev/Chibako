@@ -52,6 +52,18 @@ try {
       assert.equal(account.archived, archived);
     }
     assert.deepEqual((await client.callTool({ name: "create_finance_account", arguments: opening })).structuredContent, original);
+    for (const name of ["list_finance_schedules", "get_finance_schedule", "create_finance_schedule", "update_finance_schedule", "pause_finance_schedule", "resume_finance_schedule", "catch_up_finance_plans", "skip_finance_plans"]) assert.ok(names.includes(name));
+    const recurring = await client.callTool({ name: "create_finance_schedule", arguments: { request_id: "stdio-recurring", account_id: original.account.id, amount: "2", interval_count: 1, interval_unit: "month", start_date: "2026-01-31", end_date: "2026-02-28" } });
+    assert.equal(recurring.isError, undefined);
+    const scheduleId = (recurring.structuredContent as { schedule: { id: string } }).schedule.id;
+    const catchup = { request_id: "stdio-catchup", through_date: "2026-02-28" };
+    const generated = await client.callTool({ name: "catch_up_finance_plans", arguments: catchup });
+    assert.deepEqual(generated.structuredContent, { created_count: 2, has_more: false });
+    assert.deepEqual((await client.callTool({ name: "catch_up_finance_plans", arguments: catchup })).structuredContent, generated.structuredContent);
+    const occurrences = await client.callTool({ name: "list_finance_plans", arguments: { schedule_id: scheduleId } });
+    const pending = (occurrences.structuredContent as { plans: { id: string; version: number; due_date: string }[] }).plans;
+    assert.deepEqual(pending.map(plan => plan.due_date), ["2026-01-31", "2026-02-28"]);
+    assert.equal((await client.callTool({ name: "skip_finance_plans", arguments: { request_id: "stdio-skip", plans: pending.map(({ id, version }) => ({ id, version })) } })).isError, undefined);
     postedAccountId = original.account.id;
     const payload = { request_id: "stdio-post", account_id: postedAccountId, amount: "1.01", transaction_date: "2026-10-03", text: "Private receipt" };
     const posted = await client.callTool({ name: "post_finance_transaction", arguments: payload });
@@ -88,6 +100,9 @@ try {
     const names = (await client.listTools()).tools.map(tool => tool.name);
     assert.ok(names.includes("create_finance_account"));
     assert.ok(!names.includes("get_finance_summary"));
+    assert.ok(names.includes("create_finance_schedule"));
+    assert.ok(!names.includes("list_finance_schedules"));
+    assert.ok(!names.includes("catch_up_finance_plans"));
     assert.equal((await client.callTool({ name: "create_finance_account", arguments: opening })).isError, undefined);
   });
   await connect(writer.key, async client => {
@@ -101,12 +116,19 @@ try {
     assert.ok(!names.includes("set_finance_note_links"));
     assert.equal((await client.callTool({ name: "post_finance_transaction", arguments: { request_id: "denied-note-link", account_id: postedAccountId, amount: "1", transaction_date: "2026-10-04", note_ids: [linkedNoteId] } })).isError, true);
     assert.ok(!names.includes("create_finance_classification"));
+    assert.ok(names.includes("catch_up_finance_plans"));
+    assert.ok(names.includes("skip_finance_plans"));
+    assert.ok(!names.includes("create_finance_schedule"));
+    assert.ok(!names.includes("list_finance_schedules"));
     assert.equal((await client.callTool({ name: "post_finance_transaction", arguments: { request_id: "keyed-post", account_id: postedAccountId, amount: "0.01", type: "income", transaction_date: "2026-10-04" } })).isError, undefined);
   });
   await connect(reader.key, async client => {
     const names = (await client.listTools()).tools.map(tool => tool.name);
     assert.ok(names.includes("get_finance_summary"));
     assert.ok(!names.includes("create_finance_account"));
+    assert.ok(names.includes("list_finance_schedules"));
+    assert.ok(!names.includes("create_finance_schedule"));
+    assert.ok(!names.includes("catch_up_finance_plans"));
     assert.ok(!names.includes("get_finance_note_links"));
     assert.equal((await client.callTool({ name: "get_finance_note_links", arguments: { id: linkedTransactionId } })).isError, true);
     const detail = await client.callTool({ name: "get_finance_transaction", arguments: { id: linkedTransactionId, include_details: true } });
@@ -119,7 +141,7 @@ try {
     assert.equal(client.getServerCapabilities()?.tools, undefined);
     await assert.rejects(client.listTools(), /Method not found/);
   });
-  console.log("PASS finance stdio: trusted, independent read/write/manage, invalid/empty key, exact cents, post/retry, compact/details, archive/restore");
+  console.log("PASS finance stdio: trusted, independent read/write/manage, invalid/empty key, exact cents, post/retry, compact/details, archive/restore, recurrence catchup/skip");
 } finally { getDb().close(); rmSync(vault, { recursive: true, force: true }); }
 }
 
