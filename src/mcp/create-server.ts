@@ -38,6 +38,8 @@ import { correctActivitySchema, activityActionSchema, recordRefundSchema } from 
 import { postTransferSchema, postAdjustmentSchema } from "../features/finance/movement-types";
 import { getActivityNoteLinks, setActivityNoteLinks, getFinanceNoteChoices } from "../features/finance/note-links";
 import { getActivityNoteLinksSchema, setActivityNoteLinksSchema, financeNoteChoicesSchema } from "../features/finance/note-link-types";
+import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
+import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
 import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
 import { createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema, FinanceError, type FinanceActor, type FinanceScope } from "../features/finance/types";
@@ -410,6 +412,14 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
   }
   if (financeAuthorized("finance:read")) {
+    server.registerTool("get_finance_report", {
+      title: "Spending and budget report", description: "Exact PHP category spending, monthly income/spending trends and unbudgeted spending across all accounts. Date range defaults to this month, at most 12 calendar months; categories paginated up to 100. Hidden activity counts, reverted does not; refunds reduce spending on refund dates. Budget totals are full calendar-month limits even for partial date ranges. Forecast is explicitly unavailable until pending activity exists.",
+      inputSchema: financeReportSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...getFinanceReport(actor, args) })));
+    server.registerTool("get_finance_budget", {
+      title: "Monthly category budget", description: "Read one top-level expense category's limit and schedule version for YYYY-MM. Null limit means no budget; version 0 means no schedule exists.",
+      inputSchema: getBudgetSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ budget: getBudget(actor, args) })));
     server.registerTool("list_finance_activity", {
       title: "Finance activity", description: "Bounded dated activity including refunds, transfers and adjustments. Hidden and reverted records require explicit hidden/reverted filters (false, true, all). Search by date, account, category, type or text/tag. Compact by default; explicitly request include_details for text, tags and timestamps.",
       inputSchema: listTransactionsSchema, annotations: READ_ONLY,
@@ -476,6 +486,10 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   }
   if (financeAuthorized("finance:manage")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("set_finance_budget", {
+      title: "Set monthly expense budget", description: "Set a non-negative PHP decimal limit for a top-level expense category. Includes subcategories across all accounts, no rollover. Requires request_id and current category schedule version (0 to create). Mode forward replaces limits/corrections from chosen YYYY-MM onward, preserving earlier months; correction changes only that month. Overspending never blocks posting.",
+      inputSchema: setBudgetSchema, annotations,
+    }, args => financeResult("finance:manage", actor => setBudget(actor, args)));
     server.registerTool("create_finance_classification", {
       title: "Create category or tag", description: "Create a typed income/expense category, one-level subcategory or untyped tag. Requires request_id.",
       inputSchema: createClassificationSchema, annotations,

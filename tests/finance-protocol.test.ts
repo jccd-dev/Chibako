@@ -81,7 +81,7 @@ test("REST and request-scoped remote MCP share results, retries, edits, and attr
   assert.equal(getDb().prepare<[string], { count: number }>("SELECT COUNT(*) AS count FROM finance_audit WHERE actor_id = ?").get(`api-key:${principal.id}`)?.count, 2);
   const manager = createApiKey("Manage only", ["finance:manage"]);
   const reader = createApiKey("Read only", ["finance:read"]);
-  for (const [key, expected] of [[manager.key, ["create_finance_account", "update_finance_account", "create_finance_classification", "update_finance_classification"]], [reader.key, ["get_finance_account", "get_finance_summary", "list_finance_accounts", "list_finance_activity", "get_finance_transaction", "get_finance_activity_totals", "list_finance_classifications"]]] as const) {
+  for (const [key, expected] of [[manager.key, ["create_finance_account", "update_finance_account", "create_finance_classification", "update_finance_classification", "set_finance_budget"]], [reader.key, ["get_finance_account", "get_finance_summary", "list_finance_accounts", "list_finance_activity", "get_finance_transaction", "get_finance_activity_totals", "list_finance_classifications", "get_finance_report", "get_finance_budget"]]] as const) {
     const catalog = await rpc(key, "tools/list");
     assert.deepEqual(catalog.result.tools.map((tool: { name: string }) => tool.name).filter((name: string) => name.includes("finance")).sort(), [...expected].sort());
   }

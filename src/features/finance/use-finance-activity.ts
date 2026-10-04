@@ -5,16 +5,12 @@ import type { FinanceAccount, FinanceAccountList } from "./types";
 import type { ActivityPage, ActivityTotals, ClassificationPage, FinanceClassification, FinanceTransaction, PostedTransaction } from "./activity-types";
 import type { CorrectedActivity } from "./correction-types";
 import type { PostedMovement } from "./movement-types";
+import { financeJson as json } from "./client-json";
 import { formatPHP, localCalendarDate } from "./presentation";
 
 export type ActivityVisibility = "false" | "true" | "all";
 export interface ActivityFilters { q: string; date_from: string; date_to: string; account_id: string; category_id: string; type: string; hidden: ActivityVisibility; reverted: ActivityVisibility }
 const emptyFilters: ActivityFilters = { q: "", date_from: "", date_to: "", account_id: "", category_id: "", type: "", hidden: "false", reverted: "false" };
-async function json<T>(response: Response): Promise<T> {
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || "Could not load finance. Try again.");
-  return body;
-}
 
 export function useFinanceActivity(onPosted: () => Promise<void>) {
   const [filters, setFilters] = useState<ActivityFilters>(emptyFilters);

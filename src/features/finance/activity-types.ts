@@ -11,7 +11,7 @@ export const calendarDateSchema = z.string().regex(/^[1-9]\d{3}-\d{2}-\d{2}$/, "
   const date = new Date(`${value}T00:00:00Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }, "Use a valid calendar day");
-const monthSchema = z.string().regex(/^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/, "Use YYYY-MM");
+export const monthSchema = z.string().regex(/^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/, "Use YYYY-MM");
 const page = {
   limit: z.number().int().min(1).max(100).default(50),
   offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),

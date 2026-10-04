@@ -209,6 +209,19 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_finance_movements_account ON finance_movements (account_id, transaction_date);
   CREATE INDEX IF NOT EXISTS idx_finance_movements_destination ON finance_movements (destination_account_id, transaction_date);
   `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_budget_plans (
+    category_id TEXT PRIMARY KEY REFERENCES finance_classifications(id),
+    version INTEGER NOT NULL CHECK (version > 0)
+  );
+  CREATE TABLE IF NOT EXISTS finance_budget_limits (
+    category_id TEXT NOT NULL REFERENCES finance_budget_plans(category_id),
+    month TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('forward', 'correction')),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 0 AND 9007199254740991),
+    PRIMARY KEY (category_id, month, mode)
+  );
+  `,
 ];
 
 export function getDb(): Database.Database {
