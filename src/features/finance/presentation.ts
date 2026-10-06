@@ -7,6 +7,11 @@ export function decimalPHP(cents: number): string {
   return `${cents < 0 ? "-" : ""}${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
 }
 
+export function allocationWarningText(result: { allocation_shortfalls?: { shortfall_cents: number }[] }): string {
+  const shortfalls = result.allocation_shortfalls;
+  return shortfalls?.length ? ` Goal allocation shortfall: ${shortfalls.map(row => formatPHP(row.shortfall_cents)).join("; ")}. Review goal reservations in Planning.` : "";
+}
+
 export function localCalendarDate(): string {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;

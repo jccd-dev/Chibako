@@ -257,6 +257,29 @@ const MIGRATIONS: string[] = [
     CHECK (end_date IS NULL OR end_date >= start_date)
   );
   `,
+  `
+  -- Goal progress comes from account reservations, separate from cash effects.
+  CREATE TABLE IF NOT EXISTS finance_goals (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    target_cents INTEGER NOT NULL CHECK (typeof(target_cents) = 'integer' AND target_cents BETWEEN 1 AND 9007199254740991),
+    -- Retained for the draft dev schema; public progress is derived from allocations.
+    saved_cents INTEGER NOT NULL CHECK (typeof(saved_cents) = 'integer' AND saved_cents BETWEEN -9007199254740991 AND 9007199254740991),
+    due_date TEXT,
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_goals_list ON finance_goals (archived, created_at, id);
+  CREATE TABLE IF NOT EXISTS finance_goal_allocations (
+    goal_id TEXT NOT NULL REFERENCES finance_goals(id),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    PRIMARY KEY (goal_id, account_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_allocations_account ON finance_goal_allocations(account_id);
+   `,
 ];
 
 export function getDb(): Database.Database {

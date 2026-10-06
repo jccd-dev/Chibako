@@ -43,6 +43,8 @@ import { createSchedule, getSchedule, listSchedules, updateSchedule, pauseSchedu
 import { createScheduleSchema, getScheduleSchema, listSchedulesSchema, updateScheduleSchema, scheduleActionSchema, catchUpPlansSchema, skipPlansSchema } from "../features/finance/recurrence-types";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema } from "../features/finance/planning-types";
 import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
+import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts } from "../features/finance/goals";
+import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema } from "../features/finance/goal-types";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
 import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
@@ -416,6 +418,18 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
   }
   if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_goals", {
+      title: "List savings goals", description: "Paginated PHP savings goals with account reservations and achievement, active by default. Goal progress is already included in cash totals. Archived goals preserve released allocation history.",
+      inputSchema: listGoalsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listGoals(actor, args) })));
+    server.registerTool("get_finance_goal", {
+      title: "Inspect savings goal", description: "Read one goal's target, account allocations, achievement and account-level shortfalls. Shortfalls are shared across goals on the same account; do not sum duplicates.",
+      inputSchema: getGoalSchema, annotations: READ_ONLY,
+    }, ({ id }) => financeResult("finance:read", actor => ({ goal: getGoal(actor, id) })));
+    server.registerTool("list_finance_goal_accounts", {
+      title: "Read reservable money", description: "Paginated money accounts with cash, reserved money, unreserved money and shortfalls. Active accounts by default. Reservation totals never add to cash; negative cash deficits remain separate from uncovered reservations.",
+      inputSchema: listGoalAccountsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listGoalAccounts(actor, args) })));
     server.registerTool("list_finance_schedules", {
       title: "List recurring finance schedules", description: "Bounded recurrence definitions, active or paused, with calendar intervals and optional end dates. No automatic posting or generation. Text/tags require include_details.",
       inputSchema: listSchedulesSchema, annotations: READ_ONLY,
@@ -534,6 +548,18 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   }
   if (financeAuthorized("finance:manage")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("create_finance_goal", {
+      title: "Create savings goal", description: "Create a positive PHP target and optional due date. Requires request_id. Starts without reservations and never moves cash.",
+      inputSchema: createGoalSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createGoal(actor, args)));
+    server.registerTool("update_finance_goal", {
+      title: "Edit or archive savings goal", description: "Update name, target or due date, or archive with archived:true. Requires request_id and current version. Archive retains history and releases reservations; archived goals are read-only.",
+      inputSchema: updateGoalSchema.safeExtend({ id: getGoalSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateGoal(actor, id, args)));
+    server.registerTool("set_finance_goal_allocation", {
+      title: "Reserve or release goal money", description: "Set the absolute PHP amount reserved on one account for a goal; amount:0 releases it. Requires request_id and goal version. Increases require active money accounts and enough unreserved cash across every goal. Releases remain allowed during shortfalls or account archival. No cash movement. At most 100 accounts per goal.",
+      inputSchema: setGoalAllocationSchema.extend({ id: getGoalSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => setGoalAllocation(actor, id, args)));
     server.registerTool("create_finance_schedule", {
       title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. May start paused for reviewed imports. Requires finance:manage and request_id; no pending generation or cash effect.",
       inputSchema: createScheduleSchema, annotations,

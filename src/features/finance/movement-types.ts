@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createAccountSchema, getAccountSchema } from "./types";
 import { postTransactionSchema, calendarDateSchema, type FinanceTransaction } from "./activity-types";
+import type { FinanceAllocationShortfall } from "./goal-types";
 
 const context = {
   request_id: createAccountSchema.shape.request_id,
@@ -32,4 +33,5 @@ export interface PostedMovement {
   fee: FinanceTransaction | null;
   balances: { account_id: string; balance_cents: number }[];
   warnings: string[];
+  allocation_shortfalls?: FinanceAllocationShortfall[];
 }

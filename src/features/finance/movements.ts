@@ -3,6 +3,7 @@ import { getDb, now } from "../../lib/db";
 import { authorizeFinance, authorizeFinanceNotes } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
 import { readAccountBalance } from "./accounts";
+import { financeBalanceWarnings } from "./reservations";
 import { readTransaction, insertTransaction, validateTransactionClassifications } from "./activity";
 import { financeMutation, parseFinance } from "./mutations";
 import { decimalCents, exactCents } from "./money";
@@ -30,7 +31,8 @@ function postAdjustment(actor: FinanceActor, input: unknown, type: "reconciliati
     getDb().prepare("INSERT INTO finance_movements (id,type,account_id,amount_cents,transaction_date,text,tag_ids,compared_balance_cents,actual_balance_cents,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
       .run(id, type, before.id, difference, payload.transaction_date, payload.text, JSON.stringify(payload.tag_ids), before.balance_cents, actual, timestamp, timestamp);
     replaceActivityNoteLinks(id, note_ids);
-    const result: PostedMovement = { transaction: readTransaction(id, false), fee: null, balances: [{ account_id: before.id, balance_cents: actual }], warnings: actual < 0 ? ["negative_balance"] : [] };
+    const balances = [{ account_id: before.id, balance_cents: actual }];
+    const result: PostedMovement = { transaction: readTransaction(id, false), fee: null, balances, ...financeBalanceWarnings(balances) };
     return { result, affectedIds: [id, before.id, ...note_ids], before, after: { transaction: readTransaction(id, true), note_ids, balances: result.balances } };
   });
 }
@@ -54,7 +56,7 @@ export function postTransfer(actor: FinanceActor, input: unknown): PostedMovemen
     getDb().prepare("INSERT INTO finance_movements (id,type,account_id,destination_account_id,amount_cents,transaction_date,text,tag_ids,fee_transaction_id,created_at,updated_at) VALUES (?,'transfer',?,?,?,?,?,?,?,?,?)")
       .run(id, source.id, destination.id, amount, payload.transaction_date, payload.text, JSON.stringify(payload.tag_ids), feeId, timestamp, timestamp);
     replaceActivityNoteLinks(id, note_ids);
-    const result: PostedMovement = { transaction: readTransaction(id, false), fee: feeId ? readTransaction(feeId, false) : null, balances, warnings: balances.some(account => account.balance_cents < 0) ? ["negative_balance"] : [] };
+    const result: PostedMovement = { transaction: readTransaction(id, false), fee: feeId ? readTransaction(feeId, false) : null, balances, ...financeBalanceWarnings(balances) };
     return { result, affectedIds: [id, source.id, destination.id, ...(feeId ? [feeId] : []), ...note_ids], before: { source, destination }, after: { transaction: readTransaction(id, true), note_ids, fee: result.fee, balances } };
   });
 }

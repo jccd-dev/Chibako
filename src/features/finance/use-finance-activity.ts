@@ -6,7 +6,7 @@ import type { ActivityPage, ActivityTotals, ClassificationPage, FinanceClassific
 import type { CorrectedActivity } from "./correction-types";
 import type { PostedMovement } from "./movement-types";
 import { financeJson as json } from "./client-json";
-import { formatPHP, localCalendarDate } from "./presentation";
+import { allocationWarningText, formatPHP, localCalendarDate } from "./presentation";
 
 export type ActivityVisibility = "false" | "true" | "all";
 export interface ActivityFilters { q: string; date_from: string; date_to: string; account_id: string; category_id: string; type: string; hidden: ActivityVisibility; reverted: ActivityVisibility }
@@ -100,14 +100,14 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   }
   async function post(input: object) {
     return save<PostedTransaction>("activity", input, "POST", async result => {
-      setNotice(result.warnings.includes("negative_balance") ? "Transaction saved. Negative balance: review this account." : "Transaction saved.");
+      setNotice(`${result.warnings.includes("negative_balance") ? "Transaction saved. Negative balance: review this account." : "Transaction saved."}${allocationWarningText(result)}`);
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
   async function postMovement(path: "transfers" | "reconciliations" | "valuations", input: object) {
     return save<PostedMovement>(`activity/${path}`, input, "POST", async result => {
       const balances = result.balances.map(balance => `${accounts.find(account => account.id === balance.account_id)?.name ?? "Account"}: ${formatPHP(balance.balance_cents)}`).join("; ");
-      setNotice(`Saved. ${balances}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}`);
+      setNotice(`Saved. ${balances}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${allocationWarningText(result)}`);
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
@@ -116,7 +116,7 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
     return save<CorrectedActivity>(`activity/${id}${suffix}`, input, action === "edit" ? "PATCH" : action === "hide" ? "DELETE" : "POST", async result => {
       const balances = result.balances.map(balance => `${accounts.find(account => account.id === balance.account_id)?.name ?? "Account"}: ${formatPHP(balance.balance_cents)}`).join("; ");
       const label = { edit: "Correction saved", hide: "Deleted from default Activity; financial effects retained", revert: "Activity reverted", refund: "Refund recorded" }[action];
-      setNotice(`${label}. ${balances}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}`);
+      setNotice(`${label}. ${balances}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${allocationWarningText(result)}`);
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }

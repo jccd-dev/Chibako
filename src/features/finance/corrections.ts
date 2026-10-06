@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDb, now } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { readAccountBalance } from "./accounts";
+import { financeBalanceWarnings } from "./reservations";
 import { readTransaction, validateTransactionClassifications } from "./activity";
 import type { FinanceTransaction } from "./activity-types";
 import { FinanceError, getAccountSchema, type FinanceActor } from "./types";
@@ -31,7 +32,7 @@ function outcome(id: string, ids: string[]): CorrectedActivity {
   const transaction = readTransaction(id, false);
   const balances = ids.map(account_id => ({ account_id, balance_cents: readAccountBalance(account_id).balance_cents }));
   const expense = transaction.expense_id ? readTransaction(transaction.expense_id, false) : null;
-  return { transaction, fee: transaction.fee_transaction_id ? readTransaction(transaction.fee_transaction_id, false) : null, balances, warnings: balances.some(balance => balance.balance_cents < 0) ? ["negative_balance"] : [],
+  return { transaction, fee: transaction.fee_transaction_id ? readTransaction(transaction.fee_transaction_id, false) : null, balances, ...financeBalanceWarnings(balances),
     ...(expense ? { expense: { id: expense.id, version: expense.version, amount_cents: expense.amount_cents, refunded_cents: expense.refunded_cents } } : {}) };
 }
 function bump(record: FinanceTransaction) {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createAccountSchema, getAccountSchema } from "./types";
 import { noteIdsSchema } from "./note-link-types";
+import type { FinanceAllocationShortfall } from "./goal-types";
 
 const id = getAccountSchema.shape.id;
 const requestId = createAccountSchema.shape.request_id;
@@ -72,4 +73,4 @@ export interface FinanceTransaction {
 export interface ActivityPage { transactions: FinanceTransaction[]; total: number; limit: number; offset: number }
 export interface ClassificationPage { classifications: FinanceClassification[]; total: number; limit: number; offset: number }
 export interface ActivityTotals { currency: "PHP"; month: string; income_cents: number; expense_cents: number }
-export interface PostedTransaction { transaction: FinanceTransaction; balance_cents: number; warnings: string[] }
+export interface PostedTransaction { transaction: FinanceTransaction; balance_cents: number; warnings: string[]; allocation_shortfalls?: FinanceAllocationShortfall[] }

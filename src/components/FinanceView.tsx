@@ -9,6 +9,7 @@ import { FinanceActivityList, FinanceMonthlyTotals, FinanceTransactionEntry } fr
 import { FinanceReports, FinanceBudgets } from "./FinanceReports";
 import { useFinanceBudget } from "@/features/finance/use-finance-budget";
 import { FinancePlans } from "./FinancePlans";
+import { FinanceGoals } from "./FinanceGoals";
 import { useFinancePlanning } from "@/features/finance/use-finance-planning";
 import { useFinanceReports } from "@/features/finance/use-finance-reports";
 import { FinanceAdjustment } from "./FinanceAdjustment";
@@ -35,6 +36,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     await Promise.all([finance.refresh(), activity.refreshHistory(), activity.refreshTotals(), reports.refresh()]);
   }, [finance.refresh, activity.refreshHistory, activity.refreshTotals, reports.refresh]);
   const planning = useFinancePlanning(activity.notice, refreshAfterPlan);
+  useEffect(() => { window.dispatchEvent(new Event("finance-changed")); }, [activity.notice, finance.notice, planning.notice]);
   const [transactionOpen, setTransactionOpen] = useState(false);
   const [adjusting, setAdjusting] = useState<FinanceAccount | null>(null);
   useEffect(() => { if (finance.notice) void activity.refreshOptions(); }, [finance.notice, activity.refreshOptions]);
@@ -149,7 +151,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         </>}
       </TabsContent>
       <TabsContent value="activity"><FinanceActivityList activity={activity} /></TabsContent>
-      <TabsContent value="planning"><FinanceBudgets budget={budget} activity={activity} /><FinancePlans planning={planning} activity={activity} /></TabsContent>
+      <TabsContent value="planning"><FinanceBudgets budget={budget} activity={activity} /><FinancePlans planning={planning} activity={activity} /><FinanceGoals /></TabsContent>
       <TabsContent value="manage">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div><h2 className="text-lg font-semibold">Accounts</h2><p className="mt-1 text-sm text-muted-foreground">Opening balances are fixed. Rename or archive accounts here.</p></div>

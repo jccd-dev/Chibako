@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FinanceAllocationShortfall } from "./goal-types";
 import { postTransactionSchema, calendarDateSchema, transactionTypeSchema } from "./activity-types";
 import { getAccountSchema } from "./types";
 import type { FinanceTransaction } from "./activity-types";
@@ -31,4 +32,4 @@ export interface FinancePlan {
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;
 }
 export interface PlanPage { plans: FinancePlan[]; total: number; limit: number; offset: number }
-export interface SatisfiedPlan { plan: FinancePlan; transaction: FinanceTransaction; balance_cents: number; warnings: string[] }
+export interface SatisfiedPlan { plan: FinancePlan; transaction: FinanceTransaction; balance_cents: number; warnings: string[]; allocation_shortfalls?: FinanceAllocationShortfall[] }

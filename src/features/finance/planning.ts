@@ -3,6 +3,7 @@ import { getDb, now } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
 import { readAccountBalance } from "./accounts";
+import { financeBalanceWarnings } from "./reservations";
 import { validateTransactionClassifications, insertTransaction, readTransaction } from "./activity";
 import { decimalCents } from "./money";
 import { parseFinance, financeMutation } from "./mutations";
@@ -84,7 +85,7 @@ export function updatePlan(actor: FinanceActor, id: string, input: unknown): { p
 function satisfy(plan: FinancePlan, transactionId: string): SatisfiedPlan {
   getDb().prepare("UPDATE finance_plans SET status='satisfied',transaction_id=?,version=version+1,updated_at=? WHERE id=?").run(transactionId, now(), plan.id);
   const transaction = readTransaction(transactionId, false), balance = readAccountBalance(transaction.account_id).balance_cents;
-  return { plan: readPlan(plan.id), transaction, balance_cents: balance, warnings: balance < 0 ? ["negative_balance"] : [] };
+  return { plan: readPlan(plan.id), transaction, balance_cents: balance, ...financeBalanceWarnings([{ account_id: transaction.account_id, balance_cents: balance }]) };
 }
 export function postPlan(actor: FinanceActor, id: string, input: unknown): SatisfiedPlan {
   authorizeFinance(actor, "finance:write"); parseFinance(getPlanSchema, { id });

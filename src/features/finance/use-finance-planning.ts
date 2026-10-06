@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlanPage, FinancePlan, SatisfiedPlan } from "./planning-types";
 import { financeJson } from "./client-json";
-import { formatPHP, localCalendarDate } from "./presentation";
+import { allocationWarningText, formatPHP, localCalendarDate } from "./presentation";
 
 export function useFinancePlanning(activityNotice: string, onSaved: () => Promise<void>) {
   const [status, setStatus] = useState("pending");
@@ -47,7 +47,7 @@ export function useFinancePlanning(activityNotice: string, onSaved: () => Promis
       pending.current = null;
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not save the plan. Try again."); saving.current = false; setBusy(false); return null; }
     const label = { create: "Plan saved. Balances unchanged", edit: "Plan updated. Balances unchanged", cancel: "Plan cancelled. Balances unchanged", post: "Actual activity posted once", match: "Existing activity matched. No new cash movement", skip: "Selected occurrences skipped. Balances unchanged", "catch-up": "Due occurrences prepared for review. Balances unchanged" }[operation];
-    setNotice(`${label}.${"balance_cents" in result ? ` Account balance: ${formatPHP(result.balance_cents)}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}` : ""}`);
+    setNotice(`${label}.${"balance_cents" in result ? ` Account balance: ${formatPHP(result.balance_cents)}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${allocationWarningText(result)}` : ""}`);
     try { await Promise.all([refresh(), onSaved()]); }
     catch { setError("Plan saved, but related totals could not refresh. Reload before making further changes."); }
     finally { saving.current = false; setBusy(false); }

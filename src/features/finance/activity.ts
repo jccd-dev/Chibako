@@ -3,6 +3,7 @@ import { getDb, now } from "../../lib/db";
 import { authorizeFinance, authorizeFinanceNotes } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
 import { readAccountBalance } from "./accounts";
+import { financeBalanceWarnings } from "./reservations";
 import { parseFinance, financeMutation } from "./mutations";
 import { decimalCents, exactCents } from "./money";
 import { readClassification } from "./classifications";
@@ -57,7 +58,7 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
     const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)));
     const id = insertTransaction({ ...payload, amount_cents: amount });
     replaceActivityNoteLinks(id, note_ids);
-    const result: PostedTransaction = { transaction: readTransaction(id, false), balance_cents: balance, warnings: balance < 0 ? ["negative_balance"] : [] };
+    const result: PostedTransaction = { transaction: readTransaction(id, false), balance_cents: balance, ...financeBalanceWarnings([{ account_id: account.id, balance_cents: balance }]) };
     return { result, affectedIds: [id, account.id, ...note_ids], before: null, after: { ...readTransaction(id, true), note_ids } };
   });
 }
