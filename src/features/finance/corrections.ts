@@ -3,17 +3,15 @@ import { getDb, now } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { readAccountBalance } from "./accounts";
 import { financeBalanceWarnings } from "./reservations";
-import { readTransaction, validateTransactionClassifications } from "./activity";
+import { activityTable as table, readTransaction, validateTransactionClassifications } from "./activity";
 import type { FinanceTransaction } from "./activity-types";
 import { FinanceError, getAccountSchema, type FinanceActor } from "./types";
 import { exactCents, decimalCents } from "./money";
 import { financeMutation, parseFinance } from "./mutations";
+import { readObligation, checkObligationVersion, bumpObligation } from "./obligations";
 import { reopenPlanForTransaction } from "./planning";
 import { activityActionSchema, correctActivitySchema, recordRefundSchema, type CorrectedActivity } from "./correction-types";
 
-function table(record: FinanceTransaction) {
-  return record.type === "refund" ? "finance_refunds" : record.type === "income" || record.type === "expense" ? "finance_transactions" : "finance_movements";
-}
 function editable(record: FinanceTransaction, version: number) {
   if (record.version !== version || record.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity changed; refresh before editing", 409, "version_conflict");
   if (record.reverted) throw new FinanceError("Reverted activity cannot be changed", 409, "already_reverted");
@@ -80,6 +78,9 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
   const { request_id, ...payload } = parseFinance(activityActionSchema, input);
   return financeMutation(actor, request_id, `activity.${operation}`, { id, ...payload }, () => {
     const record = readTransaction(id, true), fee = linkedFee(record);
+    const obligation = record.obligation_id ? readObligation(record.obligation_id) : null;
+    if (obligation) checkObligationVersion(obligation, payload.obligation_version);
+    else if (payload.obligation_version !== undefined) throw new FinanceError("This activity has no obligation", 400, "invalid_input");
     const expense = record.type === "refund" && operation === "revert" ? expenseForRefund(record) : null;
     if (operation === "hide") {
       if (record.version !== payload.version) throw new FinanceError("Activity changed; refresh before editing", 409, "version_conflict");
@@ -94,8 +95,10 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
     if (expense) bump(expense);
     const plan = operation === "revert" ? reopenPlanForTransaction(id) : null;
     const ids = accountIds([record, fee]);
-    const result: CorrectedActivity = { ...outcome(id, ids), ...(plan ? { plan: plan.after } : {}) };
-    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(plan ? [plan.after.id] : [])], before: { transaction: record, fee, expense, ...(plan ? { plan: plan.before } : {}) }, after: { transaction: readTransaction(id, true), fee: linkedFee(readTransaction(id, true)), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(plan ? { plan: plan.after } : {}) } };
+    if (obligation) bumpObligation(obligation.id);
+    const result: CorrectedActivity = { ...outcome(id, ids), ...(plan ? { plan: plan.after } : {}),
+      ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: operation === "revert" ? -record.amount_cents : 0 } : {}) };
+    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(plan ? [plan.after.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: record, fee, expense, ...(plan ? { plan: plan.before } : {}), ...(obligation ? { obligation } : {}) }, after: { transaction: readTransaction(id, true), fee: linkedFee(readTransaction(id, true)), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(plan ? { plan: plan.after } : {}), ...(obligation ? { obligation: result.obligation } : {}) } };
   });
 }
 
@@ -106,13 +109,16 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
   return financeMutation(actor, request_id, "activity.correct", { id, ...patch }, () => {
     const before = readTransaction(id, true), fee = linkedFee(before);
     editable(before, patch.version);
+    const obligation = before.obligation_id ? readObligation(before.obligation_id) : null;
+    if (obligation) checkObligationVersion(obligation, patch.obligation_version);
+    else if (patch.obligation_version !== undefined) throw new FinanceError("This activity has no obligation", 400, "invalid_input");
     const account = patch.account_id ?? before.account_id;
     const amount = patch.amount === undefined ? before.amount_cents : decimalCents(patch.amount);
     const date = patch.transaction_date ?? before.transaction_date;
     const category = patch.category_id === undefined ? before.category_id : patch.category_id;
     const subcategory = patch.subcategory_id === undefined ? before.subcategory_id : patch.subcategory_id;
     const tags = patch.tag_ids ?? before.tag_ids ?? [];
-    const movement = before.type === "transfer" || before.type === "reconciliation" || before.type === "valuation";
+    const movement = before.type === "transfer" || before.type === "reconciliation" || before.type === "valuation" || !!obligation;
     if (before.type !== "transfer" && (patch.destination_account_id !== undefined || patch.fee !== undefined)) throw new FinanceError("Fields do not apply to this activity", 400, "invalid_input");
     if ((movement || before.type === "refund") && (patch.category_id !== undefined || patch.subcategory_id !== undefined)) throw new FinanceError("This activity inherits or excludes categories", 400, "invalid_category");
     if (before.linked_record_id && (account !== before.account_id || date !== before.transaction_date)) throw new FinanceError("Correct the linked transfer to move its fee together", 409, "linked_activity");
@@ -146,16 +152,17 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
       } else if (patch.fee) throw new FinanceError("Transfer has no linked fee to correct", 400, "invalid_input");
     } else if (before.type === "reconciliation" || before.type === "valuation") {
       db.prepare("UPDATE finance_movements SET actual_balance_cents = ? WHERE id = ?").run(exactCents(BigInt(before.compared_balance_cents!) + BigInt(amount)), id);
-    } else if (before.type !== "refund") {
+    } else if (before.type !== "refund" && !obligation) {
       db.prepare("UPDATE finance_transactions SET category_id = ?, subcategory_id = ? WHERE id = ?").run(category, subcategory, id);
     }
     db.prepare(`UPDATE ${table(before)} SET account_id = ?, amount_cents = ?, transaction_date = ?, text = ?, tag_ids = ? WHERE id = ?`)
       .run(account, amount, date, patch.text ?? before.text ?? "", JSON.stringify(tags), id);
     bump(before);
     if (expense) bump(expense);
+    if (obligation) bumpObligation(obligation.id);
     const after = readTransaction(id, true);
     const ids = accountIds([before, fee, after, linkedFee(after)]);
-    const result = outcome(id, ids);
-    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : [])], before: { transaction: before, fee, expense }, after: { transaction: after, fee: linkedFee(after), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances } };
+    const result: CorrectedActivity = { ...outcome(id, ids), ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: exactCents(BigInt(amount) - BigInt(before.amount_cents)) } : {}) };
+    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: before, fee, expense, ...(obligation ? { obligation } : {}) }, after: { transaction: after, fee: linkedFee(after), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(obligation ? { obligation: result.obligation } : {}) } };
   });
 }

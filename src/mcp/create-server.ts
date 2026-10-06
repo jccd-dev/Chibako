@@ -43,6 +43,8 @@ import { createSchedule, getSchedule, listSchedules, updateSchedule, pauseSchedu
 import { createScheduleSchema, getScheduleSchema, listSchedulesSchema, updateScheduleSchema, scheduleActionSchema, catchUpPlansSchema, skipPlansSchema } from "../features/finance/recurrence-types";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema } from "../features/finance/planning-types";
 import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
+import { createObligation, updateObligation, getObligation, listObligations, postObligationMovement } from "../features/finance/obligations";
+import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema } from "../features/finance/obligation-types";
 import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts } from "../features/finance/goals";
 import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema } from "../features/finance/goal-types";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
@@ -418,6 +420,14 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
   }
   if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_obligations", {
+      title: "List debts and receivables", description: "Paginated obligations with optional due dates and overdue flags as_of a local calendar day (default today). Outstanding debt and receivable totals include archived definitions and remain separate from cash/assets. Creating a definition has no cash effect.",
+      inputSchema: listObligationsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listObligations(actor, args) })));
+    server.registerTool("get_finance_obligation", {
+      title: "Inspect an obligation", description: "Read a debt or receivable, opening principal, outstanding principal, due date and current version. No cash movement.",
+      inputSchema: getObligationSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ obligation: getObligation(actor, id, args) })));
     server.registerTool("list_finance_goals", {
       title: "List savings goals", description: "Paginated PHP savings goals with account reservations and achievement, active by default. Goal progress is already included in cash totals. Archived goals preserve released allocation history.",
       inputSchema: listGoalsSchema, annotations: READ_ONLY,
@@ -485,6 +495,10 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   }
   if (financeAuthorized("finance:write")) {
     const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("record_finance_borrowing_lending", {
+      title: "Record actual borrowing or lending", description: "Borrowing adds cash and debt principal; lending removes cash and adds receivable principal. Neither counts as income or spending. Supply an existing obligation_id and version, or a name/optional due_date to create the linked obligation atomically (also requires finance:manage). Requires finance:write, request_id, actual amount/account/transaction_date. Corrections in Activity require both activity version and obligation_version. Delete preserves effects; Revert cancels both.",
+      inputSchema: postObligationMovementSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...postObligationMovement(actor, args) })));
     server.registerTool("catch_up_finance_plans", {
       title: "Catch up recurring pending review", description: "Generate at most 1000 pending recurring occurrences through through_date (default today), plus one next upcoming per active schedule. No cash effects. Requires finance:write and request_id. Repeat with fresh request IDs while has_more; identical retries return the original result.",
       inputSchema: catchUpPlansSchema, annotations,
@@ -547,6 +561,14 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
   }
   if (financeAuthorized("finance:manage")) {
+    server.registerTool("create_finance_obligation", {
+      title: "Define a debt or receivable", description: "Create a debt (owner owes) or receivable (owner is owed) without moving cash. Optional principal records money already outstanding; default zero. Optional due_date. Use borrowing/lending to record actual cash, never record the same principal twice. Requires finance:manage and request_id.",
+      inputSchema: createObligationSchema, annotations: { ...MUTATING, idempotentHint: true },
+    }, args => financeResult("finance:manage", actor => createObligation(actor, args)));
+    server.registerTool("update_finance_obligation", {
+      title: "Manage an obligation", description: "Rename, change/clear due_date, archive or restore a definition with its current version. No cash or principal change; archived principal remains in totals. Requires finance:manage and request_id. Correct actual borrowing/lending through Activity.",
+      inputSchema: updateObligationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations: { ...MUTATING, idempotentHint: true },
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateObligation(actor, id, args)));
     const annotations = { ...MUTATING, idempotentHint: true };
     server.registerTool("create_finance_goal", {
       title: "Create savings goal", description: "Create a positive PHP target and optional due date. Requires request_id. Starts without reservations and never moves cash.",

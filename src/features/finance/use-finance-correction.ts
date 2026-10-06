@@ -45,7 +45,7 @@ export function useFinanceCorrection(record: FinanceTransaction, activity: Finan
     setAccountId(record.account_id); setDate(localCalendarDate()); setText("");
   }
   function validate(action: Action): object | null {
-    let input: object = { version: record.version };
+    let input: object = { version: record.version, ...(record.obligation_id ? { obligation_version: record.obligation_version } : {}) };
     if (action === "refund") input = { ...input, amount, account_id: accountId, transaction_date: date, text };
     if (action === "edit") {
       const patch: Record<string, unknown> = {};

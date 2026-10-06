@@ -2,7 +2,7 @@ import { getDb, now } from "../../lib/db";
 import { getNote } from "../../lib/notes";
 import { listNoteChoices } from "../notes/note-choices";
 import { authorizeFinance, authorizeFinanceNotes } from "../../server/auth/finance-authorization";
-import { readTransaction } from "./activity";
+import { activityTable, readTransaction } from "./activity";
 import { readAccountBalance } from "./accounts";
 import { financeMutation, parseFinance } from "./mutations";
 import { readActivityNoteIds, replaceActivityNoteLinks } from "./note-link-storage";
@@ -39,7 +39,7 @@ export function setActivityNoteLinks(actor: FinanceActor, id: string, input: unk
     if (record.version !== payload.version || record.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity changed; refresh before editing Note links", 409, "version_conflict");
     const before = { version: record.version, note_ids: readActivityNoteIds(id) };
     replaceActivityNoteLinks(id, payload.note_ids);
-    const table = record.type === "refund" ? "finance_refunds" : record.type === "income" || record.type === "expense" ? "finance_transactions" : "finance_movements";
+    const table = activityTable(record);
     getDb().prepare(`UPDATE ${table} SET version = version + 1, updated_at = ? WHERE id = ?`).run(now(), id);
     const accountIds = [record.account_id, ...(record.destination_account_id ? [record.destination_account_id] : [])];
     const result = { transaction: readTransaction(id, false), note_ids: payload.note_ids, balances: accountIds.map(account_id => ({ account_id, balance_cents: readAccountBalance(account_id).balance_cents })) };

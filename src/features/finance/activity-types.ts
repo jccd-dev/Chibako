@@ -7,7 +7,7 @@ const id = getAccountSchema.shape.id;
 const requestId = createAccountSchema.shape.request_id;
 const name = createAccountSchema.shape.name;
 export const transactionTypeSchema = z.enum(["expense", "income"]);
-export const activityTypeSchema = z.enum(["expense", "income", "transfer", "reconciliation", "valuation", "refund"]);
+export const activityTypeSchema = z.enum(["expense", "income", "transfer", "reconciliation", "valuation", "refund", "borrowing", "lending"]);
 export const calendarDateSchema = z.string().regex(/^[1-9]\d{3}-\d{2}-\d{2}$/, "Use a valid YYYY-MM-DD transaction date").refine(value => {
   const date = new Date(`${value}T00:00:00Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
@@ -35,6 +35,7 @@ export const listTransactionsSchema = z.object({
   date_from: calendarDateSchema.optional(),
   date_to: calendarDateSchema.optional(),
   account_id: id.optional(),
+  obligation_id: id.optional(),
   category_id: id.optional(),
   type: activityTypeSchema.optional(),
   matchable: z.boolean().default(false),
@@ -66,6 +67,7 @@ export interface FinanceTransaction {
   account_name: string; category_name: string | null; subcategory_name: string | null;
   destination_account_id?: string | null; destination_account_name?: string | null;
   linked_record_id?: string | null; fee_transaction_id?: string | null;
+  obligation_id?: string | null; obligation_version?: number | null;
   compared_balance_cents?: number | null; actual_balance_cents?: number | null;
   hidden: boolean; reverted: boolean; expense_id: string | null; refunded_cents: number;
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;

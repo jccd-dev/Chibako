@@ -13,6 +13,11 @@ import {
   type FinanceTransaction, type ActivityPage, type ActivityTotals, type PostedTransaction,
 } from "./activity-types";
 
+export function activityTable(record: FinanceTransaction) {
+  if (record.obligation_id) return "finance_obligation_movements";
+  return record.type === "refund" ? "finance_refunds" : record.type === "income" || record.type === "expense" ? "finance_transactions" : "finance_movements";
+}
+
 const activityRows = `WITH activity AS (
   SELECT t.id, t.type, t.account_id, t.amount_cents, t.transaction_date, t.category_id, t.subcategory_id, t.text, t.tag_ids,
     t.version, t.created_at, t.updated_at, t.hidden, t.reverted,
@@ -27,8 +32,11 @@ const activityRows = `WITH activity AS (
   SELECT r.id, 'refund', r.account_id, r.amount_cents, r.transaction_date, t.category_id, t.subcategory_id, r.text, r.tag_ids,
     r.version, r.created_at, r.updated_at, r.hidden, r.reverted, NULL, NULL, NULL, NULL, NULL, r.expense_id, 0
   FROM finance_refunds r JOIN finance_transactions t ON t.id = r.expense_id
+  UNION ALL
+  SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at, hidden, reverted,
+    NULL, NULL, NULL, NULL, NULL, NULL, 0 FROM finance_obligation_movements
 )`;
-const transactionSelect = "SELECT t.*, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id";
+const transactionSelect = "SELECT t.*, om.obligation_id, o.version AS obligation_version, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id LEFT JOIN finance_obligation_movements om ON om.id = t.id LEFT JOIN finance_obligations o ON o.id = om.obligation_id";
 
 type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids" | "hidden" | "reverted"> & { hidden: number; reverted: number; text: string; tag_ids: string; created_at: number; updated_at: number };
 function transactionFromRow(row: TransactionRow, details: boolean): FinanceTransaction {
@@ -99,6 +107,7 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
   }
   if (query.matchable) clauses.push("t.type IN ('income','expense') AND t.reverted = 0 AND t.linked_record_id IS NULL AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id = t.id)");
   if (query.account_id) { clauses.push("(t.account_id = ? OR t.destination_account_id = ?)"); values.push(query.account_id, query.account_id); }
+  if (query.obligation_id) { clauses.push("EXISTS (SELECT 1 FROM finance_obligation_movements om WHERE om.id = t.id AND om.obligation_id = ?)"); values.push(query.obligation_id); }
   if (query.type) { clauses.push("t.type = ?"); values.push(query.type); }
   if (query.category_id) { clauses.push("(t.category_id = ? OR t.subcategory_id = ?)"); values.push(query.category_id, query.category_id); }
   if (query.q) {

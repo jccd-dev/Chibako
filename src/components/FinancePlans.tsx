@@ -16,6 +16,7 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "./ui/empty";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { FinancePlanMatch } from "./FinancePlanMatch";
+import { FinanceObligations } from "./FinanceObligations";
 import { FinanceRecurrence } from "./FinanceRecurrence";
 
 export function FinancePlans({ planning, activity }: { planning: FinancePlanningController; activity: FinanceActivityController }) {
@@ -48,12 +49,11 @@ export function FinancePlans({ planning, activity }: { planning: FinancePlanning
       <span className="text-right text-sm"><span className="block">Planned {plan.type}</span><strong className="tabular-nums">{money(plan.amount_cents)}</strong></span>
     </button></li>)}</ul> : <Empty><EmptyHeader><EmptyTitle>No {planning.status === "all" ? "" : planning.status} plans</EmptyTitle><EmptyDescription>Add expected income or an expense. It stays separate from actual activity until reviewed.</EmptyDescription></EmptyHeader></Empty>}
     {planning.page && planning.page.total > 25 && <nav aria-label="Plan pages" className="mt-5 flex flex-wrap items-center gap-3"><Button variant="outline" className={control} disabled={!planning.offset || planning.loading} onClick={() => planning.setOffset(Math.max(0, planning.offset - 25))}>Previous plans</Button><span className="text-sm">{planning.offset + 1}-{Math.min(planning.offset + 25, planning.page.total)} of {planning.page.total}</span><Button variant="outline" className={control} disabled={planning.offset + 25 >= planning.page.total || planning.loading} onClick={() => planning.setOffset(planning.offset + 25)}>Next plans</Button></nav>}
-    <p className="mt-6 text-sm text-muted-foreground">Debts and receivables arrive in later previews.</p>
     <Sheet open={panel !== null} onOpenChange={value => { if (!value && !planning.busy) setPanel(null); }}><SheetContent className={financeSheet} showCloseButton={false}>
       <SheetHeader className="border-b border-border p-6"><SheetTitle>{panel === "create" ? "Add one-time plan" : "Review planned activity"}</SheetTitle><SheetDescription>Due dates describe expectations. Transaction dates describe money that actually moved.</SheetDescription></SheetHeader>
       {detailError ? <div className="flex flex-col gap-4 p-6"><Alert><AlertDescription>{detailError}</AlertDescription></Alert><Button variant="outline" className={control} onClick={() => setReload(value => value + 1)}>Retry plan inspection</Button><Button variant="outline" className={control} onClick={() => setPanel(null)}>Close plan</Button></div> : panel === "create" || detail ? <PlanPanel key={`${panel}:${detail?.version ?? "new"}:${reload}`} plan={detail} activity={activity} planning={planning} onClose={() => setPanel(null)} onFuture={plan => { setPanel(null); setFutureOccurrence(plan); }} onRefresh={() => { planning.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-6"><p role="status">Loading plan…</p><Button variant="outline" className={control} onClick={() => setPanel(null)}>Close plan</Button></div>}
     </SheetContent></Sheet>
-  </section></>;
+  </section><FinanceObligations activity={activity} /></>;
 }
 
 function PlanPanel({ plan, activity, planning, onClose, onFuture, onRefresh }: { plan: FinancePlan | null; activity: FinanceActivityController; planning: FinancePlanningController; onClose: () => void; onFuture: (plan: FinancePlan) => void; onRefresh: () => void }) {

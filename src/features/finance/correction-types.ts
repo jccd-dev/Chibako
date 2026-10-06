@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { getAccountSchema, createAccountSchema } from "./types";
 import { postTransactionSchema, calendarDateSchema } from "./activity-types";
+import type { FinanceObligation } from "./obligation-types";
 import type { FinancePlan } from "./planning-types";
 import type { PostedMovement } from "./movement-types";
 
 const version = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
-const context = { request_id: createAccountSchema.shape.request_id, version };
+const context = { request_id: createAccountSchema.shape.request_id, version, obligation_version: version.optional() };
 export const activityActionSchema = z.object(context).strict();
 export const recordRefundSchema = z.object({
   ...context, account_id: getAccountSchema.shape.id, amount: postTransactionSchema.shape.amount,
@@ -29,5 +30,7 @@ export const correctActivitySchema = z.object({
   || value.text !== undefined || value.tag_ids !== undefined || value.fee !== undefined, "Provide a correction");
 export interface CorrectedActivity extends PostedMovement {
   plan?: FinancePlan;
+  obligation?: FinanceObligation;
+  principal_change_cents?: number;
   expense?: { id: string; version: number; amount_cents: number; refunded_cents: number };
 }

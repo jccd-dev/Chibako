@@ -4,12 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FinanceAccount, FinanceAccountList } from "./types";
 import type { ActivityPage, ActivityTotals, ClassificationPage, FinanceClassification, FinanceTransaction, PostedTransaction } from "./activity-types";
 import type { CorrectedActivity } from "./correction-types";
+import type { PostedObligationMovement } from "./obligation-types";
 import type { PostedMovement } from "./movement-types";
 import { financeJson as json } from "./client-json";
 import { allocationWarningText, formatPHP, localCalendarDate } from "./presentation";
 
 export type ActivityVisibility = "false" | "true" | "all";
-export interface ActivityFilters { q: string; date_from: string; date_to: string; account_id: string; category_id: string; type: string; hidden: ActivityVisibility; reverted: ActivityVisibility }
+export interface ActivityFilters { obligation_id?: string; q: string; date_from: string; date_to: string; account_id: string; category_id: string; type: string; hidden: ActivityVisibility; reverted: ActivityVisibility }
 const emptyFilters: ActivityFilters = { q: "", date_from: "", date_to: "", account_id: "", category_id: "", type: "", hidden: "false", reverted: "false" };
 
 export function useFinanceActivity(onPosted: () => Promise<void>) {
@@ -111,12 +112,19 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
+  async function postObligation(input: object) {
+    return save<PostedObligationMovement>("obligations/movements", input, "POST", async result => {
+      const balances = result.balances.map(balance => `${accounts.find(account => account.id === balance.account_id)?.name ?? "Account"}: ${formatPHP(balance.balance_cents)}`).join("; ");
+      setNotice(`Recorded ${result.transaction.type}. ${balances}. Outstanding ${result.obligation.kind}: ${formatPHP(result.obligation.outstanding_cents)}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${allocationWarningText(result)}`);
+      await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
+    });
+  }
   async function correct(id: string, action: "edit" | "hide" | "revert" | "refund", input: object) {
     const suffix = action === "revert" || action === "refund" ? `/${action}` : "";
     return save<CorrectedActivity>(`activity/${id}${suffix}`, input, action === "edit" ? "PATCH" : action === "hide" ? "DELETE" : "POST", async result => {
       const balances = result.balances.map(balance => `${accounts.find(account => account.id === balance.account_id)?.name ?? "Account"}: ${formatPHP(balance.balance_cents)}`).join("; ");
       const label = { edit: "Correction saved", hide: "Deleted from default Activity; financial effects retained", revert: "Activity reverted", refund: "Refund recorded" }[action];
-      setNotice(`${label}. ${balances}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${allocationWarningText(result)}`);
+      setNotice(`${label}. ${balances}.${result.obligation ? ` Outstanding ${result.obligation.kind}: ${formatPHP(result.obligation.outstanding_cents)}.` : ""}${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${allocationWarningText(result)}`);
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
@@ -139,6 +147,6 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   function applyFilters(value: ActivityFilters) { setOffset(0); setFilters(value); }
   function clearFilters() { applyFilters(emptyFilters); }
   function resetSave() { pending.current = null; setSaveError(""); }
-  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, loadMoreOptions, resetSave };
+  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, postObligation, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, loadMoreOptions, resetSave };
 }
 export type FinanceActivityController = ReturnType<typeof useFinanceActivity>;

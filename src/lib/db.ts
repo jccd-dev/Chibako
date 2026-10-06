@@ -280,6 +280,33 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_finance_goal_allocations_account ON finance_goal_allocations(account_id);
    `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_obligations (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('debt','receivable')),
+    name TEXT NOT NULL,
+    opening_principal_cents INTEGER NOT NULL CHECK (typeof(opening_principal_cents) = 'integer' AND opening_principal_cents BETWEEN 0 AND 9007199254740991),
+    due_date TEXT,
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0,1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_obligations_due ON finance_obligations(due_date, id);
+  CREATE TABLE IF NOT EXISTS finance_obligation_movements (
+    id TEXT PRIMARY KEY,
+    obligation_id TEXT NOT NULL REFERENCES finance_obligations(id),
+    type TEXT NOT NULL CHECK (type IN ('borrowing','lending')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    transaction_date TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+    hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0,1)),
+    reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0,1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_obligation_movements_principal ON finance_obligation_movements(obligation_id, reverted);
+  CREATE INDEX IF NOT EXISTS idx_finance_obligation_movements_account ON finance_obligation_movements(account_id, reverted);
+  `,
 ];
 
 export function getDb(): Database.Database {

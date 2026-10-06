@@ -16,7 +16,7 @@ import { useFinanceEntry } from "@/features/finance/use-finance-entry";
 import type { ActivityFilters, FinanceActivityController } from "@/features/finance/use-finance-activity";
 import { financeControl as control, financeSelect as select, financeSheet, formatPHP } from "@/features/finance/presentation";
 
-const activityLabel = (type: FinanceTransaction["type"]) => ({ income: "Income", expense: "Expense", transfer: "Transfer", reconciliation: "Reconciliation", valuation: "Asset valuation", refund: "Refund" })[type];
+const activityLabel = (type: FinanceTransaction["type"]) => ({ income: "Income", expense: "Expense", transfer: "Transfer", reconciliation: "Reconciliation", valuation: "Asset valuation", refund: "Refund", borrowing: "Borrowing", lending: "Lending" })[type];
 
 export function FinanceMonthlyTotals({ activity }: { activity: FinanceActivityController }) {
   return <section aria-label="Monthly income and spending" className="border-b border-border py-6">
@@ -28,7 +28,7 @@ export function FinanceMonthlyTotals({ activity }: { activity: FinanceActivityCo
       <div><dt className="text-sm text-muted-foreground">Income</dt><dd className="mt-2 break-words text-2xl font-semibold tabular-nums" data-testid="finance-income-total">{formatPHP(activity.totals.income_cents)}</dd></div>
       <div><dt className="text-sm text-muted-foreground">Spending</dt><dd className="mt-2 break-words text-2xl font-semibold tabular-nums" data-testid="finance-expense-total">{formatPHP(activity.totals.expense_cents)}</dd></div>
     </dl> : <p role="status" className="py-5 text-sm text-muted-foreground">Loading monthly totals…</p>}
-    <p className="mt-3 text-sm text-muted-foreground">By the calendar day money moved. Refunds reduce spending on their refund date, never income. Openings, transfers and adjustments are excluded; transfer fees count as spending.</p>
+    <p className="mt-3 text-sm text-muted-foreground">By the calendar day money moved. Refunds reduce spending on their refund date, never income. Openings, transfers, borrowing, lending and adjustments are excluded; transfer fees count as spending.</p>
   </section>;
 }
 
@@ -53,11 +53,12 @@ export function FinanceActivityList({ activity }: { activity: FinanceActivityCon
   return <section aria-label="Activity history">
     <h2 className="text-lg font-semibold">Activity</h2>
     <p className="mt-1 text-sm text-muted-foreground">Find the transactions behind your balances. Select a record to inspect or correct it.</p>
+    {activity.filters.obligation_id && <p className="mt-3 text-sm">Showing this obligation's linked activity, including hidden and reverted records. Clear filters to return to all activity.</p>}
     <form onSubmit={event => { event.preventDefault(); activity.applyFilters(draft); }} className="my-6">
       <FieldGroup className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Field><FieldLabel htmlFor="activity-search">Search activity</FieldLabel><Input id="activity-search" value={draft.q} maxLength={200} onChange={event => change("q", event.target.value)} className={control} /><FieldDescription>Search transaction text, categories and tags.</FieldDescription></Field>
         <Field><FieldLabel htmlFor="activity-account">Filter account</FieldLabel><select id="activity-account" className={select} value={draft.account_id} onChange={event => change("account_id", event.target.value)}><option value="">All accounts</option>{activity.accounts.map(account => <option key={account.id} value={account.id}>{account.name}{account.archived ? " (archived)" : ""}</option>)}</select></Field>
-        <Field><FieldLabel htmlFor="activity-type">Filter type</FieldLabel><select id="activity-type" className={select} value={draft.type} onChange={event => change("type", event.target.value)}><option value="">All activity</option><option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option><option value="reconciliation">Reconciliation</option><option value="valuation">Asset valuation</option><option value="refund">Refund</option></select></Field>
+        <Field><FieldLabel htmlFor="activity-type">Filter type</FieldLabel><select id="activity-type" className={select} value={draft.type} onChange={event => change("type", event.target.value)}><option value="">All activity</option><option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option><option value="reconciliation">Reconciliation</option><option value="valuation">Asset valuation</option><option value="refund">Refund</option><option value="borrowing">Borrowing</option><option value="lending">Lending</option></select></Field>
         <Field><FieldLabel htmlFor="activity-from">From date</FieldLabel><FinanceDateInput id="activity-from" min="1000-01-01" max="9999-12-31" value={draft.date_from} onChange={value => change("date_from", value)} /></Field>
         <Field><FieldLabel htmlFor="activity-to">To date</FieldLabel><FinanceDateInput id="activity-to" min={draft.date_from || "1000-01-01"} max="9999-12-31" value={draft.date_to} onChange={value => change("date_to", value)} /></Field>
         <Field><FieldLabel htmlFor="activity-category">Filter category</FieldLabel><select id="activity-category" className={select} value={draft.category_id} onChange={event => change("category_id", event.target.value)}><option value="">All categories</option>{activity.classifications.filter(item => item.kind === "category" && (!draft.type || item.type === (draft.type === "refund" ? "expense" : draft.type))).map(item => <option key={item.id} value={item.id}>{item.type === "income" ? "Income" : "Expense"}: {item.name}{item.parent_id ? " (subcategory)" : ""}{item.archived ? " (archived)" : ""}</option>)}</select></Field>
@@ -82,6 +83,7 @@ export function FinanceActivityList({ activity }: { activity: FinanceActivityCon
             <div><dt className="text-muted-foreground">Type</dt><dd>{activityLabel(selected.type)}</dd></div>
             <div><dt className="text-muted-foreground">Amount</dt><dd className="text-xl font-semibold tabular-nums">{formatPHP(selected.amount_cents)}</dd></div>
             <div><dt className="text-muted-foreground">Account</dt><dd className="break-words">{selected.account_name}</dd></div>
+            {selected.obligation_id && <div><dt className="text-muted-foreground">Linked obligation</dt><dd>Cash and principal change together. Inspect outstanding principal and due dates in Planning. Neither borrowing nor lending counts as income or spending.</dd></div>}
             {selected.destination_account_name && <div><dt className="text-muted-foreground">Destination account</dt><dd className="break-words">{selected.destination_account_name}</dd></div>}
             {selected.fee_transaction_id && <div><dt className="text-muted-foreground">Separate transfer fee</dt><dd><Button variant="outline" className={control} disabled={activity.busy} onClick={() => void inspect(selected.fee_transaction_id!)}>Inspect fee</Button></dd></div>}
             {selected.expense_id && <div><dt className="text-muted-foreground">Original expense</dt><dd><Button variant="outline" className={control} disabled={activity.busy} onClick={() => void inspect(selected.expense_id!)}>Inspect original expense</Button></dd></div>}
