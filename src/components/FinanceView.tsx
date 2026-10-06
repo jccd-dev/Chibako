@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
 import { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
 import { useFinanceActivity } from "@/features/finance/use-finance-activity";
-import { FinanceActivityList, FinanceMonthlyTotals, FinanceTransactionEntry } from "./FinanceActivity";
+import { FinanceActivityList, FinanceTransactionEntry } from "./FinanceActivity";
 import { FinanceReports, FinanceBudgets } from "./FinanceReports";
 import { useFinanceBudget } from "@/features/finance/use-finance-budget";
 import { FinancePlans } from "./FinancePlans";
@@ -14,6 +14,7 @@ import { useFinancePlanning } from "@/features/finance/use-finance-planning";
 import { useFinanceReports } from "@/features/finance/use-finance-reports";
 import { FinanceAdjustment } from "./FinanceAdjustment";
 import { FinanceClassifications } from "./FinanceClassifications";
+import { FinanceOverviewDashboard } from "./FinanceOverviewDashboard";
 import { decimalPHP as decimal, formatPHP as money } from "@/features/finance/presentation";
 import type { FinanceAccount } from "@/features/finance/types";
 import { Button } from "@/components/ui/button";
@@ -74,14 +75,13 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     if (await finance.save(editing.id, { version: editing.version, archived: !editing.archived }, editing.archived ? "Account restored." : "Account archived. Its balance is retained.")) setPanel(null);
   }
 
-  const overviewAccounts = finance.accounts.filter(account => !account.archived);
   const accountRows = (accounts: FinanceAccount[], editable = false) => accounts.length ? (
     <ul className="divide-y divide-border">
       {accounts.map(account => <li key={account.id} className="flex min-w-0 flex-wrap items-center justify-between gap-4 py-4">
         <div className="min-w-0">
           <p className="break-words text-sm font-medium">{account.name}</p>
           <p className="mt-1 text-xs text-muted-foreground">{account.archived ? "Archived account" : account.kind === "asset" ? "Asset account" : "Money account"}</p>
-          {account.balance_cents < 0 && <p className="mt-1 flex items-start gap-1.5 text-xs font-medium"><IconAlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />Negative balance. Review this account.</p>}
+          {account.balance_cents < 0 && <p className="mt-1 flex items-start gap-1.5 text-xs font-medium text-destructive"><IconAlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />Negative balance. Review this account.</p>}
         </div>
         <div className="shrink-0 text-right">
           <p className="text-sm font-medium tabular-nums">{money(account.balance_cents)}</p>
@@ -91,65 +91,95 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     </ul>
   ) : <p className="py-5 text-sm text-muted-foreground">No accounts yet. Create one in Manage with its opening balance.</p>;
 
-  return <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
-    <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
-      <div><h1 className="font-heading text-2xl font-semibold tracking-tight">Finance</h1>
-      <p className="mt-2 max-w-prose text-sm text-muted-foreground">Your accounts and activity, in PHP. Cash and assets stay separate.</p></div>
-      <Button className={control} onClick={() => setTransactionOpen(true)}><IconPlus aria-hidden="true" data-icon="inline-start" />Add transaction</Button>
+  return <div className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6">
+    <header className="mb-4 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight">Finance</h1>
+        <p className="mt-1.5 max-w-prose text-sm text-muted-foreground">Your accounts and activity, in PHP. Cash and assets stay separate.</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button className={control} onClick={() => setTransactionOpen(true)}>
+          <IconPlus aria-hidden="true" data-icon="inline-start" />Add transaction
+        </Button>
+      </div>
     </header>
+
     <Tabs value={tab} onValueChange={value => { if (isTab(value)) changeTab(value); }}>
-      <TabsList variant="line" className="mb-6 grid h-auto w-full grid-cols-4 justify-start border-b border-border pb-2 sm:flex sm:w-fit" aria-label="Finance views">
-        {tabs.map(value => <TabsTrigger key={value} value={value} className={`${control} px-2 text-muted-foreground sm:px-5`}>{value[0].toUpperCase() + value.slice(1)}</TabsTrigger>)}
-      </TabsList>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-2">
+        <TabsList
+          variant="line"
+          className="grid h-auto w-full grid-cols-4 gap-1 sm:flex sm:w-fit"
+          aria-label="Finance views"
+        >
+          {tabs.map(value => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className={`${control} px-2.5 sm:px-5`}
+            >
+              {value[0].toUpperCase() + value.slice(1)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+
       {finance.notice && <p role="status" className="mb-4 text-sm">{finance.notice}</p>}
       {activity.notice && <p role="status" className="mb-4 text-sm">{activity.notice}</p>}
       {finance.loadError && <div role="alert" className="mb-5 rounded-md border border-border bg-muted p-4">
         <p className="text-sm">{finance.loadError}</p>
         <Button variant="outline" className={`${control} mt-3`} onClick={() => void finance.refresh()}>Retry loading</Button>
       </div>}
+
       <TabsContent value="overview">
         {finance.loading && !finance.summary ? <div role="status" aria-label="Loading balances" className="grid gap-6 sm:grid-cols-2">
           {[0, 1].map(item => <div key={item} className="h-36 rounded-lg bg-muted" />)}
         </div> : finance.summary && <>
-          <div className="grid gap-8 border-b border-border pb-8 sm:grid-cols-[1.6fr_1fr]">
-            <section aria-label="Money accounts">
-              <h2 className="text-sm font-medium">Money accounts</h2>
-              <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums sm:text-4xl" data-testid="finance-money-total">{money(finance.summary.money.balance_cents)}</p>
-              <p className="mt-2 text-sm text-muted-foreground">{finance.summary.money.account_count} {finance.summary.money.account_count === 1 ? "account" : "accounts"}, including archived accounts. Assets are excluded.</p>
-            </section>
-            <section aria-label="Asset value" className="sm:border-l sm:border-border sm:pl-8">
-              <h2 className="text-sm font-medium">Asset value</h2>
-              <p className="mt-3 text-2xl font-semibold tabular-nums" data-testid="finance-asset-total">{money(finance.summary.assets.balance_cents)}</p>
-              <p className="mt-2 text-sm text-muted-foreground">Tracked value, separate from spendable cash.</p>
-            </section>
-          </div>
-          <FinanceMonthlyTotals activity={activity} />
-          <FinanceReports reports={reports} onCategory={id => {
-            activity.applyFilters({ q: "", date_from: reports.dates.date_from, date_to: reports.dates.date_to, category_id: id, account_id: "", type: "", hidden: "all", reverted: "false" });
-            changeTab("activity");
-          }} />
-          <div className="grid gap-8 py-8 lg:grid-cols-[1.6fr_1fr]">
-            <section aria-label="Account balances">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold">Account balances</h2>
-                <Button variant="outline" className={control} onClick={() => changeTab("manage")}>Manage accounts</Button>
-              </div>
-              {accountRows(overviewAccounts.filter(account => account.kind === "money"))}
-              {overviewAccounts.some(account => account.kind === "asset") && <div className="mt-6">
-                <h3 className="text-sm font-semibold">Assets</h3>
-                {accountRows(overviewAccounts.filter(account => account.kind === "asset"))}
-              </div>}
-              {finance.total > finance.accounts.length && <p className="mt-3 text-sm text-muted-foreground">Showing the current account page. Review all accounts in Manage.</p>}
-              <p className="mt-3 text-xs text-muted-foreground">Archived balances are retained in totals. Review them in Manage.</p>
-            </section>
-            <section className="self-start rounded-lg bg-muted p-5">
-              <h2 className="text-base font-semibold">Finance preview</h2>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Openings establish your starting position. They do not count as income or spending.</p>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">Income, expenses and transfers are ready to record. Reconcile balances and adjust asset values in Manage. Set budgets and review one-time plans in Planning. Inspect actual spending and separate forecasts above. Other attention items arrive in a later preview.</p>
-            </section>
-          </div>
+          <FinanceOverviewDashboard
+            finance={finance}
+            activity={activity}
+            reports={reports}
+            planning={planning}
+            onNavigateTab={changeTab}
+            onOpenAccount={open}
+            onCategoryFilter={id => {
+              activity.applyFilters({
+                q: "",
+                date_from: reports.dates.date_from,
+                date_to: reports.dates.date_to,
+                category_id: id,
+                account_id: "",
+                type: "",
+                hidden: "all",
+                reverted: "false",
+              });
+              changeTab("activity");
+            }}
+          />
+
+          <details className="mt-4 border-t border-border pt-3">
+            <summary className="min-h-11 cursor-pointer font-heading text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">Detailed spending reports</summary>
+            <div className="pt-4">
+            <FinanceReports
+              reports={reports}
+              onCategory={id => {
+                activity.applyFilters({
+                  q: "",
+                  date_from: reports.dates.date_from,
+                  date_to: reports.dates.date_to,
+                  category_id: id,
+                  account_id: "",
+                  type: "",
+                  hidden: "all",
+                  reverted: "false",
+                });
+                changeTab("activity");
+              }}
+            />
+            </div>
+          </details>
         </>}
       </TabsContent>
+
       <TabsContent value="activity"><FinanceActivityList activity={activity} /></TabsContent>
       <TabsContent value="planning"><FinanceBudgets budget={budget} activity={activity} /><FinancePlans planning={planning} activity={activity} /><FinanceGoals /></TabsContent>
       <TabsContent value="manage">
@@ -169,6 +199,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         <FinanceClassifications activity={activity} />
       </TabsContent>
     </Tabs>
+
     <FinanceAdjustment selected={adjusting} activity={activity} onClose={() => setAdjusting(null)} />
     <FinanceTransactionEntry activity={activity} open={transactionOpen} onClose={() => setTransactionOpen(false)} />
     <Sheet open={panel !== null} onOpenChange={value => { if (!value && !finance.busy) setPanel(null); }}>
