@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { format, lastDayOfMonth, parse } from "date-fns";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "./ui/field";
-import { Alert, AlertDescription } from "./ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -13,8 +13,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "./ui/table";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
+} from "@/components/ui/table";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { FinanceDateInput, FinanceMonthInput } from "./FinanceDateInputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { financeControl as control, financeSelect as select, financeSheet, formatPHP as money } from "@/features/finance/presentation";

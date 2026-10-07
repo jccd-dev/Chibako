@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/auth";
-import { CalendarView } from "@/components/CalendarView";
+import { CalendarView } from "@/features/calendar/components/CalendarView";
 import { listDatedNotes } from "@/features/calendar/dated-notes";
 
 export default async function CalendarPage({ searchParams }: {

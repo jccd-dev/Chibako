@@ -2,14 +2,14 @@
 
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Textarea } from "./ui/textarea";
-import { Field, FieldGroup, FieldDescription, FieldError, FieldLabel } from "./ui/field";
-import { Alert, AlertDescription } from "./ui/alert";
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "./ui/empty";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
-import { ConfirmDialog } from "./ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Field, FieldGroup, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FinanceDateInput } from "./FinanceDateInputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { useFinanceObligations, type FinanceObligationsController } from "@/features/finance/use-finance-obligations";

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useLayoutEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { Note } from "@/lib/notes";
-import { NoteClient, type ViewMode } from "@/components/NoteClient";
+import { NoteClient, type ViewMode } from "@/features/notes/components/NoteClient";
 
 interface NoteRouteData {
   initial: Note | null;

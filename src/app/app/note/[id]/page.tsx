@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { getNote, listNotes } from "@/lib/notes";
-import { NoteRoute } from "@/components/NoteWorkspace";
+import { NoteRoute } from "@/features/notes/components/NoteWorkspace";
 import { isNoteDate } from "@/features/calendar/note-dates";
-import type { ViewMode } from "@/components/NoteClient";
+import type { ViewMode } from "@/features/notes/components/NoteClient";
 
 function viewFromCookie(value: string | undefined): ViewMode | undefined {
   return value === "write" || value === "edit" || value === "split" || value === "preview" ? value : undefined;

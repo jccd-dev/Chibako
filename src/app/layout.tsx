@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Source_Sans_3, Figtree } from "next/font/google";
-import { AppearanceProvider } from "@/components/AppearanceProvider";
-import { ThemeProvider } from "@/components/ThemeProvider";
-import { ChibakoToaster } from "@/components/ChibakoToaster";
+import { AppearanceProvider } from "@/components/providers/AppearanceProvider";
+import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import { ChibakoToaster } from "@/components/providers/ChibakoToaster";
 import { APPEARANCE_INIT_SCRIPT } from "@/lib/appearance";
 import { cn } from "@/lib/utils";
 import "./globals.css";

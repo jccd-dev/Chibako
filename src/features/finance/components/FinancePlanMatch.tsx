@@ -6,10 +6,10 @@ import type { FinancePlan } from "@/features/finance/planning-types";
 import type { FinancePlanningController } from "@/features/finance/use-finance-planning";
 import { financeJson } from "@/features/finance/client-json";
 import { financeControl as control, formatPHP as money } from "@/features/finance/presentation";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Field, FieldLabel } from "./ui/field";
-import { Alert, AlertDescription } from "./ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function FinancePlanMatch({ plan, planning, onSaved }: { plan: FinancePlan; planning: FinancePlanningController; onSaved: () => void }) {
   const [search, setSearch] = useState("");

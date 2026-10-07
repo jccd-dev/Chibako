@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { useAppearance } from "@/components/AppearanceProvider";
+import { useAppearance } from "@/components/providers/AppearanceProvider";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { IconCheck, IconKey, IconPlus, IconTrash, IconX } from "@/components/icons";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";

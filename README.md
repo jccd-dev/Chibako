@@ -484,12 +484,16 @@ snapshot contains the vault, links, search index, API keys, and sessions.
 ## 🗂️ Project layout
 
 ```
-src/app/          pages + API route handlers
-src/lib/          db, auth, notes engine, markdown/wikilinks, api wrapper
-src/components/   sidebar, editor, preview, graph, settings, agent guide
-src/mcp/server.ts MCP stdio server (bundled to dist/mcp/server.mjs)
-nginx/            reverse-proxy template for the VPS
-docs/adr/         architecture decision records
+src/app/                  pages + thin API route handlers; remote MCP at /mcp
+src/features/             feature capabilities, client controllers, and components/
+src/components/           shared controls and UI primitives
+src/components/layout/    sidebar, top bar, workspace shell, command palette
+src/components/providers/ theme, appearance, and notifications
+src/server/               portable authorization and vault setup
+src/lib/                  db, notes engine, markdown/wikilinks, embeddings, shared utilities
+src/mcp/                  shared tool factory + local stdio adapter
+nginx/                    reverse-proxy template for self-hosting
+docs/adr/                 architecture decision records
 ```
 
 See `AGENTS.md` for developer conventions and `CONTEXT.md` for the domain

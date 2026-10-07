@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/auth";
-import { GraphView } from "@/components/GraphView";
+import { GraphView } from "@/features/graph/components/GraphView";
 
 export default async function GraphPage() {
   await requireAuth();

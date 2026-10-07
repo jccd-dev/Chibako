@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote } from "@/features/calendar/note-dates";
-import { DatedNotesCalendar } from "@/components/DatedNotesCalendar";
+import { DatedNotesCalendar } from "@/features/calendar/components/DatedNotesCalendar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconPlus } from "@/components/icons";

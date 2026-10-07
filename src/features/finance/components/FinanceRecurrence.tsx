@@ -8,12 +8,12 @@ import type { FinancePlanningController } from "@/features/finance/use-finance-p
 import { useFinanceRecurrence, type FinanceRecurrenceController } from "@/features/finance/use-finance-recurrence";
 import { financeJson } from "@/features/finance/client-json";
 import { financeControl as control, financeSelect as select, financeSheet, formatPHP as money } from "@/features/finance/presentation";
-import { Button } from "./ui/button";
+import { Button } from "@/components/ui/button";
 import { FinanceDateInput } from "./FinanceDateInputs";
-import { Input } from "./ui/input";
-import { Field, FieldLabel, FieldDescription, FieldError } from "./ui/field";
-import { Alert, AlertDescription } from "./ui/alert";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
+import { Input } from "@/components/ui/input";
+import { Field, FieldLabel, FieldDescription, FieldError } from "@/components/ui/field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { useFinanceScheduleEntry } from "@/features/finance/use-finance-schedule-entry";
 

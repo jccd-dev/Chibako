@@ -7,8 +7,8 @@ import type { Note, NoteKind, NoteSummary } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { applyFrontmatter, parseFrontmatter, serializeFrontmatter, type PropValue } from "@/lib/markdown";
 import { PROPERTY_TYPES, type PropertyDef, type PropertyType } from "@/lib/property-types";
-import { MarkdownPreview } from "@/components/MarkdownPreview";
-import { RichTextEditor } from "@/components/editor/RichTextEditor";
+import { MarkdownPreview } from "@/features/notes/components/MarkdownPreview";
+import { RichTextEditor } from "@/features/notes/components/editor/RichTextEditor";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +33,7 @@ import { createNoteDetailClient, type MentionInfo } from "@/features/notes/note-
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import { noteSaveRefreshChanges } from "@/features/notes/note-save-refresh";
 import { isNoteDate } from "@/features/calendar/note-dates";
-import { DatedNotesCalendar } from "@/components/DatedNotesCalendar";
+import { DatedNotesCalendar } from "@/features/calendar/components/DatedNotesCalendar";
 
 export type ViewMode = "write" | "edit" | "split" | "preview";
 /** Select sentinel for the "create a new bookmark group" option. */

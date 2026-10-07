@@ -10,10 +10,10 @@ import {
   IconMoon,
   IconSun,
 } from "@/components/icons";
-import { useTheme } from "@/components/ThemeProvider";
+import { useTheme } from "@/components/providers/ThemeProvider";
 import { IconTip } from "@/components/IconTip";
-import { NoteTabs } from "@/components/NoteTabs";
-import { ShortcutsDialog } from "@/components/ShortcutsDialog";
+import { NoteTabs } from "@/features/notes/components/NoteTabs";
+import { ShortcutsDialog } from "@/components/layout/ShortcutsDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
