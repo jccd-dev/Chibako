@@ -22,10 +22,12 @@ export function activityTable(record: FinanceTransaction) {
 const activityRows = `WITH activity AS (
   SELECT t.id, t.type, t.account_id, t.amount_cents, t.transaction_date, t.category_id, t.subcategory_id, t.text, t.tag_ids,
     t.version, t.created_at, t.updated_at, t.hidden, t.reverted,
-    NULL AS destination_account_id, m.id AS linked_record_id, NULL AS fee_transaction_id,
+    NULL AS destination_account_id, COALESCE(m.id, pf.cash_activity_id) AS linked_record_id, pp.fee_transaction_id AS fee_transaction_id,
     NULL AS compared_balance_cents, NULL AS actual_balance_cents, NULL AS expense_id,
     COALESCE((SELECT SUM(r.amount_cents) FROM finance_refunds r WHERE r.expense_id = t.id AND r.reverted = 0), 0) AS refunded_cents
   FROM finance_transactions t LEFT JOIN finance_movements m ON m.fee_transaction_id = t.id
+  LEFT JOIN finance_obligation_payments pp ON pp.cash_activity_id = t.id
+  LEFT JOIN finance_obligation_payments pf ON pf.fee_transaction_id = t.id
   UNION ALL
   SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at, hidden, reverted,
     destination_account_id, NULL, fee_transaction_id, compared_balance_cents, actual_balance_cents, NULL, 0 FROM finance_movements

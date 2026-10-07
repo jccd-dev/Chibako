@@ -504,7 +504,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postObligationMovementSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postObligationMovement(actor, args) })));
     server.registerTool("post_finance_obligation_payment", {
-      title: "Pay debt principal or collect receivable", description: "Record a dated partial principal payment/collection under finance:write. Supply the obligation version. Optionally link one existing compatible income/expense activity by id and current cash_activity_version; account, amount and date must match. Existing history gets no second cash effect. Hidden, reverted, refunded, transfer-linked and fee activities are rejected. Fees and interest are separate ordinary transactions.",
+      title: "Pay debt principal or collect receivable", description: "Record a dated partial principal payment/collection under finance:write. Supply the obligation version. Optionally link one existing compatible income/expense activity by id and current cash_activity_version; account, amount and date must match. Existing history gets no second cash effect. Hidden, reverted, refunded, transfer-linked and fee activities are rejected. Optional fee {type, amount, category_id?, subcategory_id?} posts explicit separate income/expense atomically and follows payment correction/Delete/Revert. Linking existing cash cannot post a fee.",
       inputSchema: postObligationPaymentSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postObligationPayment(actor, args) })));
     server.registerTool("catch_up_finance_plans", {
@@ -520,7 +520,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: createPlanSchema, annotations,
     }, args => financeResult("finance:write", actor => createPlan(actor, args)));
     server.registerTool("update_finance_plan", {
-      title: "Edit or reschedule pending plan", description: "Change expected fields or due_date while pending. No cash effect. Requires request_id and current plan version.",
+      title: "Edit or reschedule pending plan", description: "Change expected fields or due_date while pending. Recurring occurrences accept nullable obligation_id for debt expense or receivable income reminders. No cash effect. Requires request_id and current plan version.",
       inputSchema: updatePlanSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => updatePlan(actor, id, args)));
     server.registerTool("cancel_finance_plan", {
@@ -528,11 +528,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: planActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => cancelPlan(actor, id, args)));
     server.registerTool("post_finance_plan", {
-      title: "Post actual activity from a plan", description: "Explicitly confirm actual positive PHP amount, active money account and transaction_date. Post once atomically and satisfy the plan; request retries return original results. Requires current plan version. Revert reopens it; Delete preserves satisfaction.",
+      title: "Post actual activity from a plan", description: "Explicitly confirm actual positive PHP amount, active money account and transaction_date. Post once atomically and satisfy the plan; request retries return original results. Requires current plan version. An obligation-linked recurring reminder also requires obligation_version: amount is principal, with optional explicit fee {type,amount,category_id?,subcategory_id?}. Optional cash_activity_id/current cash_activity_version links compatible existing cash without reposting; no fee can be posted when linking cash. Revert reopens it; Delete preserves satisfaction.",
       inputSchema: postPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...postPlan(actor, id, args) })));
     server.registerTool("match_finance_plan", {
-      title: "Match manually recorded activity", description: "Explicitly select same-type unreverted income/expense not linked to a plan or transfer fee. Actual amount/account/date may differ. No new cash effect. Requires request_id, current plan version and transaction_version. One transaction satisfies one plan; Revert reopens and Delete preserves satisfaction.",
+      title: "Match manually recorded activity", description: "Explicitly select same-type unreverted income/expense not linked to a plan or transfer fee. Actual amount/account/date may differ. No new cash effect. Requires request_id, current plan version and transaction_version. Obligation reminders instead select an existing principal payment of that same obligation, requiring obligation_version. Matching changes no principal progress or cash again. One transaction satisfies one plan; Revert reopens and Delete preserves satisfaction.",
       inputSchema: matchPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...matchPlan(actor, id, args) })));
     server.registerTool("correct_finance_activity", {
@@ -595,11 +595,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: setGoalAllocationSchema.extend({ id: getGoalSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => setGoalAllocation(actor, id, args)));
     server.registerTool("create_finance_schedule", {
-      title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. May start paused for reviewed imports. Requires finance:manage and request_id; no pending generation or cash effect.",
+      title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. Optional obligation_id associates debt expense or receivable income reminders; posting explicitly reviews principal and fees. May start paused for reviewed imports. Requires finance:manage and request_id; no pending generation or cash effect.",
       inputSchema: createScheduleSchema, annotations,
     }, args => financeResult("finance:manage", actor => createSchedule(actor, args)));
     server.registerTool("update_finance_schedule", {
-      title: "Edit this and future occurrences", description: "Change a schedule from selected pending from_plan_id onward. Requires schedule version, from_plan_version and request_id. Earlier occurrences and satisfied history remain intact. For one occurrence use update_finance_plan. Cadence changes cancel obsolete future pending expectations and restart from selected/new start_date; catch up explicitly afterward.",
+      title: "Edit this and future occurrences", description: "Change a schedule from selected pending from_plan_id onward, including nullable obligation_id. Requires schedule version, from_plan_version and request_id. Earlier occurrences and satisfied history remain intact. For one occurrence use update_finance_plan. Cadence changes cancel obsolete future pending expectations and restart from selected/new start_date; catch up explicitly afterward.",
       inputSchema: updateScheduleSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateSchedule(actor, id, args)));
     server.registerTool("pause_finance_schedule", {

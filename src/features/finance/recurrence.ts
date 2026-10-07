@@ -4,7 +4,7 @@ import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
 import { financeMutation, parseFinance } from "./mutations";
 import { validateTransactionClassifications } from "./activity";
-import { pendingPlan, positiveAmount, readPlan, validatePlanAccount } from "./planning";
+import { pendingPlan, positiveAmount, readPlan, validatePlanAccount, validatePlanObligation } from "./planning";
 import { createScheduleSchema, updateScheduleSchema, getScheduleSchema, listSchedulesSchema, scheduleActionSchema, catchUpPlansSchema, skipPlansSchema,
   type FinanceSchedule, type SchedulePage, type CatchUpResult, type SkippedPlans } from "./recurrence-types";
 
@@ -84,11 +84,11 @@ export function createSchedule(actor: FinanceActor, input: unknown): { schedule:
   authorizeFinance(actor, "finance:manage");
   const { request_id, ...payload } = parseFinance(createScheduleSchema, input), amount = positiveAmount(payload.amount);
   return financeMutation(actor, request_id, "schedule.create", payload, () => {
-    validatePlanAccount(payload.account_id); validateTransactionClassifications(payload);
+    validatePlanAccount(payload.account_id); validateTransactionClassifications(payload); validatePlanObligation(payload.obligation_id, payload.type);
     const id = randomUUID(), timestamp = now();
-    getDb().prepare(`INSERT INTO finance_schedules (id,type,account_id,amount_cents,category_id,subcategory_id,text,tag_ids,interval_count,interval_unit,start_date,end_date,paused,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, payload.type, payload.account_id, amount, payload.category_id, payload.subcategory_id, payload.text,
-      JSON.stringify(payload.tag_ids), payload.interval_count, payload.interval_unit, payload.start_date, payload.end_date, Number(payload.paused), timestamp, timestamp);
+    getDb().prepare(`INSERT INTO finance_schedules (id,type,account_id,amount_cents,category_id,subcategory_id,text,tag_ids,interval_count,interval_unit,start_date,end_date,paused,created_at,updated_at,obligation_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, payload.type, payload.account_id, amount, payload.category_id, payload.subcategory_id, payload.text,
+      JSON.stringify(payload.tag_ids), payload.interval_count, payload.interval_unit, payload.start_date, payload.end_date, Number(payload.paused), timestamp, timestamp, payload.obligation_id ?? null);
     return { result: { schedule: readSchedule(id) }, affectedIds: [id], before: null, after: readSchedule(id, true) };
   });
 }
@@ -106,8 +106,8 @@ export function catchUpPlans(actor: FinanceActor, input: unknown): CatchUpResult
     const through = payload.through_date ?? today(), db = getDb();
     const rows = db.prepare(`${selection} WHERE s.paused=0 ORDER BY s.id`).all() as ScheduleRow[];
     const created: string[] = [], advanced: string[] = []; let remaining = 1000;
-    const insert = db.prepare(`INSERT INTO finance_plans (id,type,account_id,amount_cents,due_date,category_id,subcategory_id,text,tag_ids,schedule_id,occurrence_date,schedule_generation,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const insert = db.prepare(`INSERT INTO finance_plans (id,type,account_id,amount_cents,due_date,category_id,subcategory_id,text,tag_ids,schedule_id,occurrence_date,schedule_generation,created_at,updated_at,obligation_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const row of rows) {
       const initialIndex = row.next_index;
       while (remaining > 0 && needsOccurrence(row, through)) {
@@ -129,14 +129,14 @@ export function catchUpPlans(actor: FinanceActor, input: unknown): CatchUpResult
           if (reopen) {
             if (reopen.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Plan version limit reached", 409, "version_conflict");
             db.prepare(`UPDATE finance_plans SET type=?,account_id=?,amount_cents=?,due_date=?,category_id=?,subcategory_id=?,
-              text=?,tag_ids=?,status='pending',transaction_id=NULL,schedule_generation=?,cancel_reason=NULL,version=version+1,updated_at=?
+              text=?,tag_ids=?,obligation_id=?,status='pending',transaction_id=NULL,schedule_generation=?,cancel_reason=NULL,version=version+1,updated_at=?
               WHERE id=? AND status='cancelled' AND version=?`)
-              .run(row.type, row.account_id, row.amount_cents, date, row.category_id, row.subcategory_id, row.text, row.tag_ids,
+              .run(row.type, row.account_id, row.amount_cents, date, row.category_id, row.subcategory_id, row.text, row.tag_ids, row.obligation_id,
                 row.generation, timestamp, reopen.id, reopen.version);
             created.push(reopen.id);
           } else if (!current) {
             insert.run(id, row.type, row.account_id, row.amount_cents, date, row.category_id, row.subcategory_id, row.text, row.tag_ids,
-              row.id, date, row.generation, timestamp, timestamp);
+              row.id, date, row.generation, timestamp, timestamp, row.obligation_id);
             created.push(id);
           }
         }
@@ -189,6 +189,7 @@ export function updateSchedule(actor: FinanceActor, id: string, input: unknown):
     if (cadenceChanged && patch.start_date !== undefined && patch.start_date !== row.start_date && after.start_date < anchor.occurrence_date)
       throw new FinanceError("Future recurrence must start on or after the selected occurrence", 400, "invalid_input");
     if (after.end_date && after.end_date < after.start_date) throw new FinanceError("End date must not precede start date", 400, "invalid_input");
+    validatePlanObligation(after.obligation_id, after.type);
     if (after.account_id !== row.account_id) validatePlanAccount(after.account_id);
     if (patch.type !== undefined || patch.category_id !== undefined || patch.subcategory_id !== undefined || patch.tag_ids !== undefined)
       validateTransactionClassifications({ ...after, tag_ids: JSON.parse(after.tag_ids) as string[] });
@@ -211,15 +212,15 @@ export function updateSchedule(actor: FinanceActor, id: string, input: unknown):
       if (cancelReason) db.prepare("UPDATE finance_plans SET status='cancelled',cancel_reason=?,version=version+1,updated_at=? WHERE id=?")
         .run(cancelReason, now(), plan.id);
       else db.prepare(`UPDATE finance_plans SET type=?,account_id=?,amount_cents=?,category_id=?,subcategory_id=?,text=?,tag_ids=?,
-        due_date=?,occurrence_date=?,schedule_generation=?,version=version+1,updated_at=? WHERE id=?`)
+        due_date=?,occurrence_date=?,schedule_generation=?,obligation_id=?,version=version+1,updated_at=? WHERE id=?`)
         .run(after.type, after.account_id, after.amount_cents, after.category_id, after.subcategory_id, after.text, after.tag_ids,
           cadenceChanged ? after.start_date : plan.due_date, cadenceChanged ? after.start_date : plan.occurrence_date,
-          cadenceChanged ? generation : row.generation, now(), plan.id);
+          cadenceChanged ? generation : row.generation, after.obligation_id, now(), plan.id);
     }
     db.prepare(`UPDATE finance_schedules SET type=?,account_id=?,amount_cents=?,category_id=?,subcategory_id=?,text=?,tag_ids=?,
-      interval_count=?,interval_unit=?,start_date=?,end_date=?,generation=?,next_index=?,version=version+1,updated_at=? WHERE id=?`)
+      interval_count=?,interval_unit=?,start_date=?,end_date=?,generation=?,next_index=?,obligation_id=?,version=version+1,updated_at=? WHERE id=?`)
       .run(after.type, after.account_id, after.amount_cents, after.category_id, after.subcategory_id, after.text, after.tag_ids,
-        after.interval_count, after.interval_unit, after.start_date, after.end_date, generation, nextIndex, now(), id);
+        after.interval_count, after.interval_unit, after.start_date, after.end_date, generation, nextIndex, after.obligation_id, now(), id);
     return { result: { schedule: readSchedule(id) }, affectedIds: [id, ...affected.map(plan => plan.id)],
       before: { schedule: before, plans: beforePlans }, after: { schedule: readSchedule(id, true), plans: affected.map(plan => readPlan(plan.id, true)) } };
   });

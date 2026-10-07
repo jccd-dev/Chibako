@@ -16,6 +16,7 @@ export function useFinanceScheduleEntry(schedule: FinanceSchedule | null, occurr
   const [category, setCategory] = useState(source?.category_id ?? "");
   const [subcategory, setSubcategory] = useState(source?.subcategory_id ?? "");
   const [text, setText] = useState(source?.text ?? "");
+  const [association, setAssociation] = useState(source?.obligation_id ?? "");
   const [count, setCount] = useState(String(schedule?.interval_count ?? 1));
   const [unit, setUnit] = useState<FinanceSchedule["interval_unit"]>(schedule?.interval_unit ?? "month");
   const [start, setStart] = useState(occurrence?.occurrence_date ?? schedule?.start_date ?? localCalendarDate());
@@ -28,7 +29,7 @@ export function useFinanceScheduleEntry(schedule: FinanceSchedule | null, occurr
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const recurrenceChanged = !schedule || Number(count) !== schedule.interval_count || unit !== schedule.interval_unit || start !== (occurrence?.occurrence_date ?? schedule.start_date);
-    const fields = { type, amount, account_id: account, category_id: category || null, subcategory_id: subcategory || null, text, tag_ids: source?.tag_ids ?? [], end_date: end || null,
+    const fields = { type, amount, account_id: account, category_id: category || null, subcategory_id: subcategory || null, text, tag_ids: source?.tag_ids ?? [], end_date: end || null, obligation_id: association || null,
       ...(recurrenceChanged ? { interval_count: Number(count), interval_unit: unit, start_date: start } : {}) };
     const input = schedule ? { ...fields, version: schedule.version, from_plan_id: occurrence?.id, from_plan_version: occurrence?.version } : fields;
     const parsed = (schedule ? updateScheduleSchema : createScheduleSchema).safeParse({ ...input, request_id: "validate" });
@@ -39,10 +40,10 @@ export function useFinanceScheduleEntry(schedule: FinanceSchedule | null, occurr
     if (await recurrence.save(schedule?.id ?? null, schedule ? "edit" : "create", input)) onClose();
   }
 
-  function changeType(value: string) { setType(value === "income" ? "income" : "expense"); setCategory(""); setSubcategory(""); }
+  function changeType(value: string) { setType(value === "income" ? "income" : "expense"); setCategory(""); setSubcategory(""); setAssociation(""); }
   function changeCategory(value: string) { setCategory(value); setSubcategory(""); }
   function changeUnit(value: string) { if (value === "day" || value === "week" || value === "month" || value === "year") setUnit(value); }
   function invalid(key: string) { return { "aria-invalid": !!errors[key], "aria-describedby": errors[key] ? `schedule-error-${key}` : undefined }; }
 
-  return { type, amount, setAmount, account, setAccount, category, subcategory, setSubcategory, text, setText, count, setCount, unit, changeUnit, start, setStart, end, setEnd, errors, editable, categories, subcategories, submit, changeType, changeCategory, invalid };
+  return { type, amount, setAmount, account, setAccount, category, subcategory, setSubcategory, text, setText, association, setAssociation, count, setCount, unit, changeUnit, start, setStart, end, setEnd, errors, editable, categories, subcategories, submit, changeType, changeCategory, invalid };
 }

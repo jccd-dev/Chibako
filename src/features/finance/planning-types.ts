@@ -1,3 +1,4 @@
+import { paymentFeeSchema, type FinanceObligation } from "./obligation-types";
 import { z } from "zod";
 import type { FinanceAllocationShortfall } from "./goal-types";
 import { postTransactionSchema, calendarDateSchema, transactionTypeSchema } from "./activity-types";
@@ -10,12 +11,16 @@ export const createPlanSchema = postTransactionSchema.omit({ transaction_date: t
 export const planActionSchema = z.object({ request_id: createPlanSchema.shape.request_id, version }).strict();
 export const updatePlanSchema = z.object({
   ...planActionSchema.shape,
+  obligation_id: id.nullable().optional(),
   type: transactionTypeSchema.optional(), account_id: id.optional(), amount: postTransactionSchema.shape.amount.optional(), due_date: calendarDateSchema.optional(),
   category_id: id.nullable().optional(), subcategory_id: id.nullable().optional(),
   text: postTransactionSchema.shape.text.removeDefault().optional(), tag_ids: z.array(id).max(20).refine(ids => new Set(ids).size === ids.length, "Tags must be unique").optional(),
 }).strict().refine(value => Object.keys(value).some(key => key !== "request_id" && key !== "version"), "Provide a plan change");
-export const postPlanSchema = planActionSchema.extend({ account_id: id, amount: postTransactionSchema.shape.amount, transaction_date: calendarDateSchema }).strict();
-export const matchPlanSchema = planActionSchema.extend({ transaction_id: id, transaction_version: version }).strict();
+export const postPlanSchema = planActionSchema.extend({ account_id: id, amount: postTransactionSchema.shape.amount, transaction_date: calendarDateSchema,
+  obligation_version: version.optional(), fee: paymentFeeSchema.optional(),
+  cash_activity_id: id.optional(), cash_activity_version: version.optional(),
+}).strict();
+export const matchPlanSchema = planActionSchema.extend({ transaction_id: id, transaction_version: version, obligation_version: version.optional() }).strict();
 export const getPlanSchema = z.object({ id, include_details: z.boolean().default(false) }).strict();
 export const listPlansSchema = z.object({
   status: z.enum(["pending", "satisfied", "cancelled", "all"]).default("pending"),
@@ -27,9 +32,10 @@ export const listPlansSchema = z.object({
 export interface FinancePlan {
   id: string; type: "income" | "expense"; account_id: string; account_name: string; currency: "PHP"; amount_cents: number;
   due_date: string; category_id: string | null; subcategory_id: string | null; category_name: string | null;
+  obligation_id: string | null;
   schedule_id: string | null; occurrence_date: string | null;
   status: "pending" | "satisfied" | "cancelled"; transaction_id: string | null; version: number;
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;
 }
 export interface PlanPage { plans: FinancePlan[]; total: number; limit: number; offset: number }
-export interface SatisfiedPlan { plan: FinancePlan; transaction: FinanceTransaction; balance_cents: number; warnings: string[]; allocation_shortfalls?: FinanceAllocationShortfall[] }
+export interface SatisfiedPlan { obligation?: FinanceObligation; fee?: FinanceTransaction | null; plan: FinancePlan; transaction: FinanceTransaction; balance_cents: number; warnings: string[]; allocation_shortfalls?: FinanceAllocationShortfall[] }

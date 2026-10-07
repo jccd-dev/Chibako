@@ -90,7 +90,7 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
       && record.amount_cents > obligation.outstanding_cents) {
       throw new FinanceError("Reverting this principal activity would make outstanding principal negative", 409, "principal_in_use");
     }
-    if (operation === "revert" && record.linked_record_id) throw new FinanceError("Revert the linked transfer to cancel its fee together", 409, "linked_activity");
+    if (operation === "revert" && record.linked_record_id) throw new FinanceError("Revert the linked activity to cancel its fee together", 409, "linked_activity");
     for (const entry of [record, fee]) {
       if (!entry) continue;
       if (operation === "revert" && entry.refunded_cents > 0) throw new FinanceError("Revert active refunds before their expense", 409, "active_refunds");
@@ -124,9 +124,9 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     const subcategory = patch.subcategory_id === undefined ? before.subcategory_id : patch.subcategory_id;
     const tags = patch.tag_ids ?? before.tag_ids ?? [];
     const movement = before.type === "transfer" || before.type === "reconciliation" || before.type === "valuation" || !!obligation;
-    if (before.type !== "transfer" && (patch.destination_account_id !== undefined || patch.fee !== undefined)) throw new FinanceError("Fields do not apply to this activity", 400, "invalid_input");
+    if ((before.type !== "transfer" && patch.destination_account_id !== undefined) || (before.type !== "transfer" && !before.obligation_payment && patch.fee !== undefined)) throw new FinanceError("Fields do not apply to this activity", 400, "invalid_input");
     if ((movement || before.type === "refund") && (patch.category_id !== undefined || patch.subcategory_id !== undefined)) throw new FinanceError("This activity inherits or excludes categories", 400, "invalid_category");
-    if (before.linked_record_id && (account !== before.account_id || date !== before.transaction_date)) throw new FinanceError("Correct the linked transfer to move its fee together", 409, "linked_activity");
+    if (before.linked_record_id && (account !== before.account_id || date !== before.transaction_date)) throw new FinanceError("Correct the linked activity to move its fee together", 409, "linked_activity");
     if (account !== before.account_id) activeAccount(account, before.type === "valuation" ? "asset" : "money");
     if (before.type !== "reconciliation" && before.type !== "valuation" && amount <= 0) throw new FinanceError("Amount must be positive", 400, "invalid_input");
     if (obligation) {
@@ -149,21 +149,23 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
       if (account === destination) throw new FinanceError("Choose different accounts", 400, "invalid_account");
       if (destination !== before.destination_account_id) activeAccount(destination, "money");
       db.prepare("UPDATE finance_movements SET account_id = ?, destination_account_id = ? WHERE id = ?").run(account, destination, id);
+    } else if (before.type === "reconciliation" || before.type === "valuation") {
+      db.prepare("UPDATE finance_movements SET actual_balance_cents = ? WHERE id = ?").run(exactCents(BigInt(before.compared_balance_cents!) + BigInt(amount)), id);
+    } else if (before.type !== "refund" && !obligation) {
+      db.prepare("UPDATE finance_transactions SET category_id = ?, subcategory_id = ? WHERE id = ?").run(category, subcategory, id);
+    }
+    if (before.type === "transfer" || before.obligation_payment) {
       if (fee) {
         editable(fee, patch.fee?.version ?? fee.version);
         const feeAmount = patch.fee ? decimalCents(patch.fee.amount) : fee.amount_cents;
         if (feeAmount <= 0 || feeAmount < fee.refunded_cents) throw new FinanceError("Fee cannot be less than its active refunds", 409, "refund_limit");
         if (patch.fee && (patch.fee.category_id !== fee.category_id || patch.fee.subcategory_id !== fee.subcategory_id)) {
-          validateTransactionClassifications({ type: "expense", category_id: patch.fee.category_id, subcategory_id: patch.fee.subcategory_id, tag_ids: [] });
+          validateTransactionClassifications({ type: fee.type === "income" ? "income" : "expense", category_id: patch.fee.category_id, subcategory_id: patch.fee.subcategory_id, tag_ids: [] });
         }
         db.prepare("UPDATE finance_transactions SET account_id = ?, transaction_date = ?, amount_cents = ?, category_id = ?, subcategory_id = ? WHERE id = ?")
           .run(account, date, feeAmount, patch.fee ? patch.fee.category_id : fee.category_id, patch.fee ? patch.fee.subcategory_id : fee.subcategory_id, fee.id);
         bump(fee);
-      } else if (patch.fee) throw new FinanceError("Transfer has no linked fee to correct", 400, "invalid_input");
-    } else if (before.type === "reconciliation" || before.type === "valuation") {
-      db.prepare("UPDATE finance_movements SET actual_balance_cents = ? WHERE id = ?").run(exactCents(BigInt(before.compared_balance_cents!) + BigInt(amount)), id);
-    } else if (before.type !== "refund" && !obligation) {
-      db.prepare("UPDATE finance_transactions SET category_id = ?, subcategory_id = ? WHERE id = ?").run(category, subcategory, id);
+      } else if (patch.fee) throw new FinanceError("Activity has no linked fee to correct", 400, "invalid_input");
     }
     db.prepare(`UPDATE ${table(before)} SET account_id = ?, amount_cents = ?, transaction_date = ?, text = ?, tag_ids = ? WHERE id = ?`)
       .run(account, amount, date, patch.text ?? before.text ?? "", JSON.stringify(tags), id);

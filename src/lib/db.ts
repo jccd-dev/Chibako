@@ -374,6 +374,13 @@ export function getDb(): Database.Database {
     if (!planColumns.has("schedule_generation")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_generation INTEGER");
     if (!planColumns.has("cancel_reason")) db.exec("ALTER TABLE finance_plans ADD COLUMN cancel_reason TEXT");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_occurrence_identity ON finance_plans(schedule_id, schedule_generation, occurrence_date)");
+    for (const table of ["finance_plans", "finance_schedules"]) {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (!columns.some(column => column.name === "obligation_id")) db.exec(`ALTER TABLE ${table} ADD COLUMN obligation_id TEXT REFERENCES finance_obligations(id)`);
+    }
+    const paymentColumns = db.prepare("PRAGMA table_info(finance_obligation_payments)").all() as Array<{ name: string }>;
+    if (!paymentColumns.some(column => column.name === "fee_transaction_id")) db.exec("ALTER TABLE finance_obligation_payments ADD COLUMN fee_transaction_id TEXT REFERENCES finance_transactions(id)");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_payment_fee ON finance_obligation_payments(fee_transaction_id)");
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

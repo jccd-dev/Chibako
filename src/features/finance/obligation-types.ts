@@ -33,8 +33,13 @@ export const postObligationMovementSchema = z.object({
     ctx.addIssue({ code: "custom", message: "Supply obligation_id and current version, or a name and optional due_date for a new obligation" });
   }
 });
+export const paymentFeeSchema = z.object({
+  type: z.enum(["income", "expense"]), amount: postTransactionSchema.shape.amount,
+  category_id: postTransactionSchema.shape.category_id, subcategory_id: postTransactionSchema.shape.subcategory_id,
+}).strict();
 export const postObligationPaymentSchema = z.object({
   request_id: requestId, obligation_id: id, obligation_version: version,
+  fee: paymentFeeSchema.optional(),
   cash_activity_id: id.optional(), cash_activity_version: version.optional(),
   account_id: id, amount: postTransactionSchema.shape.amount, transaction_date: calendarDateSchema,
   text: postTransactionSchema.shape.text,
@@ -42,6 +47,7 @@ export const postObligationPaymentSchema = z.object({
   if (p.cash_activity_id ? p.cash_activity_version === undefined : p.cash_activity_version !== undefined) {
     ctx.addIssue({ code: "custom", message: "Existing cash activity requires its current version" });
   }
+  if (p.cash_activity_id && p.fee) ctx.addIssue({ code: "custom", message: "Linking existing cash cannot post a new fee" });
 });
 export const closeObligationSchema = z.object({
   request_id: requestId, version, amount: postTransactionSchema.shape.amount,

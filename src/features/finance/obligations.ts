@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { getDb, now } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
@@ -140,52 +141,64 @@ export function postObligationMovement(actor: FinanceActor, input: unknown): Pos
 
 export function postObligationPayment(actor: FinanceActor, input: unknown): PostedObligationPayment {
   authorizeFinance(actor, "finance:write");
-  const payload = parseFinance(postObligationPaymentSchema, input), amount = decimalCents(payload.amount);
+  const payload = parseFinance(postObligationPaymentSchema, input);
+  return financeMutation(actor, payload.request_id, "obligation.payment", payload, () => insertObligationPayment(payload));
+}
+
+// Caller owns the atomic mutation, so occurrence satisfaction and payment share one audit/retry boundary.
+export function insertObligationPayment(payload: z.output<typeof postObligationPaymentSchema>) {
+  const amount = decimalCents(payload.amount);
   if (amount <= 0) throw new FinanceError("Principal amount must be positive", 400, "invalid_input");
-  return financeMutation(actor, payload.request_id, "obligation.payment", payload, () => {
-    const before = readObligation(payload.obligation_id);
-    checkObligationVersion(before, payload.obligation_version);
-    if (payload.cash_activity_id && getDb().prepare("SELECT 1 FROM finance_obligation_payments WHERE cash_activity_id=?").get(payload.cash_activity_id)) {
-      throw new FinanceError("Cash activity already backs a principal payment", 409, "cash_activity_reused");
+  const before = readObligation(payload.obligation_id);
+  checkObligationVersion(before, payload.obligation_version);
+  if (payload.cash_activity_id && getDb().prepare("SELECT 1 FROM finance_obligation_payments WHERE cash_activity_id=?").get(payload.cash_activity_id)) {
+    throw new FinanceError("Cash activity already backs a principal payment", 409, "cash_activity_reused");
+  }
+  if (before.archived || before.outstanding_cents <= 0) throw new FinanceError("Choose an open obligation", 409, "not_outstanding");
+  if (amount > before.outstanding_cents) throw new FinanceError("Payment cannot exceed outstanding principal", 409, "overpayment");
+  const account = readAccountBalance(payload.account_id);
+  if (account.archived || account.kind !== "money") throw new FinanceError("Choose an active money account", 400, "invalid_account");
+  const type = before.kind === "debt" ? "expense" : "income";
+  let activityId: string, cashActivityBefore: ReturnType<typeof readTransaction> | null = null;
+  if (payload.cash_activity_id) {
+    const cash = getDb().prepare(`SELECT t.id,t.type,t.account_id,t.amount_cents,t.transaction_date,t.version,t.hidden,t.reverted,
+      EXISTS(SELECT 1 FROM finance_refunds r WHERE r.expense_id=t.id) AS refunded,
+      (EXISTS(SELECT 1 FROM finance_movements m WHERE m.fee_transaction_id=t.id) OR EXISTS(SELECT 1 FROM finance_obligation_payments p WHERE p.fee_transaction_id=t.id)) AS transfer_fee,
+      EXISTS(SELECT 1 FROM finance_plans p WHERE p.transaction_id=t.id) AS plan_linked
+      FROM finance_transactions t WHERE t.id=?`).get(payload.cash_activity_id) as {
+        id: string; type: string; account_id: string; amount_cents: number; transaction_date: string;
+        version: number; hidden: number; reverted: number; refunded: number; transfer_fee: number; plan_linked: number;
+      } | undefined;
+    if (!cash || cash.type !== type || cash.account_id !== account.id || cash.amount_cents !== amount || cash.transaction_date !== payload.transaction_date
+      || cash.version !== payload.cash_activity_version || cash.hidden || cash.reverted || cash.refunded || cash.transfer_fee || cash.plan_linked) {
+      throw new FinanceError("Selected cash activity must be active, compatible, unlinked and match account, amount and date", 409, "invalid_cash_activity");
     }
-    if (before.archived || before.outstanding_cents <= 0) throw new FinanceError("Choose an open obligation", 409, "not_outstanding");
-    if (amount > before.outstanding_cents) throw new FinanceError("Payment cannot exceed outstanding principal", 409, "overpayment");
-    const account = readAccountBalance(payload.account_id);
-    if (account.archived || account.kind !== "money") throw new FinanceError("Choose an active money account", 400, "invalid_account");
-    const type = before.kind === "debt" ? "expense" : "income";
-    let activityId: string, cashActivityBefore: ReturnType<typeof readTransaction> | null = null;
-    if (payload.cash_activity_id) {
-      const cash = getDb().prepare(`SELECT t.id,t.type,t.account_id,t.amount_cents,t.transaction_date,t.version,t.hidden,t.reverted,
-        EXISTS(SELECT 1 FROM finance_refunds r WHERE r.expense_id=t.id) AS refunded,
-        EXISTS(SELECT 1 FROM finance_movements m WHERE m.fee_transaction_id=t.id) AS transfer_fee,
-        EXISTS(SELECT 1 FROM finance_plans p WHERE p.transaction_id=t.id) AS plan_linked
-        FROM finance_transactions t WHERE t.id=?`).get(payload.cash_activity_id) as {
-          id: string; type: string; account_id: string; amount_cents: number; transaction_date: string;
-          version: number; hidden: number; reverted: number; refunded: number; transfer_fee: number; plan_linked: number;
-        } | undefined;
-      if (!cash || cash.type !== type || cash.account_id !== account.id || cash.amount_cents !== amount || cash.transaction_date !== payload.transaction_date
-        || cash.version !== payload.cash_activity_version || cash.hidden || cash.reverted || cash.refunded || cash.transfer_fee || cash.plan_linked) {
-        throw new FinanceError("Selected cash activity must be active, compatible, unlinked and match account, amount and date", 409, "invalid_cash_activity");
-      }
-      if (cash.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity version limit reached", 409, "version_conflict");
-      activityId = cash.id;
-      cashActivityBefore = readTransaction(cash.id, true);
-    } else {
-      activityId = insertTransaction({ type, account_id: account.id, amount_cents: amount, transaction_date: payload.transaction_date,
-        category_id: null, subcategory_id: null, text: payload.text, tag_ids: [] });
-    }
-    getDb().prepare("INSERT INTO finance_obligation_payments (id,obligation_id,cash_activity_id,amount_cents,created_at) VALUES (?,?,?,?,?)")
-      .run(randomUUID(), before.id, activityId, amount, now());
-    if (payload.cash_activity_id) getDb().prepare("UPDATE finance_transactions SET version=version+1,updated_at=? WHERE id=?").run(now(), activityId);
-    bumpObligation(before.id);
-    const transaction = readTransaction(activityId, false);
-    const balance = readAccountBalance(account.id);
-    const balances = [{ account_id: account.id, balance_cents: balance.balance_cents }];
-    const obligation = readObligation(before.id);
-    const result: PostedObligationPayment = { transaction, fee: null, balances, ...financeBalanceWarnings(balances), obligation, principal_change_cents: -amount };
-    return { result, affectedIds: [activityId, before.id, account.id], before: { obligation: before, cash_activity: cashActivityBefore, account },
-      after: { obligation, transaction: readTransaction(activityId, true), balances } };
-  });
+    if (cash.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity version limit reached", 409, "version_conflict");
+    activityId = cash.id;
+    cashActivityBefore = readTransaction(cash.id, true);
+  } else {
+    activityId = insertTransaction({ type, account_id: account.id, amount_cents: amount, transaction_date: payload.transaction_date,
+      category_id: null, subcategory_id: null, text: payload.text, tag_ids: [] });
+  }
+  let feeId: string | null = null;
+  if (payload.fee) {
+    const feeAmount = decimalCents(payload.fee.amount);
+    if (feeAmount <= 0) throw new FinanceError("Interest/fee amount must be positive", 400, "invalid_input");
+    validateTransactionClassifications({ ...payload.fee, tag_ids: [] });
+    feeId = insertTransaction({ ...payload.fee, account_id: account.id, amount_cents: feeAmount,
+      transaction_date: payload.transaction_date, text: payload.text, tag_ids: [] });
+  }
+  getDb().prepare("INSERT INTO finance_obligation_payments (id,obligation_id,cash_activity_id,fee_transaction_id,amount_cents,created_at) VALUES (?,?,?,?,?,?)")
+    .run(randomUUID(), before.id, activityId, feeId, amount, now());
+  if (payload.cash_activity_id) getDb().prepare("UPDATE finance_transactions SET version=version+1,updated_at=? WHERE id=?").run(now(), activityId);
+  bumpObligation(before.id);
+  const transaction = readTransaction(activityId, false);
+  const balance = readAccountBalance(account.id);
+  const balances = [{ account_id: account.id, balance_cents: balance.balance_cents }];
+  const obligation = readObligation(before.id);
+  const result: PostedObligationPayment = { transaction, fee: feeId ? readTransaction(feeId, false) : null, balances, ...financeBalanceWarnings(balances), obligation, principal_change_cents: -amount };
+  return { result, affectedIds: [activityId, before.id, account.id, ...(feeId ? [feeId] : [])], before: { obligation: before, cash_activity: cashActivityBefore, account },
+    after: { obligation, transaction: readTransaction(activityId, true), fee: result.fee, balances } };
 }
 
 export function closeObligation(actor: FinanceActor, id: string, input: unknown): { obligation: FinanceObligation } {

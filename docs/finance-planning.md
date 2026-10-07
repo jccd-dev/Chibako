@@ -71,6 +71,34 @@ Schedule reads require `finance:read`, schedule management requires
 `finance:write`. These permissions do not imply one another. Every mutation
 requires a request ID; record changes also require the current version.
 
+## Recurring obligation payment review
+
+A schedule can associate `obligation_id` with a debt (expense) or receivable
+(income). Each generated pending occurrence retains that association. Edit one
+occurrence or this and future occurrences to change or remove it; satisfied
+history keeps its original link. Creating, pausing, catching up, skipping or
+editing a reminder never changes cash or principal.
+
+Posting a linked occurrence requires its current `version` and the inspected
+`obligation_version`, actual `account_id`, `transaction_date`, and principal
+`amount`. An optional `fee` with explicit `type` (`income` or `expense`), decimal
+`amount`, and optional category/subcategory creates a separate transaction.
+Principal, fee, obligation progress and occurrence satisfaction commit together.
+Principal is excluded from income/spending; interest and fees are included.
+Overpayment and stale reviews fail without partial effects.
+
+To associate previously recorded ordinary cash with principal, posting accepts
+`cash_activity_id` and `cash_activity_version`; account, amount and date must
+match. This applies no cash again, and cannot create a new fee. Alternatively,
+matching accepts an already recorded principal payment of the same obligation
+with current transaction and obligation versions. One transaction satisfies one
+occurrence. Linking never pays principal twice.
+
+Correct the principal in Activity to update cash, principal progress, and any
+linked fee together. A linked fee follows account/date changes. Delete preserves
+both payment progress and occurrence satisfaction. Revert cancels the principal
+and linked fee, restores outstanding principal, and reopens the occurrence.
+
 ## REST and MCP
 
 Reads require `finance:read`; mutations require `finance:write`. `finance:manage`
@@ -178,3 +206,9 @@ October 5 as the next owner-local future date. The UI confirmed balances stayed
 unchanged, and no transaction was posted. At 390x844, document width remained
 390px with no horizontal overflow. This named schedule and pending occurrence
 persist in the local dev Vault, paused.
+
+Ticket 12 adds `tests/finance-recurring-payments.test.ts` at the shared capability
+seam with real temporary SQLite, plus focused REST/remote MCP checks. Owner
+browser verification is pending by explicit request; see
+[manual checks](finance-ticket12-manual-checks.md). No running dev Vault was
+mutated by automated ticket-12 verification.

@@ -5,6 +5,7 @@ import { createPlanSchema, getPlanSchema, planActionSchema, updatePlanSchema, ty
 export const intervalUnitSchema = z.enum(["day", "week", "month", "year"]);
 const intervalCount = z.number().int().min(1).max(10000);
 export const createScheduleSchema = createPlanSchema.omit({ due_date: true }).extend({
+  obligation_id: getPlanSchema.shape.id.nullable().optional(),
   interval_count: intervalCount, interval_unit: intervalUnitSchema, start_date: calendarDateSchema,
   end_date: calendarDateSchema.nullable().default(null), paused: z.boolean().default(false),
 }).strict().refine(value => !value.end_date || value.start_date <= value.end_date, "End date must not precede start date");
@@ -26,6 +27,7 @@ export const skipPlansSchema = z.object({
     .refine(plans => new Set(plans.map(plan => plan.id)).size === plans.length, "Plans must be unique"),
 }).strict();
 export interface FinanceSchedule {
+  obligation_id: string | null;
   id: string; type: "income" | "expense"; account_id: string; account_name: string; currency: "PHP"; amount_cents: number;
   category_id: string | null; subcategory_id: string | null; category_name: string | null;
   interval_count: number; interval_unit: z.infer<typeof intervalUnitSchema>; start_date: string; end_date: string | null;

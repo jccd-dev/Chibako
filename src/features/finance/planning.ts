@@ -5,6 +5,8 @@ import { FinanceError, type FinanceActor } from "./types";
 import { readAccountBalance } from "./accounts";
 import { financeBalanceWarnings } from "./reservations";
 import { validateTransactionClassifications, insertTransaction, readTransaction } from "./activity";
+import { readObligation, checkObligationVersion, insertObligationPayment } from "./obligations";
+import { postObligationPaymentSchema } from "./obligation-types";
 import { decimalCents } from "./money";
 import { parseFinance, financeMutation } from "./mutations";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema, type FinancePlan, type PlanPage, type SatisfiedPlan } from "./planning-types";
@@ -58,6 +60,12 @@ export function positiveAmount(value: string) {
   if (amount <= 0) throw new FinanceError("Amount must be greater than zero", 400, "invalid_input");
   return amount;
 }
+export function validatePlanObligation(id: string | null | undefined, type: "income" | "expense") {
+  if (!id) return;
+  const obligation = readObligation(id);
+  if (obligation.archived || (obligation.kind === "debt" ? "expense" : "income") !== type)
+    throw new FinanceError("Choose a compatible active debt or receivable", 400, "invalid_obligation");
+}
 export function createPlan(actor: FinanceActor, input: unknown): { plan: FinancePlan } {
   authorizeFinance(actor, "finance:write");
   const { request_id, ...payload } = parseFinance(createPlanSchema, input), amount = positiveAmount(payload.amount);
@@ -75,10 +83,12 @@ export function updatePlan(actor: FinanceActor, id: string, input: unknown): { p
   return financeMutation(actor, request_id, "plan.update", { id, ...patch }, () => {
     const before = pendingPlan(id, patch.version);
     const after = { ...before, ...patch, amount_cents: patch.amount === undefined ? before.amount_cents : positiveAmount(patch.amount), tag_ids: patch.tag_ids ?? before.tag_ids ?? [] };
+    if (after.obligation_id && !before.schedule_id) throw new FinanceError("Payment reminders require a recurring occurrence", 400, "invalid_obligation");
+    validatePlanObligation(after.obligation_id, after.type);
     if (after.account_id !== before.account_id) validatePlanAccount(after.account_id);
     if (patch.type !== undefined || patch.category_id !== undefined || patch.subcategory_id !== undefined || patch.tag_ids !== undefined) validateTransactionClassifications(after);
-    getDb().prepare("UPDATE finance_plans SET type=?,account_id=?,amount_cents=?,due_date=?,category_id=?,subcategory_id=?,text=?,tag_ids=?,version=version+1,updated_at=? WHERE id=?")
-      .run(after.type, after.account_id, after.amount_cents, after.due_date, after.category_id, after.subcategory_id, after.text ?? "", JSON.stringify(after.tag_ids), now(), id);
+    getDb().prepare("UPDATE finance_plans SET type=?,account_id=?,amount_cents=?,due_date=?,category_id=?,subcategory_id=?,text=?,tag_ids=?,obligation_id=?,version=version+1,updated_at=? WHERE id=?")
+      .run(after.type, after.account_id, after.amount_cents, after.due_date, after.category_id, after.subcategory_id, after.text ?? "", JSON.stringify(after.tag_ids), after.obligation_id, now(), id);
     return { result: { plan: readPlan(id) }, affectedIds: [id], before, after: readPlan(id, true) };
   });
 }
@@ -92,6 +102,19 @@ export function postPlan(actor: FinanceActor, id: string, input: unknown): Satis
   const { request_id, ...payload } = parseFinance(postPlanSchema, input), amount = positiveAmount(payload.amount);
   return financeMutation(actor, request_id, "plan.post", { id, ...payload }, () => {
     const before = pendingPlan(id, payload.version);
+    if (before.obligation_id) {
+      validatePlanObligation(before.obligation_id, before.type);
+      const payment = insertObligationPayment(parseFinance(postObligationPaymentSchema, {
+        request_id, obligation_id: before.obligation_id, obligation_version: payload.obligation_version,
+        account_id: payload.account_id, amount: payload.amount, transaction_date: payload.transaction_date,
+        text: before.text ?? "", fee: payload.fee, cash_activity_id: payload.cash_activity_id, cash_activity_version: payload.cash_activity_version,
+      }));
+      const result = { ...satisfy(before, payment.result.transaction.id), obligation: payment.result.obligation, fee: payment.result.fee };
+      return { result, affectedIds: [id, ...payment.affectedIds], before: { plan: before, ...payment.before },
+        after: { ...payment.after, plan: result.plan } };
+    }
+    if (payload.obligation_version !== undefined || payload.fee || payload.cash_activity_id || payload.cash_activity_version !== undefined)
+      throw new FinanceError("Payment review fields require an obligation reminder", 400, "invalid_input");
     validatePlanAccount(payload.account_id);
     validateTransactionClassifications({ ...before, tag_ids: before.tag_ids ?? [] });
     const transactionId = insertTransaction({ type: before.type, account_id: payload.account_id, amount_cents: amount,
@@ -106,12 +129,19 @@ export function matchPlan(actor: FinanceActor, id: string, input: unknown): Sati
   const { request_id, ...payload } = parseFinance(matchPlanSchema, input);
   return financeMutation(actor, request_id, "plan.match", { id, ...payload }, () => {
     const before = pendingPlan(id, payload.version), transaction = readTransaction(payload.transaction_id, true), db = getDb();
-    if (transaction.reverted || transaction.type !== before.type || transaction.linked_record_id || transaction.obligation_payment) throw new FinanceError("Select unreverted manual activity of the same income/expense type, excluding transfer fees and principal payments", 409, "invalid_match");
+    if (before.obligation_id) {
+      const obligation = readObligation(before.obligation_id);
+      checkObligationVersion(obligation, payload.obligation_version);
+      if (!transaction.obligation_payment || transaction.obligation_id !== obligation.id)
+        throw new FinanceError("Choose a principal payment of this obligation", 409, "invalid_match");
+    } else if (payload.obligation_version !== undefined || transaction.obligation_payment) throw new FinanceError("Payment matching requires its obligation reminder", 409, "invalid_match");
+    if (transaction.reverted || transaction.type !== before.type || transaction.linked_record_id) throw new FinanceError("Select compatible unreverted activity without another activity link", 409, "invalid_match");
     if (db.prepare("SELECT id FROM finance_plans WHERE transaction_id = ?").get(transaction.id)) throw new FinanceError("Transaction already satisfies a plan", 409, "already_matched");
     if (transaction.version !== payload.transaction_version || transaction.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity changed; refresh before matching", 409, "version_conflict");
     db.prepare("UPDATE finance_transactions SET version=version+1,updated_at=? WHERE id=?").run(now(), transaction.id);
-    const result = satisfy(before, transaction.id);
-    return { result, affectedIds: [id, transaction.id, transaction.account_id], before: { plan: before, transaction }, after: { ...result, transaction: readTransaction(transaction.id, true) } };
+    const result = { ...satisfy(before, transaction.id), ...(before.obligation_id ? { obligation: readObligation(before.obligation_id),
+      fee: transaction.fee_transaction_id ? readTransaction(transaction.fee_transaction_id, false) : null } : {}) };
+    return { result, affectedIds: [id, transaction.id, transaction.account_id, ...(before.obligation_id ? [before.obligation_id] : [])], before: { plan: before, transaction, ...(result.obligation ? { obligation: result.obligation } : {}) }, after: { ...result, transaction: readTransaction(transaction.id, true) } };
   });
 }
 export function reopenPlanForTransaction(transactionId: string): { before: FinancePlan; after: FinancePlan } | null {
