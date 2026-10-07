@@ -106,7 +106,7 @@ export function matchPlan(actor: FinanceActor, id: string, input: unknown): Sati
   const { request_id, ...payload } = parseFinance(matchPlanSchema, input);
   return financeMutation(actor, request_id, "plan.match", { id, ...payload }, () => {
     const before = pendingPlan(id, payload.version), transaction = readTransaction(payload.transaction_id, true), db = getDb();
-    if (transaction.reverted || transaction.type !== before.type || transaction.linked_record_id) throw new FinanceError("Select unreverted manual activity of the same income/expense type, excluding transfer fees", 409, "invalid_match");
+    if (transaction.reverted || transaction.type !== before.type || transaction.linked_record_id || transaction.obligation_payment) throw new FinanceError("Select unreverted manual activity of the same income/expense type, excluding transfer fees and principal payments", 409, "invalid_match");
     if (db.prepare("SELECT id FROM finance_plans WHERE transaction_id = ?").get(transaction.id)) throw new FinanceError("Transaction already satisfies a plan", 409, "already_matched");
     if (transaction.version !== payload.transaction_version || transaction.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity changed; refresh before matching", 409, "version_conflict");
     db.prepare("UPDATE finance_transactions SET version=version+1,updated_at=? WHERE id=?").run(now(), transaction.id);

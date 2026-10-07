@@ -43,8 +43,8 @@ import { createSchedule, getSchedule, listSchedules, updateSchedule, pauseSchedu
 import { createScheduleSchema, getScheduleSchema, listSchedulesSchema, updateScheduleSchema, scheduleActionSchema, catchUpPlansSchema, skipPlansSchema } from "../features/finance/recurrence-types";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema } from "../features/finance/planning-types";
 import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
-import { createObligation, updateObligation, getObligation, listObligations, postObligationMovement } from "../features/finance/obligations";
-import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema } from "../features/finance/obligation-types";
+import { createObligation, updateObligation, getObligation, listObligations, postObligationMovement, postObligationPayment, closeObligation, getObligationPaymentHistory } from "../features/finance/obligations";
+import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema, postObligationPaymentSchema, closeObligationSchema, obligationHistorySchema } from "../features/finance/obligation-types";
 import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts } from "../features/finance/goals";
 import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema } from "../features/finance/goal-types";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
@@ -425,9 +425,13 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: listObligationsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listObligations(actor, args) })));
     server.registerTool("get_finance_obligation", {
-      title: "Inspect an obligation", description: "Read a debt or receivable, opening principal, outstanding principal, due date and current version. No cash movement.",
+      title: "Inspect an obligation", description: "Read a debt or receivable, opening, paid, written-off and outstanding principal, status, due date and current version. No cash movement.",
       inputSchema: getObligationSchema, annotations: READ_ONLY,
     }, ({ id, ...args }) => financeResult("finance:read", actor => ({ obligation: getObligation(actor, id, args) })));
+    server.registerTool("get_finance_obligation_history", {
+      title: "Read obligation payment history", description: "Bounded newest-first payment and write-off history. Text and linked cash details require include_details=true.",
+      inputSchema: obligationHistorySchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => getObligationPaymentHistory(actor, id, args)));
     server.registerTool("list_finance_goals", {
       title: "List savings goals", description: "Paginated PHP savings goals with account reservations and achievement, active by default. Goal progress is already included in cash totals. Archived goals preserve released allocation history.",
       inputSchema: listGoalsSchema, annotations: READ_ONLY,
@@ -499,6 +503,10 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       title: "Record actual borrowing or lending", description: "Borrowing adds cash and debt principal; lending removes cash and adds receivable principal. Neither counts as income or spending. Supply an existing obligation_id and version, or a name/optional due_date to create the linked obligation atomically (also requires finance:manage). Requires finance:write, request_id, actual amount/account/transaction_date. Corrections in Activity require both activity version and obligation_version. Delete preserves effects; Revert cancels both.",
       inputSchema: postObligationMovementSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postObligationMovement(actor, args) })));
+    server.registerTool("post_finance_obligation_payment", {
+      title: "Pay debt principal or collect receivable", description: "Record a dated partial principal payment/collection under finance:write. Supply the obligation version. Optionally link one existing compatible income/expense activity by id and current cash_activity_version; account, amount and date must match. Existing history gets no second cash effect. Hidden, reverted, refunded, transfer-linked and fee activities are rejected. Fees and interest are separate ordinary transactions.",
+      inputSchema: postObligationPaymentSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...postObligationPayment(actor, args) })));
     server.registerTool("catch_up_finance_plans", {
       title: "Catch up recurring pending review", description: "Generate at most 1000 pending recurring occurrences through through_date (default today), plus one next upcoming per active schedule. No cash effects. Requires finance:write and request_id. Repeat with fresh request IDs while has_more; identical retries return the original result.",
       inputSchema: catchUpPlansSchema, annotations,
@@ -569,6 +577,10 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       title: "Manage an obligation", description: "Rename, change/clear due_date, archive or restore a definition with its current version. No cash or principal change; archived principal remains in totals. Requires finance:manage and request_id. Correct actual borrowing/lending through Activity.",
       inputSchema: updateObligationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations: { ...MUTATING, idempotentHint: true },
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateObligation(actor, id, args)));
+    server.registerTool("close_finance_obligation", {
+      title: "Write off remaining obligation", description: "Close an open obligation by writing off exactly its remaining principal with an explicit reason. No cash or report effect. Requires finance:manage, request_id and current obligation version.",
+      inputSchema: closeObligationSchema.extend({ id: getObligationSchema.shape.id }), annotations: { ...MUTATING, idempotentHint: true },
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => closeObligation(actor, id, args)));
     const annotations = { ...MUTATING, idempotentHint: true };
     server.registerTool("create_finance_goal", {
       title: "Create savings goal", description: "Create a positive PHP target and optional due date. Requires request_id. Starts without reservations and never moves cash.",

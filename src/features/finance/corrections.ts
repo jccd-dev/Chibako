@@ -55,6 +55,7 @@ export function recordRefund(actor: FinanceActor, expenseId: string, input: unkn
   return financeMutation(actor, request_id, "activity.refund", { id: expenseId, ...payload }, () => {
     const expense = readTransaction(expenseId, true);
     editable(expense, payload.version);
+    if (expense.obligation_payment) throw new FinanceError("Principal payments cannot be refunded as expense activity", 409, "invalid_refund");
     validateRefundLimit(expense, amount);
     activeAccount(payload.account_id, "money");
     const id = randomUUID(), timestamp = now();
@@ -85,6 +86,10 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
     if (operation === "hide") {
       if (record.version !== payload.version) throw new FinanceError("Activity changed; refresh before editing", 409, "version_conflict");
     } else editable(record, payload.version);
+    if (operation === "revert" && obligation && !record.obligation_payment
+      && record.amount_cents > obligation.outstanding_cents) {
+      throw new FinanceError("Reverting this principal activity would make outstanding principal negative", 409, "principal_in_use");
+    }
     if (operation === "revert" && record.linked_record_id) throw new FinanceError("Revert the linked transfer to cancel its fee together", 409, "linked_activity");
     for (const entry of [record, fee]) {
       if (!entry) continue;
@@ -97,7 +102,7 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
     const ids = accountIds([record, fee]);
     if (obligation) bumpObligation(obligation.id);
     const result: CorrectedActivity = { ...outcome(id, ids), ...(plan ? { plan: plan.after } : {}),
-      ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: operation === "revert" ? -record.amount_cents : 0 } : {}) };
+      ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: operation === "revert" ? record.obligation_payment ? record.amount_cents : -record.amount_cents : 0 } : {}) };
     return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(plan ? [plan.after.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: record, fee, expense, ...(plan ? { plan: plan.before } : {}), ...(obligation ? { obligation } : {}) }, after: { transaction: readTransaction(id, true), fee: linkedFee(readTransaction(id, true)), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(plan ? { plan: plan.after } : {}), ...(obligation ? { obligation: result.obligation } : {}) } };
   });
 }
@@ -124,6 +129,11 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     if (before.linked_record_id && (account !== before.account_id || date !== before.transaction_date)) throw new FinanceError("Correct the linked transfer to move its fee together", 409, "linked_activity");
     if (account !== before.account_id) activeAccount(account, before.type === "valuation" ? "asset" : "money");
     if (before.type !== "reconciliation" && before.type !== "valuation" && amount <= 0) throw new FinanceError("Amount must be positive", 400, "invalid_input");
+    if (obligation) {
+      const delta = BigInt(amount) - BigInt(before.amount_cents);
+      const nextOutstanding = BigInt(obligation.outstanding_cents) + (before.obligation_payment ? -delta : delta);
+      if (nextOutstanding < 0n) throw new FinanceError(before.obligation_payment ? "Payment cannot exceed outstanding principal" : "Correction would make outstanding principal negative", 409, before.obligation_payment ? "overpayment" : "principal_in_use");
+    }
     if (before.type === "expense" && amount < before.refunded_cents) throw new FinanceError("Expense cannot be less than its active refunds", 409, "refund_limit");
     let expense: FinanceTransaction | null = null;
     if (before.type === "refund") {
@@ -157,12 +167,13 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     }
     db.prepare(`UPDATE ${table(before)} SET account_id = ?, amount_cents = ?, transaction_date = ?, text = ?, tag_ids = ? WHERE id = ?`)
       .run(account, amount, date, patch.text ?? before.text ?? "", JSON.stringify(tags), id);
+    if (before.obligation_payment) db.prepare("UPDATE finance_obligation_payments SET amount_cents=? WHERE cash_activity_id=?").run(amount, id);
     bump(before);
     if (expense) bump(expense);
     if (obligation) bumpObligation(obligation.id);
     const after = readTransaction(id, true);
     const ids = accountIds([before, fee, after, linkedFee(after)]);
-    const result: CorrectedActivity = { ...outcome(id, ids), ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: exactCents(BigInt(amount) - BigInt(before.amount_cents)) } : {}) };
+    const result: CorrectedActivity = { ...outcome(id, ids), ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: exactCents(before.obligation_payment ? BigInt(before.amount_cents) - BigInt(amount) : BigInt(amount) - BigInt(before.amount_cents)) } : {}) };
     return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: before, fee, expense, ...(obligation ? { obligation } : {}) }, after: { transaction: after, fee: linkedFee(after), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(obligation ? { obligation: result.obligation } : {}) } };
   });
 }

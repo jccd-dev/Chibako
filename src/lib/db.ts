@@ -357,6 +357,17 @@ export function getDb(): Database.Database {
       note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
       PRIMARY KEY (activity_id, note_id)
     ); CREATE INDEX IF NOT EXISTS idx_finance_note_links_note ON finance_note_links(note_id);`);
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_obligation_payments (
+      id TEXT PRIMARY KEY, obligation_id TEXT NOT NULL REFERENCES finance_obligations(id),
+      cash_activity_id TEXT NOT NULL UNIQUE REFERENCES finance_transactions(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+      created_at INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS idx_finance_obligation_payments_obligation ON finance_obligation_payments(obligation_id, created_at, id);
+    CREATE TABLE IF NOT EXISTS finance_obligation_writeoffs (
+      id TEXT PRIMARY KEY, obligation_id TEXT NOT NULL REFERENCES finance_obligations(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+      reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 2000), created_at INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS idx_finance_obligation_writeoffs_obligation ON finance_obligation_writeoffs(obligation_id, created_at, id);`);
     const planColumns = new Set((db.prepare("PRAGMA table_info(finance_plans)").all() as Array<{ name: string }>).map(column => column.name));
     if (!planColumns.has("schedule_id")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_id TEXT REFERENCES finance_schedules(id)");
     if (!planColumns.has("occurrence_date")) db.exec("ALTER TABLE finance_plans ADD COLUMN occurrence_date TEXT");

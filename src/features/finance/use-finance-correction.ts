@@ -24,7 +24,7 @@ export function useFinanceCorrection(record: FinanceTransaction, activity: Finan
   const [feeCategoryId, setFeeCategoryId] = useState("");
   const [feeSubcategoryId, setFeeSubcategoryId] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [confirmation, setConfirmation] = useState<{ action: Exclude<Action, "edit">; input: object } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ action: Action; input: object } | null>(null);
   const [feeLoad, setFeeLoad] = useState(0);
   useEffect(() => {
     let live = true;
@@ -56,8 +56,10 @@ export function useFinanceCorrection(record: FinanceTransaction, activity: Finan
       if (JSON.stringify(tagIds) !== JSON.stringify(record.tag_ids ?? [])) patch.tag_ids = tagIds;
       if (record.type === "transfer" && destinationId !== record.destination_account_id) patch.destination_account_id = destinationId;
       if (record.type === "income" || record.type === "expense") {
-        if ((categoryId || null) !== record.category_id) patch.category_id = categoryId || null;
-        if ((subcategoryId || null) !== record.subcategory_id) patch.subcategory_id = subcategoryId || null;
+        if (!record.obligation_id) {
+          if ((categoryId || null) !== record.category_id) patch.category_id = categoryId || null;
+          if ((subcategoryId || null) !== record.subcategory_id) patch.subcategory_id = subcategoryId || null;
+        }
       }
       if (fee && (feeAmount !== financeDecimal(fee.amount_cents) || (feeCategoryId || null) !== fee.category_id || (feeSubcategoryId || null) !== fee.subcategory_id || patch.account_id || patch.transaction_date)) {
         patch.fee = { version: fee.version, amount: feeAmount, category_id: feeCategoryId || null, subcategory_id: feeSubcategoryId || null };
@@ -86,10 +88,10 @@ export function useFinanceCorrection(record: FinanceTransaction, activity: Finan
     if (result) onSaved(action === "refund" ? result.transaction.id : record.id);
   }
   async function submit() {
-    const action = mode === "refund" ? "refund" : "edit";
+    const action: Action = mode === "refund" ? "refund" : "edit";
     const input = validate(action);
     if (!input) return;
-    if (action === "refund") setConfirmation({ action, input });
+    if (action === "refund" || record.obligation_payment) setConfirmation({ action, input });
     else await execute(action, input);
   }
   function confirmAction(action: "hide" | "revert") {

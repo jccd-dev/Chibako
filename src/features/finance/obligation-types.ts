@@ -33,9 +33,29 @@ export const postObligationMovementSchema = z.object({
     ctx.addIssue({ code: "custom", message: "Supply obligation_id and current version, or a name and optional due_date for a new obligation" });
   }
 });
+export const postObligationPaymentSchema = z.object({
+  request_id: requestId, obligation_id: id, obligation_version: version,
+  cash_activity_id: id.optional(), cash_activity_version: version.optional(),
+  account_id: id, amount: postTransactionSchema.shape.amount, transaction_date: calendarDateSchema,
+  text: postTransactionSchema.shape.text,
+}).strict().superRefine((p, ctx) => {
+  if (p.cash_activity_id ? p.cash_activity_version === undefined : p.cash_activity_version !== undefined) {
+    ctx.addIssue({ code: "custom", message: "Existing cash activity requires its current version" });
+  }
+});
+export const closeObligationSchema = z.object({
+  request_id: requestId, version, amount: postTransactionSchema.shape.amount,
+  reason: z.string().trim().min(1).max(2000),
+}).strict();
+export const obligationHistorySchema = z.object({
+  id, limit: z.number().int().min(1).max(100).default(25),
+  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
+  include_details: z.boolean().default(false),
+}).strict();
 export interface FinanceObligation {
   id: string; kind: z.infer<typeof obligationKindSchema>; name: string; currency: "PHP";
-  opening_principal_cents: number; outstanding_cents: number; due_date: string | null;
+  opening_principal_cents: number; paid_cents: number; written_off_cents: number;
+  outstanding_cents: number; status: "open" | "paid" | "written_off" | "settled"; due_date: string | null;
   overdue: boolean; archived: boolean; version: number; created_at: number; updated_at: number;
 }
 export interface FinanceObligationList {
@@ -46,3 +66,13 @@ export interface PostedObligationMovement extends PostedMovement {
   obligation: FinanceObligation;
   principal_change_cents: number;
 }
+export interface FinanceObligationHistoryEntry {
+  id: string; kind: "payment" | "write_off"; amount_cents: number; transaction_date: string | null;
+  version: number; hidden: boolean; reverted: boolean; cash_activity_id: string | null;
+  text?: string; reason?: string | null;
+  cash_activity?: { id: string; type: "income" | "expense"; account_id: string; account_name: string; amount_cents: number; transaction_date: string; version: number } | null;
+}
+export interface FinanceObligationHistory {
+  entries: FinanceObligationHistoryEntry[]; total: number; limit: number; offset: number;
+}
+export type PostedObligationPayment = PostedObligationMovement;

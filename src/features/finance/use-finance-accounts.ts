@@ -50,7 +50,11 @@ export function useFinanceAccounts() {
     }
   }, [offset, includeArchived]);
 
-  useEffect(() => { void refresh(); return () => { loadSequence.current += 1; }; }, [refresh]);
+  useEffect(() => {
+    const changed = () => { void refresh(); };
+    changed(); window.addEventListener("finance-changed", changed);
+    return () => { loadSequence.current += 1; window.removeEventListener("finance-changed", changed); };
+  }, [refresh]);
 
   async function save(id: string | null, input: Record<string, string | number | boolean>, message: string) {
     if (saving.current) return false;

@@ -14,6 +14,7 @@ import {
 } from "./activity-types";
 
 export function activityTable(record: FinanceTransaction) {
+  if (record.obligation_payment) return "finance_transactions";
   if (record.obligation_id) return "finance_obligation_movements";
   return record.type === "refund" ? "finance_refunds" : record.type === "income" || record.type === "expense" ? "finance_transactions" : "finance_movements";
 }
@@ -36,12 +37,12 @@ const activityRows = `WITH activity AS (
   SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at, hidden, reverted,
     NULL, NULL, NULL, NULL, NULL, NULL, 0 FROM finance_obligation_movements
 )`;
-const transactionSelect = "SELECT t.*, om.obligation_id, o.version AS obligation_version, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id LEFT JOIN finance_obligation_movements om ON om.id = t.id LEFT JOIN finance_obligations o ON o.id = om.obligation_id";
+const transactionSelect = "SELECT t.*, COALESCE(om.obligation_id,op.obligation_id) AS obligation_id, CASE WHEN op.id IS NOT NULL THEN 1 ELSE 0 END AS obligation_payment, o.version AS obligation_version, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id LEFT JOIN finance_obligation_movements om ON om.id = t.id LEFT JOIN finance_obligation_payments op ON op.cash_activity_id=t.id LEFT JOIN finance_obligations o ON o.id = COALESCE(om.obligation_id,op.obligation_id)";
 
-type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids" | "hidden" | "reverted"> & { hidden: number; reverted: number; text: string; tag_ids: string; created_at: number; updated_at: number };
+type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids" | "hidden" | "reverted" | "obligation_payment"> & { hidden: number; reverted: number; obligation_payment: number; text: string; tag_ids: string; created_at: number; updated_at: number };
 function transactionFromRow(row: TransactionRow, details: boolean): FinanceTransaction {
   const { text, tag_ids, created_at, updated_at, ...compact } = row;
-  return { ...compact, hidden: row.hidden === 1, reverted: row.reverted === 1, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
+  return { ...compact, obligation_payment: row.obligation_payment === 1, hidden: row.hidden === 1, reverted: row.reverted === 1, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
 }
 export function readTransaction(id: string, details: boolean): FinanceTransaction {
   const row = getDb().prepare(`${activityRows} ${transactionSelect} WHERE t.id = ?`).get(id) as TransactionRow | undefined;
@@ -105,9 +106,17 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
   for (const [key, operator] of [["date_from", ">="], ["date_to", "<="]] as const) {
     if (query[key]) { clauses.push(`t.transaction_date ${operator} ?`); values.push(query[key]); }
   }
-  if (query.matchable) clauses.push("t.type IN ('income','expense') AND t.reverted = 0 AND t.linked_record_id IS NULL AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id = t.id)");
+  if (query.matchable) clauses.push("t.type IN ('income','expense') AND t.reverted = 0 AND t.linked_record_id IS NULL AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id = t.id) AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments op WHERE op.cash_activity_id=t.id)");
+  if (query.payment_matchable) clauses.push(`t.type IN ('income','expense') AND t.hidden = 0 AND t.reverted = 0 AND t.linked_record_id IS NULL
+    AND EXISTS (SELECT 1 FROM finance_accounts a WHERE a.id=t.account_id AND a.kind='money' AND a.archived=0)
+    AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id=t.id)
+    AND NOT EXISTS (SELECT 1 FROM finance_refunds r WHERE r.expense_id=t.id)
+    AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id=t.id)`);
   if (query.account_id) { clauses.push("(t.account_id = ? OR t.destination_account_id = ?)"); values.push(query.account_id, query.account_id); }
-  if (query.obligation_id) { clauses.push("EXISTS (SELECT 1 FROM finance_obligation_movements om WHERE om.id = t.id AND om.obligation_id = ?)"); values.push(query.obligation_id); }
+  if (query.obligation_id) {
+    clauses.push("(EXISTS (SELECT 1 FROM finance_obligation_movements om WHERE om.id = t.id AND om.obligation_id = ?) OR EXISTS (SELECT 1 FROM finance_obligation_payments op WHERE op.cash_activity_id = t.id AND op.obligation_id = ?))");
+    values.push(query.obligation_id, query.obligation_id);
+  }
   if (query.type) { clauses.push("t.type = ?"); values.push(query.type); }
   if (query.category_id) { clauses.push("(t.category_id = ? OR t.subcategory_id = ?)"); values.push(query.category_id, query.category_id); }
   if (query.q) {
@@ -130,7 +139,7 @@ export function getActivityTotals(actor: FinanceActor, input: unknown = {}): Act
   const date = new Date();
   const month = query.month ?? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   const totals = { income: 0n, expense: 0n };
-  const rows = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE reverted = 0 AND transaction_date >= ? AND transaction_date <= ?")
+  const rows = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE reverted = 0 AND transaction_date >= ? AND transaction_date <= ? AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id=finance_transactions.id)")
     .safeIntegers().iterate(`${month}-01`, `${month}-31`) as Iterable<{ type: "income" | "expense"; amount_cents: bigint }>;
   for (const row of rows) totals[row.type] += row.amount_cents;
   const refunds = getDb().prepare("SELECT amount_cents FROM finance_refunds WHERE reverted = 0 AND transaction_date >= ? AND transaction_date <= ?")

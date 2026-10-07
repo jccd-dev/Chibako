@@ -62,6 +62,7 @@ export function getFinanceReport(actor: FinanceActor, input: unknown = {}): Fina
     const months = new Map(query.months.map(month => [month, { income: 0n, spending: 0n }]));
     const spending = new Map<string | null, Map<string, bigint>>();
     const rows = db.prepare(`SELECT type, category_id, amount_cents, transaction_date FROM finance_transactions WHERE reverted = 0 AND transaction_date BETWEEN ? AND ?
+      AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id=finance_transactions.id)
       UNION ALL SELECT 'refund', t.category_id, -r.amount_cents, r.transaction_date FROM finance_refunds r JOIN finance_transactions t ON t.id = r.expense_id WHERE r.reverted = 0 AND t.reverted = 0 AND r.transaction_date BETWEEN ? AND ?`)
       .safeIntegers().iterate(query.from, query.to, query.from, query.to) as Iterable<{ type: string; category_id: string | null; amount_cents: bigint; transaction_date: string }>;
     for (const row of rows) {

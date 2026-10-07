@@ -39,6 +39,7 @@ export const listTransactionsSchema = z.object({
   category_id: id.optional(),
   type: activityTypeSchema.optional(),
   matchable: z.boolean().default(false),
+  payment_matchable: z.boolean().default(false),
   hidden: z.enum(["false", "true", "all"]).default("false"),
   reverted: z.enum(["false", "true", "all"]).default("false"),
   include_details: z.boolean().default(false),
@@ -68,6 +69,7 @@ export interface FinanceTransaction {
   destination_account_id?: string | null; destination_account_name?: string | null;
   linked_record_id?: string | null; fee_transaction_id?: string | null;
   obligation_id?: string | null; obligation_version?: number | null;
+  obligation_payment?: boolean;
   compared_balance_cents?: number | null; actual_balance_cents?: number | null;
   hidden: boolean; reverted: boolean; expense_id: string | null; refunded_cents: number;
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;
