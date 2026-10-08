@@ -17,6 +17,7 @@ import { useFinancePlanning } from "@/features/finance/use-finance-planning";
 import { useFinanceReports } from "@/features/finance/use-finance-reports";
 import { FinanceAdjustment } from "./FinanceAdjustment";
 import { FinanceClassifications } from "./FinanceClassifications";
+import { FinanceImportInspection } from "./FinanceImportInspection";
 import { FinanceOverviewDashboard } from "./FinanceOverviewDashboard";
 import {
   decimalPHP as decimal,
@@ -65,6 +66,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     window.dispatchEvent(new Event("finance-changed"));
   }, [activity.notice, finance.notice, planning.notice]);
   const [transactionOpen, setTransactionOpen] = useState(false);
+  const [inspectionOpen, setInspectionOpen] = useState(false);
   const [adjusting, setAdjusting] = useState<FinanceAccount | null>(null);
   useEffect(() => {
     if (finance.notice) void activity.refreshOptions();
@@ -389,6 +391,29 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
             </nav>
           )}
           <FinanceClassifications activity={activity} />
+          <section className="mt-8 border-t border-border pt-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">Source inspection</h3>
+                <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                  Choose a Tarsi backup and review its structure without writing
+                  anything. This is not a reconciled preview; no import is
+                  available here.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                className={control}
+                onClick={() => setInspectionOpen(true)}
+              >
+                Inspect backup
+              </Button>
+            </div>
+          </section>
+          <FinanceImportInspection
+            open={inspectionOpen}
+            onClose={() => setInspectionOpen(false)}
+          />
         </TabsContent>
       </Tabs>
 

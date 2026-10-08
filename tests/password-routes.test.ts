@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import Database from "better-sqlite3";
 
 const password = "correct horse battery staple";
 const nextPassword = "new correct horse battery staple";
@@ -103,6 +104,41 @@ test("setup, login, password change, and session invalidation preserve route con
     }, setupCookie);
     assert.equal(createdKey.status, 201);
     const apiKey = (await createdKey.json()).key as string;
+    const inspectionPath = "/api/finance/import/inspect";
+    const syntheticBackup = { app: "Tarsi", data: { accounts: [], expenses: [] } };
+    const inspectionDb = new Database(join(vault, "brain.db"), { readonly: true });
+    try {
+      const before = inspectionDb.serialize();
+      const inspected = await post(baseUrl, inspectionPath, syntheticBackup, setupCookie);
+      assert.equal(inspected.status, 200);
+      assert.equal(inspected.headers.get("cache-control"), "no-store");
+      const report = await inspected.json();
+      assert.equal(report.stage, "source-inspection");
+      assert.equal(report.eligible, true, "seeded Notes do not block finance inspection");
+      for (const authorization of [`Bearer ${apiKey}`, "Bearer invalid"]) {
+        const denied = await fetch(`${baseUrl}${inspectionPath}`, {
+          method: "POST", headers: { Cookie: setupCookie, Authorization: authorization, "Content-Type": "application/json" },
+          body: JSON.stringify(syntheticBackup),
+        });
+        assert.equal(denied.status, 403);
+        assert.equal((await denied.json()).code, "owner_required");
+      }
+      assert.equal((await post(baseUrl, inspectionPath, syntheticBackup)).status, 401);
+      const foreign = await fetch(`${baseUrl}${inspectionPath}`, {
+        method: "POST", headers: { Cookie: setupCookie, Origin: "https://foreign.test", "Content-Type": "application/json" },
+        body: JSON.stringify(syntheticBackup),
+      });
+      assert.equal(foreign.status, 403);
+      const malformed = await fetch(`${baseUrl}${inspectionPath}`, {
+        method: "POST", headers: { Cookie: setupCookie, "Content-Type": "application/json" }, body: "{",
+      });
+      assert.equal(malformed.status, 400);
+      const oversized = await fetch(`${baseUrl}${inspectionPath}`, {
+        method: "POST", headers: { Cookie: setupCookie, "Content-Type": "application/json" }, body: " ".repeat(8 * 1024 * 1024 + 1),
+      });
+      assert.equal(oversized.status, 413);
+      assert.deepEqual(inspectionDb.serialize(), before, "owner inspection and denied requests leave the Vault unchanged");
+    } finally { inspectionDb.close(); }
     const mcp = await fetch(`${baseUrl}/mcp`, {
       method: "POST",
       headers: {
