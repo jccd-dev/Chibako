@@ -137,6 +137,27 @@ test("setup, login, password change, and session invalidation preserve route con
         method: "POST", headers: { Cookie: setupCookie, "Content-Type": "application/json" }, body: " ".repeat(8 * 1024 * 1024 + 1),
       });
       assert.equal(oversized.status, 413);
+      const previewPath = `${inspectionPath}?preview=1`;
+      const previewBody = { backup: syntheticBackup, exclusions: [], acknowledged_exclusions: [] };
+      const preview = await post(baseUrl, previewPath, previewBody, setupCookie);
+      assert.equal(preview.status, 200);
+      assert.equal(preview.headers.get("cache-control"), "no-store");
+      const proposal = await preview.json();
+      assert.equal(proposal.stage, "reconciled-preview");
+      assert.equal(proposal.can_approve, true);
+      assert.match(proposal.commit_notice, /recoverable backup/);
+      assert.equal((await post(baseUrl, previewPath, { ...previewBody, can_approve: true }, setupCookie)).status, 400);
+      assert.equal((await post(baseUrl, previewPath, previewBody)).status, 401);
+      const agentPreview = await fetch(`${baseUrl}${previewPath}`, {
+        method: "POST", headers: { Cookie: setupCookie, Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(previewBody),
+      });
+      assert.equal(agentPreview.status, 403);
+      const invalidPreview = await post(baseUrl, previewPath, { backup: { app: "Tarsi", data: {
+        accounts: [{ id: "TEST cash", name: "TEST cash", type: "debit", currency: "PHP", balance: 1.001 }],
+      } } }, setupCookie);
+      assert.equal(invalidPreview.status, 200);
+      assert.equal((await invalidPreview.json()).can_approve, false);
       assert.deepEqual(inspectionDb.serialize(), before, "owner inspection and denied requests leave the Vault unchanged");
     } finally { inspectionDb.close(); }
     const mcp = await fetch(`${baseUrl}/mcp`, {

@@ -394,11 +394,14 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           <section className="mt-8 border-t border-border pt-5">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h3 className="text-lg font-semibold">Source inspection</h3>
+                <h3 className="text-lg font-semibold">
+                  Tarsi migration preview
+                </h3>
                 <p className="mt-1 max-w-prose text-sm text-muted-foreground">
                   Choose a Tarsi backup and review its structure without writing
-                  anything. This is not a reconciled preview; no import is
-                  available here.
+                  anything. Review reconciled balances, mappings, and
+                  exclusions. Commit requires a recoverable backup and separate
+                  confirmation.
                 </p>
               </div>
               <Button

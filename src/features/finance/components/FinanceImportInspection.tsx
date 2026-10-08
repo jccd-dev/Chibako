@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import { financeControl as control, financeSheet } from "@/features/finance/presentation";
 import { useFinanceImportInspection } from "@/features/finance/use-finance-import-inspection";
+import { FinanceImportPreview } from "@/features/finance/components/FinanceImportPreview";
 import { TARSI_BACKUP_MAX_BYTES } from "@/features/finance/import-inspection-types";
 import type { TarsiInspection } from "@/features/finance/import-inspection-types";
 
@@ -43,7 +44,7 @@ export function FinanceImportInspection({
   const limitLabel = formatBytes(TARSI_BACKUP_MAX_BYTES);
 
   function close(nextOpen: boolean) {
-    if (nextOpen || inspection.busy) return;
+    if (nextOpen || inspection.busy || inspection.previewBusy) return;
     inspection.reset();
     onClose();
   }
@@ -77,9 +78,9 @@ export function FinanceImportInspection({
         <SheetHeader className="border-b border-border p-6">
           <SheetTitle>Source inspection</SheetTitle>
           <SheetDescription className="text-sm">
-            Choose a Tarsi backup to review its structure. Nothing is written to
-            your Vault. The file is sent to this server for inspection and is
-            never saved.
+            Choose a Tarsi backup to review its structure and preview a
+            reconciled migration. Nothing is written to your Vault. The file is
+            sent to this server for inspection and is never saved.
           </SheetDescription>
         </SheetHeader>
         <div className="flex flex-1 flex-col gap-6 p-6">
@@ -91,7 +92,7 @@ export function FinanceImportInspection({
             tabIndex={-1}
             accept=".json,application/json"
             className="sr-only"
-            disabled={inspection.busy}
+            disabled={inspection.busy || inspection.previewBusy}
             onChange={change}
           />
           <div className="grid gap-2">
@@ -99,7 +100,7 @@ export function FinanceImportInspection({
               type="button"
               variant="outline"
               className={control}
-              disabled={inspection.busy}
+              disabled={inspection.busy || inspection.previewBusy}
               onClick={() => inputRef.current?.click()}
             >
               {inspection.fileName
@@ -107,8 +108,8 @@ export function FinanceImportInspection({
                 : "Choose backup file"}
             </Button>
             <p className="text-sm text-muted-foreground">
-              JSON backups up to {limitLabel}. This is a read-only inspection,
-              not a reconciled preview or import.
+              JSON backups up to {limitLabel}. Inspection is read-only;
+              afterwards you can request a reconciled migration preview.
             </p>
             {inspection.fileName && (
               <p className="text-sm">
@@ -182,9 +183,55 @@ export function FinanceImportInspection({
                     : "Progression is blocked by the issues listed below."}
                 </p>
                 <p className="text-muted-foreground">
-                  No reconciled preview or import is available in this panel.
+                  Choose Preview migration below to review the server-derived
+                  reconciled proposal. Nothing is written to your Vault at any
+                  step, and commit is a separate later step.
                 </p>
               </section>
+
+              {!inspection.preview && (
+                <div className="grid gap-2">
+                  <Button
+                    type="button"
+                    className={control}
+                    disabled={inspection.busy || inspection.previewBusy}
+                    onClick={() => void inspection.startPreview()}
+                  >
+                    Preview migration
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Prepares a reconciled proposal from this backup, even while
+                    blockers remain. The file stays in this browser tab's memory
+                    until you close the panel or choose a different file.
+                  </p>
+                  {inspection.previewBusy && (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      Preparing preview…
+                    </p>
+                  )}
+                  {inspection.previewError && (
+                    <Alert>
+                      <AlertDescription>
+                        {inspection.previewError}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+              )}
+
+              {inspection.preview && (
+                <FinanceImportPreview
+                  preview={inspection.preview}
+                  busy={inspection.previewBusy}
+                  error={inspection.previewError}
+                  needsUpdate={inspection.previewNeedsUpdate}
+                  exclusions={inspection.exclusions}
+                  acknowledged={inspection.acknowledged}
+                  onUpdate={() => void inspection.updatePreview()}
+                  onToggleExclusion={inspection.toggleExclusion}
+                  onToggleAcknowledgment={inspection.toggleAcknowledgment}
+                />
+              )}
 
               <details>
                 <summary className={summaryClass}>
@@ -387,7 +434,7 @@ export function FinanceImportInspection({
               type="button"
               variant="outline"
               className={control}
-              disabled={inspection.busy}
+              disabled={inspection.busy || inspection.previewBusy}
               onClick={() => close(false)}
             >
               Close

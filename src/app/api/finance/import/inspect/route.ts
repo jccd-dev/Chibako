@@ -2,6 +2,8 @@ import { getCookieToken, getSession } from "@/lib/auth";
 import { inspectTarsiBackup } from "@/features/finance/import-inspection";
 import { TARSI_BACKUP_MAX_BYTES } from "@/features/finance/import-inspection-types";
 import { FinanceError } from "@/features/finance/types";
+import { previewTarsiBackup } from "@/features/finance/import-preview";
+import { isSourceObject } from "@/features/finance/import-source-format";
 
 export const runtime = "nodejs";
 
@@ -38,6 +40,11 @@ export async function POST(request: Request): Promise<Response> {
     let backup: unknown;
     try { backup = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
     catch { throw new FinanceError("Invalid JSON backup", 400, "invalid_input"); }
+    if (new URL(request.url).searchParams.get("preview") === "1") {
+      if (!isSourceObject(backup) || !Object.hasOwn(backup, "backup")) throw new FinanceError("Choose a backup for preview", 400, "invalid_input");
+      const { backup: source, ...options } = backup;
+      return Response.json(previewTarsiBackup({ kind: "owner" }, source, options), { headers });
+    }
     return Response.json(inspectTarsiBackup({ kind: "owner" }, backup), { headers });
   } catch (error) {
     if (error instanceof FinanceError) return Response.json({ error: error.message, code: error.code }, { status: error.status, headers });
