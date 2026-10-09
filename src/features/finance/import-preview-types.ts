@@ -17,6 +17,7 @@ export interface TarsiProposalRecord {
 
 export interface TarsiPreview {
   stage: "reconciled-preview";
+  proposal_hash: string;
   inspection: TarsiInspection;
   can_approve: boolean;
   issues: TarsiInspectionIssue[];

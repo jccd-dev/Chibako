@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { financeJson } from "./client-json";
+import { evaluateTarsiCommitGate } from "./import-commit-gate";
 import { TARSI_BACKUP_MAX_BYTES } from "./import-inspection-types";
 import type { TarsiInspection } from "./import-inspection-types";
 import type { TarsiPreview } from "./import-preview-types";
+import { useFinanceImportCommit } from "./use-finance-import-commit";
 
 export function useFinanceImportInspection() {
   const [fileName, setFileName] = useState("");
@@ -18,8 +20,23 @@ export function useFinanceImportInspection() {
   const [previewNeedsUpdate, setPreviewNeedsUpdate] = useState(false);
   const [exclusions, setExclusions] = useState<string[]>([]);
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
+  const [confirmed, setConfirmed] = useState(false);
   const backup = useRef<unknown>(null);
   const sequence = useRef(0);
+  const getSource = useCallback(() => backup.current, []);
+  const invalidateConfirmation = useCallback(() => setConfirmed(false), []);
+  const commitFlow = useFinanceImportCommit({
+    getSource,
+    preview,
+    exclusions,
+    acknowledged,
+    confirmed,
+    onBackupInvalidated: invalidateConfirmation,
+  });
+  const resetCommit = commitFlow.reset;
+  const commitActive = commitFlow.busy;
+  const committed = commitFlow.committed;
+  const locked = commitActive || committed;
 
   useEffect(
     () => () => {
@@ -36,9 +53,12 @@ export function useFinanceImportInspection() {
     setPreviewNeedsUpdate(false);
     setExclusions([]);
     setAcknowledged([]);
-  }, []);
+    setConfirmed(false);
+    resetCommit();
+  }, [resetCommit]);
 
   const reset = useCallback(() => {
+    if (commitActive) return;
     sequence.current++;
     setFileName("");
     setFileSize(0);
@@ -46,10 +66,11 @@ export function useFinanceImportInspection() {
     setError("");
     setBusy(false);
     clearPreview();
-  }, [clearPreview]);
+  }, [clearPreview, commitActive]);
 
   const inspect = useCallback(
     async (file: File) => {
+      if (locked) return;
       const current = ++sequence.current;
       setFileName(file.name);
       setFileSize(file.size);
@@ -100,7 +121,7 @@ export function useFinanceImportInspection() {
         if (current === sequence.current) setBusy(false);
       }
     },
-    [clearPreview],
+    [clearPreview, locked],
   );
 
   const requestPreview = useCallback(
@@ -108,11 +129,13 @@ export function useFinanceImportInspection() {
       exclusions: string[];
       acknowledged_exclusions: string[];
     }): Promise<TarsiPreview | null> => {
-      if (!backup.current) return null;
+      if (!backup.current || locked) return null;
       const current = ++sequence.current;
       setPreviewBusy(true);
       setPreviewError("");
       setPreviewNeedsUpdate(true);
+      setConfirmed(false);
+      resetCommit();
       try {
         const result = await fetch("/api/finance/import/inspect?preview=1", {
           method: "POST",
@@ -126,6 +149,7 @@ export function useFinanceImportInspection() {
         if (current === sequence.current) {
           setPreview(result);
           setPreviewNeedsUpdate(false);
+          setConfirmed(false);
           return result;
         }
       } catch (thrown) {
@@ -141,7 +165,7 @@ export function useFinanceImportInspection() {
       }
       return null;
     },
-    [],
+    [locked, resetCommit],
   );
 
   const startPreview = useCallback(async () => {
@@ -172,7 +196,10 @@ export function useFinanceImportInspection() {
   }, [requestPreview, exclusions, acknowledged]);
 
   const toggleExclusion = useCallback((path: string) => {
+    if (locked) return;
     setPreviewNeedsUpdate(true);
+    setConfirmed(false);
+    resetCommit();
     setPreviewError("");
     setAcknowledged(prev => prev.filter(row => row !== path
       && !row.startsWith(`${path}.`) && !row.startsWith(`${path}[`)
@@ -182,16 +209,38 @@ export function useFinanceImportInspection() {
         ? prev.filter(row => row !== path)
         : [...prev, path],
     );
-  }, []);
+  }, [locked, resetCommit]);
 
   const toggleAcknowledgment = useCallback((path: string) => {
+    if (locked) return;
     setPreviewNeedsUpdate(true);
+    setConfirmed(false);
+    resetCommit();
     setAcknowledged(prev =>
       prev.includes(path)
         ? prev.filter(row => row !== path)
         : [...prev, path],
     );
-  }, []);
+  }, [locked, resetCommit]);
+
+  const toggleConfirmed = useCallback(() => {
+    if (locked) return;
+    setConfirmed(prev => !prev);
+  }, [locked]);
+
+  const commitGate = evaluateTarsiCommitGate({
+    preview,
+    needsUpdate: previewNeedsUpdate,
+    busy: previewBusy || commitActive,
+    acknowledged,
+    backupVerified: commitFlow.backup !== null,
+    confirmed,
+  });
+
+  const commitNow = useCallback(async () => {
+    if (!commitGate.ready || locked) return null;
+    return commitFlow.commit();
+  }, [commitFlow, commitGate.ready, locked]);
 
   return {
     fileName,
@@ -207,9 +256,22 @@ export function useFinanceImportInspection() {
     previewNeedsUpdate,
     exclusions,
     acknowledged,
+    confirmed,
+    commitGate,
     startPreview,
     updatePreview,
     toggleExclusion,
     toggleAcknowledgment,
+    toggleConfirmed,
+    backup: commitFlow.backup,
+    backupBusy: commitFlow.backupBusy,
+    backupError: commitFlow.backupError,
+    createBackup: commitFlow.createBackup,
+    commitBusy: commitFlow.commitBusy,
+    commitError: commitFlow.commitError,
+    commitResult: commitFlow.result,
+    committed,
+    commitNow,
+    locked,
   };
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { formatPHP, financeControl as control } from "@/features/finance/presentation";
@@ -88,9 +89,11 @@ export function FinanceImportPreview({
   needsUpdate,
   exclusions,
   acknowledged,
+  locked,
   onUpdate,
   onToggleExclusion,
   onToggleAcknowledgment,
+  commit,
 }: {
   preview: TarsiPreview;
   busy: boolean;
@@ -98,9 +101,11 @@ export function FinanceImportPreview({
   needsUpdate: boolean;
   exclusions: string[];
   acknowledged: string[];
+  locked: boolean;
   onUpdate: () => void;
   onToggleExclusion: (path: string) => void;
   onToggleAcknowledgment: (path: string) => void;
+  commit: ReactNode;
 }) {
   const totals = preview.counts.reduce(
     (sum, row) => ({
@@ -122,7 +127,7 @@ export function FinanceImportPreview({
           Server decision:{" "}
           <strong>{needsUpdate ? "update required" : preview.can_approve ? "ready for approval" : "not approvable yet"}</strong>.
           {preview.can_approve && !needsUpdate
-            ? " Approval and commit are separate later steps."
+            ? " Create a verified backup, then confirm and commit below."
             : " Settle the blockers, exclusions, and acknowledgments below, then update the preview."}
         </p>
         <p className="tabular-nums">
@@ -311,7 +316,7 @@ export function FinanceImportPreview({
           Exclusions and acknowledgments
         </summary>
         {preview.exclusion_choices.length > 0 && (
-          <fieldset className="mt-3 grid gap-1" disabled={busy}>
+          <fieldset className="mt-3 grid gap-1" disabled={busy || locked}>
             <legend className="text-sm font-medium">Explicit exclusions</legend>
             <p className="text-sm text-muted-foreground">
               Leave chosen source records or unsupported data out of this
@@ -339,7 +344,7 @@ export function FinanceImportPreview({
           </fieldset>
         )}
         {preview.exclusions.length > 0 && (
-          <fieldset className="mt-4 grid gap-1" disabled={busy}>
+          <fieldset className="mt-4 grid gap-1" disabled={busy || locked}>
             <legend className="text-sm font-medium">
               Exclusion acknowledgments
             </legend>
@@ -378,7 +383,7 @@ export function FinanceImportPreview({
             type="button"
             variant="outline"
             className={control}
-            disabled={busy}
+            disabled={busy || locked}
             onClick={onUpdate}
           >
             Update preview
@@ -389,6 +394,8 @@ export function FinanceImportPreview({
           </p>
         </div>
       </details>
+
+      {commit}
     </section>
   );
 }

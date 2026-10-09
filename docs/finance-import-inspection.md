@@ -30,7 +30,7 @@ Inspection remains available to explain a blocked source or destination.
 returns a non-cacheable `source-inspection` report. It requires an authenticated
 owner session and rejects bearer credentials, including when an owner cookie is
 also present. The portable capability independently rejects keyed and trusted
-local agents. There is no MCP inspection, commit, or restore tool.
+local agents. There is no MCP inspection, backup, commit, or restore tool.
 
 Capability tests use synthetic backups and disposable SQLite Vaults. Owner HTTP
 checks reuse the existing disposable password-route server and verify unchanged
@@ -58,5 +58,54 @@ finance is empty, all blockers are settled, and every exclusion is acknowledged.
 and returns a non-cacheable `reconciled-preview` report. Review choices are checked
 server-side against that backup; unknown paths and extra review options are rejected.
 Source and exception details remain private to the owner response and client memory.
-Commit requires a recoverable backup and separate owner confirmation; this panel
-has no commit action. Never commit a personal backup or use it as a test fixture.
+The backend commit contract is available for the owner workflow to call:
+
+- `POST /api/finance/import/backup` creates and verifies a private SQLite Vault
+  snapshot. It returns `{ id, sha256, size_bytes, created_at, verified }`.
+- `GET /api/finance/import/backup/{id}` downloads that verified SQLite file.
+- `POST /api/finance/import/recovery/verify` accepts `{ request_id, backup_id }`.
+  It restores a verified backup copy into a server-created temporary Vault,
+  checks SQLite integrity and compares the complete Notes/finance snapshot, then
+  returns `integrity_check: "ok"`, `snapshot_matches: true`, per-table row counts,
+  and whether the live Vault differs from that backup. It saves an owner-only
+  retry record beside the private backup and does not change the live Vault. If the live Vault changed, those
+  later Notes and finance changes must be reconciled before any offline restore.
+- `POST /api/finance/import/commit` accepts `{ request_id, backup_id,
+  proposal_hash, backup, exclusions?, acknowledged_exclusions?,
+  final_confirmation: true }`. `proposal_hash` comes from the preview response.
+  The server rechecks Vault eligibility, rebuilds the proposal from the supplied
+  source and review choices, and requires the backup to still match Notes and
+  finance data before committing.
+
+The commit response contains `migration_id`, source and proposal hashes, counts
+for imported/skipped/excluded source records, per-record outcomes and reasons,
+reconciled balances, the source/target identities and paused state of imported
+schedules, starting progress with source/target identities for goals and
+obligations, relationship-preservation entries, and acknowledged exclusions.
+Each relationship entry identifies the source record/path and referenced source
+record, includes a native referenced-record ID when one exists, and states that
+the original relationship remains in private `source_json` metadata when Finance
+has no matching link field or capability. Such entries do not imply a live Finance
+link. Empty optional due, target, end, and recurring-due dates are stored as null;
+nonempty optional dates must be valid calendar days. Nested contribution, borrowing,
+payment, advance, collection, and mutual-offset rows each receive a private
+skipped outcome that links back to the parent source ID and explains that
+starting progress is preserved without replaying historical cash. Explicitly
+excluded non-object array values also receive outcomes using their source path
+and a safe index-based identity. Commit is owner-session-only,
+uses `request_id` for idempotent retries, and atomically writes finance rows,
+migration outcomes, request bookkeeping and audit. Notes are never changed and
+finance-to-Note links are not created. Stale proposals, changed Vault data,
+unacknowledged exclusions and nonempty finance are rejected. Backup creation,
+download and commit reject bearer-authenticated requests, including trusted-local
+MCP at the capability boundary. No MCP import or restore tool is exposed. Backup
+verification is an actual disposable-Vault restore, not a read-only open of the
+backup file. No in-app live restore is exposed. An offline restore must first
+create a current backup, compare current Notes and finance data with the recovery
+backup, and reconcile later changes; never overwrite the live Vault blindly.
+Recovery verification detects changes across all SQLite tables, including
+settings, credentials and observation data, because offline restoration replaces
+the whole database. It reports only whether later changes exist, never credential
+values.
+
+Never commit a personal backup or use it as a test fixture.

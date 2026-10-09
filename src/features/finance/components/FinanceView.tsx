@@ -415,7 +415,13 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           </section>
           <FinanceImportInspection
             open={inspectionOpen}
-            onClose={() => setInspectionOpen(false)}
+            onClose={(committed) => {
+              setInspectionOpen(false);
+              if (committed) {
+                void Promise.all([refreshAfterPlan(), activity.refreshOptions(), planning.refresh()]);
+                window.dispatchEvent(new Event("finance-changed"));
+              }
+            }}
           />
         </TabsContent>
       </Tabs>

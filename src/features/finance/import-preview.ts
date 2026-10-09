@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { inspectTarsiBackup } from "./import-inspection";
 import { mapTarsiRecord } from "./import-preview-mapping";
@@ -53,7 +54,7 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
   const excluded = new Set([...requested].filter(path => ![...requested].some(parent => parent !== path && within(path, parent))));
   const acknowledged = new Set(parsed.data.acknowledged_exclusions);
   const report: TarsiPreview = {
-    stage: "reconciled-preview", inspection, can_approve: false, issues: [], counts: [], records: [], balances: [],
+    stage: "reconciled-preview", proposal_hash: "", inspection, can_approve: false, issues: [], counts: [], records: [], balances: [],
     exclusions: [], exclusion_choices: [], commit_notice: commitNotice,
   };
   const issue = (code: string, path: string, message: string) => report.issues.push({ code, path, message, severity: "blocker" });
@@ -93,7 +94,15 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
     report.issues.push(original);
   }
   for (const [collection, rows] of Object.entries(selected)) {
-    if (!Array.isArray(rows) || ["profiles", "profileMetas"].includes(collection)) continue;
+    if (["profiles", "profileMetas"].includes(collection)) continue;
+    if (!Array.isArray(rows)) {
+      if (!Object.hasOwn(sourceFields, collection) && isExcluded(collection)) {
+        report.counts.push({ collection, accepted: 0, skipped: 0, excluded: 1, blocked: 0 });
+        report.records.push({ collection, source_id: collection, path: collection, status: "excluded",
+          source: isSourceObject(rows) ? structuredClone(rows) : { value: rows }, target: {}, effects: [] });
+      }
+      continue;
+    }
     const count = { collection, accepted: 0, skipped: 0, excluded: 0, blocked: 0 };
     report.counts.push(count);
     for (const [index, row] of rows.entries()) {
@@ -110,7 +119,7 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
       }
       if (isExcluded(path)) {
         count.excluded++;
-        if (isSourceObject(row)) report.records.push({ collection, source_id: typeof row.id === "string" ? row.id : "", path, status: "excluded", source: structuredClone(row), target: {}, effects: [] });
+        report.records.push({ collection, source_id: isSourceObject(row) && typeof row.id === "string" ? row.id : `row:${index}`, path, status: "excluded", source: isSourceObject(row) ? structuredClone(row) : { value: structuredClone(row) }, target: {}, effects: [] });
         continue;
       }
       if (!isSourceObject(row)) { count.blocked++; continue; }
@@ -191,5 +200,9 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
   for (const count of report.counts) for (const record of report.records.filter(row => row.collection === count.collection && row.status !== "excluded")) count[record.status]++;
   report.exclusion_choices = [...choices].map(([path, label]) => ({ path, label }));
   report.can_approve = inspection.eligible && report.issues.length === 0 && report.counts.every(count => count.blocked === 0) && report.exclusions.every(item => item.acknowledged);
+  report.proposal_hash = createHash("sha256").update(JSON.stringify({
+    inspection: report.inspection, can_approve: report.can_approve, issues: report.issues,
+    counts: report.counts, records: report.records, balances: report.balances, exclusions: report.exclusions,
+  })).digest("hex");
   return report;
 }

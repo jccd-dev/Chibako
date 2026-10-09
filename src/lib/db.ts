@@ -286,6 +286,7 @@ const MIGRATIONS: string[] = [
     kind TEXT NOT NULL CHECK (kind IN ('debt','receivable')),
     name TEXT NOT NULL,
     opening_principal_cents INTEGER NOT NULL CHECK (typeof(opening_principal_cents) = 'integer' AND opening_principal_cents BETWEEN 0 AND 9007199254740991),
+    starting_progress_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(starting_progress_cents) = 'integer' AND starting_progress_cents BETWEEN 0 AND opening_principal_cents),
     due_date TEXT,
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0,1)),
     version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
@@ -368,6 +369,16 @@ export function getDb(): Database.Database {
       amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
       reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 2000), created_at INTEGER NOT NULL
     ); CREATE INDEX IF NOT EXISTS idx_finance_obligation_writeoffs_obligation ON finance_obligation_writeoffs(obligation_id, created_at, id);`);
+    const obligationColumns = new Set((db.prepare("PRAGMA table_info(finance_obligations)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!obligationColumns.has("starting_progress_cents")) db.exec("ALTER TABLE finance_obligations ADD COLUMN starting_progress_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(starting_progress_cents) = 'integer' AND starting_progress_cents BETWEEN 0 AND opening_principal_cents)");
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_import_migrations (
+      id TEXT PRIMARY KEY, source_hash TEXT NOT NULL UNIQUE, proposal_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL, result_json TEXT NOT NULL
+    ); CREATE TABLE IF NOT EXISTS finance_import_records (
+      migration_id TEXT NOT NULL REFERENCES finance_import_migrations(id), collection TEXT NOT NULL,
+      source_id TEXT NOT NULL, source_path TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('imported','skipped','excluded')),
+      reason TEXT, source_json TEXT NOT NULL, PRIMARY KEY (migration_id,source_path)
+    ); CREATE INDEX IF NOT EXISTS idx_finance_import_records_status ON finance_import_records(migration_id,status,collection);`);
     const planColumns = new Set((db.prepare("PRAGMA table_info(finance_plans)").all() as Array<{ name: string }>).map(column => column.name));
     if (!planColumns.has("schedule_id")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_id TEXT REFERENCES finance_schedules(id)");
     if (!planColumns.has("occurrence_date")) db.exec("ALTER TABLE finance_plans ADD COLUMN occurrence_date TEXT");

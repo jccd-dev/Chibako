@@ -10,15 +10,22 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { financeControl as control, financeSheet } from "@/features/finance/presentation";
+import {
+  financeControl as control,
+  financeSheet,
+} from "@/features/finance/presentation";
 import { useFinanceImportInspection } from "@/features/finance/use-finance-import-inspection";
 import { FinanceImportPreview } from "@/features/finance/components/FinanceImportPreview";
+import { FinanceImportCommit } from "@/features/finance/components/FinanceImportCommit";
 import { TARSI_BACKUP_MAX_BYTES } from "@/features/finance/import-inspection-types";
 import type { TarsiInspection } from "@/features/finance/import-inspection-types";
 
 const summaryClass =
   "min-h-11 cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-ring";
-const dateStatusLabels: Record<TarsiInspection["dates"][number]["status"], string> = {
+const dateStatusLabels: Record<
+  TarsiInspection["dates"][number]["status"],
+  string
+> = {
   "calendar-day": "Explicit calendar day, kept as written",
   timestamp: "Metadata timestamp, retained without day mapping",
   invalid: "Invalid date",
@@ -37,16 +44,17 @@ export function FinanceImportInspection({
   onClose,
 }: {
   open: boolean;
-  onClose: () => void;
+  onClose: (committed: boolean) => void;
 }) {
   const inspection = useFinanceImportInspection();
   const inputRef = useRef<HTMLInputElement>(null);
   const limitLabel = formatBytes(TARSI_BACKUP_MAX_BYTES);
 
   function close(nextOpen: boolean) {
-    if (nextOpen || inspection.busy || inspection.previewBusy) return;
+    if (nextOpen || inspection.busy || inspection.previewBusy || inspection.backupBusy || inspection.commitBusy) return;
+    const committed = inspection.committed;
     inspection.reset();
-    onClose();
+    onClose(committed);
   }
 
   function change(event: ChangeEvent<HTMLInputElement>) {
@@ -78,9 +86,11 @@ export function FinanceImportInspection({
         <SheetHeader className="border-b border-border p-6">
           <SheetTitle>Source inspection</SheetTitle>
           <SheetDescription className="text-sm">
-            Choose a Tarsi backup to review its structure and preview a
-            reconciled migration. Nothing is written to your Vault. The file is
-            sent to this server for inspection and is never saved.
+            Choose a backup to review its structure and preview a reconciled
+            migration. Inspection and preview are read-only: nothing is
+            written to your Vault until you create a verified backup and
+            commit the import. The file is sent to this server for inspection
+            and is never saved.
           </SheetDescription>
         </SheetHeader>
         <div className="flex flex-1 flex-col gap-6 p-6">
@@ -91,8 +101,8 @@ export function FinanceImportInspection({
             aria-label="Tarsi backup JSON file"
             tabIndex={-1}
             accept=".json,application/json"
-            className="sr-only"
-            disabled={inspection.busy || inspection.previewBusy}
+              className="sr-only"
+            disabled={inspection.busy || inspection.previewBusy || inspection.locked}
             onChange={change}
           />
           <div className="grid gap-2">
@@ -100,7 +110,7 @@ export function FinanceImportInspection({
               type="button"
               variant="outline"
               className={control}
-              disabled={inspection.busy || inspection.previewBusy}
+              disabled={inspection.busy || inspection.previewBusy || inspection.locked}
               onClick={() => inputRef.current?.click()}
             >
               {inspection.fileName
@@ -158,14 +168,15 @@ export function FinanceImportInspection({
                   {report.profile_id && (
                     <>
                       {" "}
-                      (profile <code className="break-all">{report.profile_id}</code>)
+                      (profile{" "}
+                      <code className="break-all">{report.profile_id}</code>)
                     </>
                   )}
                   . Mirrored records are reported, never combined.
                 </p>
                 <p>
-                  Records: {recordCount} across {collections.length}{" "}
-                  collection{collections.length === 1 ? "" : "s"}.
+                  Records: {recordCount} across {collections.length} collection
+                  {collections.length === 1 ? "" : "s"}.
                 </p>
                 <p>
                   Currencies:{" "}
@@ -184,8 +195,9 @@ export function FinanceImportInspection({
                 </p>
                 <p className="text-muted-foreground">
                   Choose Preview migration below to review the server-derived
-                  reconciled proposal. Nothing is written to your Vault at any
-                  step, and commit is a separate later step.
+                  reconciled proposal. Inspection and preview never write to
+                  your Vault; writing begins only at commit, after you create a
+                  verified backup.
                 </p>
               </section>
 
@@ -194,7 +206,7 @@ export function FinanceImportInspection({
                   <Button
                     type="button"
                     className={control}
-                    disabled={inspection.busy || inspection.previewBusy}
+                    disabled={inspection.busy || inspection.previewBusy || inspection.locked}
                     onClick={() => void inspection.startPreview()}
                   >
                     Preview migration
@@ -227,9 +239,27 @@ export function FinanceImportInspection({
                   needsUpdate={inspection.previewNeedsUpdate}
                   exclusions={inspection.exclusions}
                   acknowledged={inspection.acknowledged}
+                  locked={inspection.locked}
                   onUpdate={() => void inspection.updatePreview()}
                   onToggleExclusion={inspection.toggleExclusion}
                   onToggleAcknowledgment={inspection.toggleAcknowledgment}
+                  commit={
+                    <FinanceImportCommit
+                      gate={inspection.commitGate}
+                      confirmed={inspection.confirmed}
+                      backup={inspection.backup}
+                      backupBusy={inspection.backupBusy}
+                      backupError={inspection.backupError}
+                      commitBusy={inspection.commitBusy}
+                      commitError={inspection.commitError}
+                      committed={inspection.committed}
+                      result={inspection.commitResult}
+                      locked={inspection.locked}
+                      onCreateBackup={() => void inspection.createBackup()}
+                      onToggleConfirmed={inspection.toggleConfirmed}
+                      onCommit={() => void inspection.commitNow()}
+                    />
+                  }
                 />
               )}
 
@@ -250,9 +280,7 @@ export function FinanceImportInspection({
                             : "font-medium"
                         }
                       >
-                        {issue.severity === "blocker"
-                          ? "Blocker"
-                          : "Exception"}
+                        {issue.severity === "blocker" ? "Blocker" : "Exception"}
                         : {issue.message}
                       </p>
                       <p className="mt-1 break-all text-xs text-muted-foreground">
@@ -384,7 +412,7 @@ export function FinanceImportInspection({
                             : "mt-1 break-all text-xs font-medium text-destructive"
                         }
                       >
-                        {relation.target_collection} {relation.target_id} —{" "}
+                        {relation.target_collection} {relation.target_id}:{" "}
                         {relation.resolved ? "resolved" : "unresolved"}
                       </p>
                     </li>
@@ -410,12 +438,13 @@ export function FinanceImportInspection({
                       <p className="break-all text-sm">{date.path}</p>
                       <p
                         className={
-                          date.status === "invalid" || date.status === "ambiguous"
+                          date.status === "invalid" ||
+                          date.status === "ambiguous"
                             ? "mt-1 break-all text-xs font-medium text-destructive"
                             : "mt-1 break-all text-xs text-muted-foreground"
                         }
                       >
-                        {String(date.value)} — {dateStatusLabels[date.status]}
+                        {String(date.value)}: {dateStatusLabels[date.status]}
                       </p>
                     </li>
                   ))}
@@ -434,7 +463,7 @@ export function FinanceImportInspection({
               type="button"
               variant="outline"
               className={control}
-              disabled={inspection.busy || inspection.previewBusy}
+              disabled={inspection.busy || inspection.previewBusy || inspection.commitBusy || inspection.backupBusy}
               onClick={() => close(false)}
             >
               Close

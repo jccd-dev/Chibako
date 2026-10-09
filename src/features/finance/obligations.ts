@@ -17,18 +17,18 @@ function today() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-type ObligationRow = Omit<FinanceObligation, "currency" | "paid_cents" | "written_off_cents" | "outstanding_cents" | "status" | "overdue" | "archived"> & { archived: number };
+type ObligationRow = Omit<FinanceObligation, "currency" | "paid_cents" | "written_off_cents" | "outstanding_cents" | "status" | "overdue" | "archived"> & { archived: number; starting_progress_cents: number };
 export function readObligation(id: string, asOf = today()): FinanceObligation {
   const row = getDb().prepare("SELECT * FROM finance_obligations WHERE id = ?").get(id) as ObligationRow | undefined;
   if (!row) throw new FinanceError("Obligation not found", 404, "not_found");
-  let principal = BigInt(row.opening_principal_cents);
+  let principal = BigInt(row.opening_principal_cents) - BigInt(row.starting_progress_cents);
   const effects = getDb().prepare("SELECT amount_cents FROM finance_obligation_movements WHERE obligation_id = ? AND reverted = 0").safeIntegers()
     .iterate(id) as Iterable<{ amount_cents: bigint }>;
   for (const effect of effects) principal += effect.amount_cents;
   const paymentRows = getDb().prepare(`SELECT p.amount_cents FROM finance_obligation_payments p
     JOIN finance_transactions t ON t.id = p.cash_activity_id WHERE p.obligation_id = ? AND t.reverted = 0`).safeIntegers()
     .iterate(id) as Iterable<{ amount_cents: bigint }>;
-  let paid = 0n;
+  let paid = BigInt(row.starting_progress_cents);
   for (const payment of paymentRows) { paid += payment.amount_cents; principal -= payment.amount_cents; }
   const writeoffRows = getDb().prepare("SELECT amount_cents FROM finance_obligation_writeoffs WHERE obligation_id = ?").safeIntegers()
     .iterate(id) as Iterable<{ amount_cents: bigint }>;
@@ -36,7 +36,8 @@ export function readObligation(id: string, asOf = today()): FinanceObligation {
   for (const writeoff of writeoffRows) { writtenOff += writeoff.amount_cents; principal -= writeoff.amount_cents; }
   const outstanding = exactCents(principal), paidCents = exactCents(paid), writtenOffCents = exactCents(writtenOff);
   const status: FinanceObligation["status"] = outstanding > 0 || (paidCents === 0 && writtenOffCents === 0) ? "open" : paidCents > 0 && writtenOffCents > 0 ? "settled" : writtenOffCents > 0 ? "written_off" : "paid";
-  return { ...row, currency: "PHP", archived: row.archived === 1, outstanding_cents: outstanding,
+  const { starting_progress_cents: _startingProgress, ...publicRow } = row;
+  return { ...publicRow, currency: "PHP", archived: row.archived === 1, outstanding_cents: outstanding,
     paid_cents: paidCents, written_off_cents: writtenOffCents, status,
     overdue: outstanding > 0 && row.due_date !== null && row.due_date < asOf };
 }
@@ -83,7 +84,7 @@ export function getObligation(actor: FinanceActor, id: string, input: unknown = 
   const query = parseFinance(getObligationSchema, { ...input as object, id });
   return getDb().transaction(() => readObligation(id, query.as_of))();
 }
-const principalSql = `(o.opening_principal_cents + COALESCE((SELECT SUM(m.amount_cents) FROM finance_obligation_movements m WHERE m.obligation_id=o.id AND m.reverted=0),0)
+const principalSql = `(o.opening_principal_cents - o.starting_progress_cents + COALESCE((SELECT SUM(m.amount_cents) FROM finance_obligation_movements m WHERE m.obligation_id=o.id AND m.reverted=0),0)
   - COALESCE((SELECT SUM(p.amount_cents) FROM finance_obligation_payments p JOIN finance_transactions t ON t.id=p.cash_activity_id WHERE p.obligation_id=o.id AND t.reverted=0),0)
   - COALESCE((SELECT SUM(w.amount_cents) FROM finance_obligation_writeoffs w WHERE w.obligation_id=o.id),0) > 0)`;
 export function listObligations(actor: FinanceActor, input: unknown = {}): FinanceObligationList {
@@ -99,8 +100,8 @@ export function listObligations(actor: FinanceActor, input: unknown = {}): Finan
     const { total } = db.prepare(`SELECT COUNT(*) AS total FROM finance_obligations o ${where}`).get(...values) as { total: number };
     const ids = db.prepare(`SELECT o.id FROM finance_obligations o ${where} ORDER BY o.due_date IS NULL, o.due_date, o.created_at, o.id LIMIT ? OFFSET ?`).all(...values, query.limit, query.offset) as { id: string }[];
     const totals = { debt: 0n, receivable: 0n };
-    const openings = db.prepare("SELECT kind, opening_principal_cents FROM finance_obligations").safeIntegers().iterate() as Iterable<{ kind: "debt" | "receivable"; opening_principal_cents: bigint }>;
-    for (const row of openings) totals[row.kind] += row.opening_principal_cents;
+    const openings = db.prepare("SELECT kind, opening_principal_cents, starting_progress_cents FROM finance_obligations").safeIntegers().iterate() as Iterable<{ kind: "debt" | "receivable"; opening_principal_cents: bigint; starting_progress_cents: bigint }>;
+    for (const row of openings) totals[row.kind] += row.opening_principal_cents - row.starting_progress_cents;
     const movements = db.prepare("SELECT o.kind, m.amount_cents FROM finance_obligation_movements m JOIN finance_obligations o ON o.id = m.obligation_id WHERE m.reverted = 0").safeIntegers().iterate() as Iterable<{ kind: "debt" | "receivable"; amount_cents: bigint }>;
     for (const row of movements) totals[row.kind] += row.amount_cents;
     const payments = db.prepare("SELECT o.kind, p.amount_cents FROM finance_obligation_payments p JOIN finance_obligations o ON o.id=p.obligation_id JOIN finance_transactions t ON t.id=p.cash_activity_id WHERE t.reverted=0").safeIntegers().iterate() as Iterable<{ kind: "debt" | "receivable"; amount_cents: bigint }>;
