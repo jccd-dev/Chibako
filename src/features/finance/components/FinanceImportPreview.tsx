@@ -4,8 +4,7 @@ import type { ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { formatPHP, financeControl as control } from "@/features/finance/presentation";
-import { tarsiIdentityKey } from "@/features/finance/import-preview-types";
-import type { TarsiPreview, TarsiProposalRecord } from "@/features/finance/import-preview-types";
+import { tarsiIdentityKey, type TarsiPreview, type TarsiProposalRecord } from "@/features/finance/import-preview-types";
 
 const summaryClass =
   "min-h-11 cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-ring";

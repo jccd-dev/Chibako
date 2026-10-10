@@ -232,7 +232,9 @@ function originalSource(backup: unknown, record: TarsiProposalRecord, profileId:
   const rows = selected[path[1]];
   if (!Array.isArray(rows)) return record.source;
   const source = rows[Number(path[2])];
-  if (typeof source === "string" && path[1].includes("CategoryOrder")) return { id: source, order: Number(path[2]) };
+  if (typeof source === "string" && ["categoryOrderIds", "incomeCategoryOrderIds"].includes(path[1])) {
+    return { id: source, order: Number(path[2]) };
+  }
   return source ?? record.source;
 }
 

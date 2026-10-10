@@ -266,6 +266,89 @@ test("changed source identities require review and never overwrite the imported 
     expenses: [{ id: "unrelated-shared-account-expense", accountId: "conflict-cash", amount: 2, date: "2020-01-01", category: "other" }],
   } };
   assert.equal(previewTarsiBackup(owner, sharedAccountOnly).inspection.eligible, false);
+  const accountExtension = { app: "Tarsi", data: { accounts: [
+    original.data.accounts[0], { id: "new-cash", name: "TEST unrelated added cash", type: "debit", currency: "PHP", balance: 20 },
+  ] } };
+  assert.equal(previewTarsiBackup(owner, accountExtension).inspection.eligible, false);
+});
+
+test("category order records retain identities for unchanged retries", async () => {
+  const backupSource = { app: "Tarsi", data: {
+    accounts: [{ id: "ordered-cash", name: "TEST ordered cash", type: "debit", currency: "PHP", balance: 10 }],
+    categoryOrderIds: ["food"],
+  } };
+  const backup = await createTarsiImportBackup(owner);
+  const proposal = previewTarsiBackup(owner, backupSource);
+  const imported = commitTarsiImport(owner, {
+    request_id: "category-order-first", backup_id: backup.id, proposal_hash: proposal.proposal_hash,
+    backup: backupSource, final_confirmation: true,
+  });
+  assert.equal(imported.records.find(row => row.collection === "categoryOrderIds")?.status, "imported");
+  assert.deepEqual(getDb().prepare<[string], { source_json: string }>(
+    "SELECT source_json FROM finance_import_records WHERE migration_id=? AND collection='categoryOrderIds'",
+  ).get(imported.migration_id), { source_json: JSON.stringify({ id: "food", order: 0 }) });
+
+  const retrySource = { ...backupSource, exportedAt: "2026-10-10T00:00:00.000Z" };
+  const retryBackup = await createTarsiImportBackup(owner);
+  const retryProposal = previewTarsiBackup(owner, retrySource);
+  assert.equal(retryProposal.inspection.retry_migration_id, imported.migration_id);
+  assert.deepEqual(retryProposal.records.map(row => row.status), ["skipped", "skipped"]);
+  const retried = commitTarsiImport(owner, {
+    request_id: "category-order-retry", backup_id: retryBackup.id, proposal_hash: retryProposal.proposal_hash,
+    backup: retrySource, final_confirmation: true,
+  });
+  assert.deepEqual(retried.counts, { imported: 0, skipped: 2, conflicts: 0, excluded: 0 });
+  assert.equal(getDb().prepare<[string], { count: number }>(
+    "SELECT COUNT(*) AS count FROM finance_import_records WHERE migration_id=? AND collection='categoryOrderIds'",
+  ).get(imported.migration_id)?.count, 1);
+  const unrelated = { app: "Tarsi", data: {
+    accounts: [{ id: "other-cash", name: "TEST unrelated cash", type: "debit", currency: "PHP", balance: 10 }],
+    categoryOrderIds: ["food"],
+  } };
+  assert.equal(previewTarsiBackup(owner, unrelated).inspection.eligible, false);
+});
+
+test("changed account-only re-exports retry without merging unrelated shared-account history", async () => {
+  const accountOnly = { app: "Tarsi", exportedAt: "2026-10-09T00:00:00.000Z", data: {
+    accounts: [{ id: "retry-cash", name: "TEST retry cash", type: "debit", currency: "PHP", balance: 10 }],
+  } };
+  const backup = await createTarsiImportBackup(owner);
+  const proposal = previewTarsiBackup(owner, accountOnly);
+  const imported = commitTarsiImport(owner, {
+    request_id: "account-only-first", backup_id: backup.id, proposal_hash: proposal.proposal_hash,
+    backup: accountOnly, final_confirmation: true,
+  });
+
+  const reexport = { ...accountOnly, exportedAt: "2026-10-10T00:00:00.000Z" };
+  const retryBackup = await createTarsiImportBackup(owner);
+  const retryProposal = previewTarsiBackup(owner, reexport);
+  assert.equal(retryProposal.inspection.retry_migration_id, imported.migration_id);
+  assert.equal(retryProposal.records[0].status, "skipped");
+  const retried = commitTarsiImport(owner, {
+    request_id: "account-only-retry", backup_id: retryBackup.id, proposal_hash: retryProposal.proposal_hash,
+    backup: reexport, final_confirmation: true,
+  });
+  assert.equal(retried.migration_id, imported.migration_id);
+
+  const changed = { ...reexport, data: { accounts: [{ ...reexport.data.accounts[0], name: "TEST changed retry cash" }] } };
+  const changedBackup = await createTarsiImportBackup(owner);
+  const changedProposal = previewTarsiBackup(owner, changed);
+  assert.equal(changedProposal.inspection.retry_migration_id, imported.migration_id);
+  assert.equal(changedProposal.records[0].status, "conflict");
+  const identity = tarsiIdentityKey("accounts", "retry-cash");
+  const reviewed = previewTarsiBackup(owner, changed, { acknowledged_conflicts: [identity] });
+  const conflicted = commitTarsiImport(owner, {
+    request_id: "account-only-conflict", backup_id: changedBackup.id, proposal_hash: reviewed.proposal_hash,
+    backup: changed, acknowledged_conflicts: [identity], final_confirmation: true,
+  });
+  assert.equal(conflicted.counts.conflicts, 1);
+  assert.equal(getAccount(owner, "accounts:retry-cash").name, "TEST retry cash");
+
+  const unrelated = { app: "Tarsi", data: {
+    accounts: [{ id: "retry-cash", name: "TEST retry cash", type: "debit", currency: "PHP", balance: 10 }],
+    expenses: [{ id: "unrelated-expense", accountId: "retry-cash", amount: 1, date: "2020-01-01", category: "other" }],
+  } };
+  assert.equal(previewTarsiBackup(owner, unrelated).inspection.eligible, false);
 });
 
 test("import revalidates approval, eligibility and owner-only access before writes", async () => {

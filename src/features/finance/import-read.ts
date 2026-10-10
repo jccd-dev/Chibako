@@ -19,7 +19,26 @@ const storedResultSchema = z.object({
   }).strict(),
 }).passthrough();
 
-export function listTarsiImportSummaries(actor: FinanceActor, input: unknown = {}) {
+type TarsiStoredImportResult = z.infer<typeof storedResultSchema>;
+
+export interface TarsiImportSummary {
+  migration_id: string;
+  created_at: number;
+  counts: TarsiStoredImportResult["counts"];
+  details?: {
+    result: TarsiStoredImportResult;
+    records: { collection: string; source_id: string; source_path: string; status: "imported" | "skipped" | "excluded"; reason: string | null; source: unknown }[];
+  };
+}
+
+export interface TarsiImportSummaryPage {
+  migrations: TarsiImportSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export function listTarsiImportSummaries(actor: FinanceActor, input: unknown = {}): TarsiImportSummaryPage {
   authorizeFinance(actor, "finance:read");
   const { limit, offset, include_details } = parseFinance(listTarsiImportSummariesSchema, input);
   const db = getDb();
@@ -27,7 +46,7 @@ export function listTarsiImportSummaries(actor: FinanceActor, input: unknown = {
   const rows = db.prepare<[number, number], { id: string; created_at: number; result_json: string }>(
     "SELECT id,created_at,result_json FROM finance_import_migrations ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
   ).all(limit, offset);
-  const migrations = rows.map(row => {
+  const migrations: TarsiImportSummary[] = rows.map(row => {
     let decoded: unknown;
     try { decoded = JSON.parse(row.result_json); }
     catch { throw new FinanceError("Stored import summary is unavailable", 409, "summary_unavailable"); }
@@ -35,7 +54,7 @@ export function listTarsiImportSummaries(actor: FinanceActor, input: unknown = {
     if (!result.success) throw new FinanceError("Stored import summary is unavailable", 409, "summary_unavailable");
     const summary = { migration_id: row.id, created_at: row.created_at, counts: result.data.counts };
     if (!include_details) return summary;
-    const records = db.prepare<[string], { collection: string; source_id: string; source_path: string; status: string; reason: string | null; source_json: string }>(
+    const records = db.prepare<[string], { collection: string; source_id: string; source_path: string; status: "imported" | "skipped" | "excluded"; reason: string | null; source_json: string }>(
       "SELECT collection,source_id,source_path,status,reason,source_json FROM finance_import_records WHERE migration_id=? ORDER BY id",
     ).all(row.id).map(record => {
       let source: unknown;

@@ -1,13 +1,13 @@
 import type { TarsiInspection, TarsiInspectionIssue } from "./import-inspection-types";
 
+export function tarsiIdentityKey(collection: string, sourceId: string): string {
+  return JSON.stringify([collection, sourceId]);
+}
+
 export interface TarsiPreviewOptions {
   exclusions?: string[];
   acknowledged_exclusions?: string[];
   acknowledged_conflicts?: string[];
-}
-
-export function tarsiIdentityKey(collection: string, sourceId: string): string {
-  return JSON.stringify([collection, sourceId]);
 }
 
 export interface TarsiProposalRecord {

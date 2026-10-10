@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { getDb } from "../../lib/db";
 import { FinanceError, type FinanceActor } from "./types";
 import type { TarsiInspection } from "./import-inspection-types";
+import { tarsiIdentityKey } from "./import-preview-types";
 import { sourceFields, requiredSourceFields, referenceCollections, isSourceObject, isCalendarDay, isSourceTimestamp } from "./import-source-format";
 
 const financeTables = [
@@ -21,20 +22,35 @@ function findRetryMigration(input: Record<string, unknown>, selected: Record<str
   const exact = db.prepare<[string], { id: string }>("SELECT id FROM finance_import_migrations WHERE source_hash=?").get(sourceHash);
   if (exact) return exact.id;
 
+  const historyCollections = [...retryAnchorCollections];
+  const hasHistory = historyCollections.some(collection => Array.isArray(selected[collection]) && (selected[collection] as unknown[]).length > 0);
   const incoming = new Set<string>();
-  for (const collection of retryAnchorCollections) {
+  const collections = hasHistory ? historyCollections : Object.keys(selected).filter(collection => !profileKeys.has(collection));
+  for (const collection of collections) {
     const rows = selected[collection];
     if (!Array.isArray(rows)) continue;
-    for (const row of rows) if (isSourceObject(row) && typeof row.id === "string") {
-      incoming.add(JSON.stringify([collection, row.id]));
+    for (const row of rows) {
+      if (isSourceObject(row) && typeof row.id === "string") incoming.add(tarsiIdentityKey(collection, row.id));
+      else if (typeof row === "string" && ["categoryOrderIds", "incomeCategoryOrderIds"].includes(collection)) {
+        incoming.add(tarsiIdentityKey(collection, row));
+      }
     }
   }
   if (!incoming.size) return null;
   const candidates = new Set<string>();
-  for (const row of db.prepare<[], { migration_id: string; collection: string; source_id: string }>(
-    "SELECT migration_id,collection,source_id FROM finance_import_records WHERE status='imported'",
-  ).all()) {
-    if (incoming.has(JSON.stringify([row.collection, row.source_id]))) candidates.add(row.migration_id);
+  const importedRows = db.prepare<[], { migration_id: string; collection: string; source_id: string; status: string }>(
+    "SELECT migration_id,collection,source_id,status FROM finance_import_records",
+  ).all();
+  const identitiesByMigration = new Map<string, Set<string>>();
+  for (const row of importedRows) {
+    const identity = tarsiIdentityKey(row.collection, row.source_id);
+    if (!identitiesByMigration.has(row.migration_id)) identitiesByMigration.set(row.migration_id, new Set());
+    identitiesByMigration.get(row.migration_id)!.add(identity);
+    if (hasHistory && incoming.has(identity) && row.status === "imported") candidates.add(row.migration_id);
+  }
+  // shortcut: retries without history require the original identity set; additions need explicit migration selection.
+  if (!hasHistory) for (const [migrationId, identities] of identitiesByMigration) {
+    if (identities.size === incoming.size && [...incoming].every(identity => identities.has(identity))) candidates.add(migrationId);
   }
   return candidates.size === 1 ? [...candidates][0] : null;
 }
