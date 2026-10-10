@@ -155,10 +155,10 @@ export function FinanceImportInspection({
                 className="grid gap-2 rounded-md border border-border bg-muted p-4 text-sm"
               >
                 <p>
-                  Initial migration eligible:{" "}
-                  <strong>{report.eligible ? "Yes" : "No"}</strong>. A backup
-                  can be inspected at any time, even when this Vault already has
-                  finance records.
+                  Migration eligible:{" "}
+                  <strong>{report.eligible ? "Yes" : "No"}</strong>. {report.retry_migration_id
+                    ? "This source matches a prior migration; completed identities will be skipped and changed identities need review."
+                    : "A populated Vault accepts only a retry of a previously imported migration."} A backup can be inspected at any time.
                 </p>
                 <p>
                   Representation:{" "}
@@ -239,10 +239,12 @@ export function FinanceImportInspection({
                   needsUpdate={inspection.previewNeedsUpdate}
                   exclusions={inspection.exclusions}
                   acknowledged={inspection.acknowledged}
+                  acknowledgedConflicts={inspection.acknowledgedConflicts}
                   locked={inspection.locked}
                   onUpdate={() => void inspection.updatePreview()}
                   onToggleExclusion={inspection.toggleExclusion}
                   onToggleAcknowledgment={inspection.toggleAcknowledgment}
+                  onToggleConflictAcknowledgment={inspection.toggleConflictAcknowledgment}
                   commit={
                     <FinanceImportCommit
                       gate={inspection.commitGate}

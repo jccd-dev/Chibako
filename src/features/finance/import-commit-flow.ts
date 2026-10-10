@@ -6,6 +6,7 @@ export interface TarsiCommitReview {
   proposalHash: string;
   exclusions: string[];
   acknowledged: string[];
+  acknowledgedConflicts: string[];
 }
 
 export interface TarsiCommitRequest {
@@ -25,6 +26,7 @@ export interface TarsiImportSummary {
   pausedSchedules: TarsiImportItem[];
   startingProgress: (TarsiImportItem & { cents: number; kind: string })[];
   skipped: (TarsiImportItem & { reason: string })[];
+  conflicts: (TarsiImportItem & { reason: string; previousSource: Record<string, unknown>; currentSource: Record<string, unknown> })[];
   relationships: {
     path: string;
     field: string;
@@ -46,6 +48,7 @@ export function commitFingerprint(review: TarsiCommitReview): string {
     review.proposalHash,
     [...review.exclusions].sort(),
     [...review.acknowledged].sort(),
+    [...review.acknowledgedConflicts].sort(),
   ]);
 }
 
@@ -66,6 +69,7 @@ export function buildTarsiCommitPayload(review: TarsiCommitReview, requestId: st
     backup: source,
     exclusions: review.exclusions,
     acknowledged_exclusions: review.acknowledged,
+    acknowledged_conflicts: review.acknowledgedConflicts,
     final_confirmation: true as const,
   };
 }
@@ -107,6 +111,16 @@ export function summarizeTarsiImportResult(result: TarsiImportResult, preview: T
         collection: row.collection,
         label: labelFor(row.collection, row.source_id),
         reason: row.reason ?? "No reason recorded.",
+      })),
+    conflicts: preview.records
+      .filter(row => row.status === "conflict" && row.previous_source)
+      .map(row => ({
+        path: row.path,
+        collection: row.collection,
+        label: labelFor(row.collection, row.source_id),
+        reason: row.reason ?? "Changed source identity retained for owner review.",
+        previousSource: row.previous_source!,
+        currentSource: row.source,
       })),
     relationships: result.relationships.map(row => ({
       path: row.source_path,

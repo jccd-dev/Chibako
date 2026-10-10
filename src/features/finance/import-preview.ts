@@ -1,15 +1,20 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
+import { getDb } from "../../lib/db";
+import { readAccountBalance } from "./accounts";
 import { inspectTarsiBackup } from "./import-inspection";
-import { mapTarsiRecord } from "./import-preview-mapping";
+import { mapTarsiRecord, tarsiTargetId } from "./import-preview-mapping";
 import { isSourceObject, sourceFields } from "./import-source-format";
 import { exactCents } from "./money";
+import { reservedAccountCents } from "./reservations";
 import { FinanceError, type FinanceActor } from "./types";
-import type { TarsiPreview } from "./import-preview-types";
+import { tarsiIdentityKey, type TarsiPreview } from "./import-preview-types";
 
 const optionsSchema = z.object({
   exclusions: z.array(z.string().min(1).max(512)).max(10000).default([]),
   acknowledged_exclusions: z.array(z.string().min(1).max(512)).max(10000).default([]),
+  acknowledged_conflicts: z.array(z.string().min(1).max(512)).max(10000).default([]),
 }).strict();
 const commitNotice = "Preview writes nothing. Commit requires a recoverable backup and separate owner confirmation in the next migration step.";
 const categoryOrders: Record<string, string> = { categoryOrderIds: "expense", incomeCategoryOrderIds: "income" };
@@ -40,14 +45,30 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
   const selected = inspection.representation === "profile" && isSourceObject(data.profiles)
     ? data.profiles[inspection.profile_id!] : data;
   if (!isSourceObject(selected)) throw new FinanceError("Invalid profile", 400, "invalid_input");
+  const baseline = new Map<string, Record<string, unknown>>();
+  if (inspection.retry_migration_id) for (const row of getDb().prepare<[string], { collection: string; source_id: string; source_json: string }>(
+    "SELECT collection,source_id,source_json FROM finance_import_records WHERE migration_id=? AND status='imported'",
+  ).all(inspection.retry_migration_id)) {
+    const source: unknown = JSON.parse(row.source_json);
+    if (isSourceObject(source)) baseline.set(tarsiIdentityKey(row.collection, row.source_id), source);
+  }
   const choices = new Map<string, string>();
   for (const issue of inspection.issues) {
     if (issue.code === "unsupported_section" && Object.hasOwn(categoryOrders, issue.path) && Array.isArray(selected[issue.path])) continue;
+    const field = issue.code === "unsupported_field" ? issue.path.match(/^([^.\[]+)\.([^.[\]]+)$/) : null;
+    const fieldRows = field ? selected[field[1]] : undefined;
+    if (field && Array.isArray(fieldRows) && fieldRows.every((row: unknown) => isSourceObject(row)
+      && typeof row.id === "string" && baseline.has(tarsiIdentityKey(field[1], row.id)))) continue;
     if (issue.code === "unsupported_section" || issue.code === "unsupported_field") choices.set(issue.path, `Exclude unsupported data at ${issue.path}`);
   }
   for (const [collection, value] of Object.entries(selected)) {
     if (!Object.hasOwn(sourceFields, collection) || !Array.isArray(value)) continue;
-    for (const [index, row] of value.entries()) choices.set(`${collection}[${index}]`, `Exclude ${collection} ${isSourceObject(row) && typeof row.id === "string" ? row.id : index}`);
+    for (const [index, row] of value.entries()) {
+      const sourceId = typeof row === "string" && Object.hasOwn(categoryOrders, collection)
+        ? row : isSourceObject(row) && typeof row.id === "string" ? row.id : null;
+      if (sourceId && baseline.has(tarsiIdentityKey(collection, sourceId))) continue;
+      choices.set(`${collection}[${index}]`, `Exclude ${collection} ${isSourceObject(row) && typeof row.id === "string" ? row.id : index}`);
+    }
   }
   const requested = new Set(parsed.data.exclusions);
   for (const path of requested) if (!choices.has(path)) throw new FinanceError("Exclusion does not identify a source record or unsupported field/section", 400, "invalid_input");
@@ -87,6 +108,12 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
   for (const original of inspection.issues) {
     if (original.code === "unsupported_section" && Object.hasOwn(categoryOrders, original.path) && Array.isArray(selected[original.path])) continue;
     if (isExcluded(original.path)) continue;
+    const rowIssue = original.path.match(/^([^.[\]]+)\[(\d+)\]/);
+    if (rowIssue && report.records.some(record => record.path === `${rowIssue[1]}[${rowIssue[2]}]` && (record.status === "skipped" || record.status === "conflict"))) continue;
+    const collectionIssue = original.path.match(/^([^.\[]+)\./);
+    const issueRows = collectionIssue ? selected[collectionIssue[1]] : undefined;
+    if (collectionIssue && Array.isArray(issueRows) && issueRows.every((row: unknown) =>
+      isSourceObject(row) && typeof row.id === "string" && baseline.has(tarsiIdentityKey(collectionIssue[1], row.id)))) continue;
     // A collection-level unknown field applies to every row; individual row exclusions can settle it too.
     const field = original.code === "unsupported_field" ? original.path.match(/^([^.\[]+)\.([^.\[]+)$/) : null;
     const fieldRows = field ? selected[field[1]] : undefined;
@@ -97,13 +124,13 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
     if (["profiles", "profileMetas"].includes(collection)) continue;
     if (!Array.isArray(rows)) {
       if (!Object.hasOwn(sourceFields, collection) && isExcluded(collection)) {
-        report.counts.push({ collection, accepted: 0, skipped: 0, excluded: 1, blocked: 0 });
+        report.counts.push({ collection, accepted: 0, skipped: 0, conflicts: 0, excluded: 1, blocked: 0 });
         report.records.push({ collection, source_id: collection, path: collection, status: "excluded",
           source: isSourceObject(rows) ? structuredClone(rows) : { value: rows }, target: {}, effects: [] });
       }
       continue;
     }
-    const count = { collection, accepted: 0, skipped: 0, excluded: 0, blocked: 0 };
+    const count = { collection, accepted: 0, skipped: 0, conflicts: 0, excluded: 0, blocked: 0 };
     report.counts.push(count);
     for (const [index, row] of rows.entries()) {
       const path = `${collection}[${index}]`;
@@ -114,8 +141,24 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
         const customCollection = categoryOrders[collection] === "income" ? "customIncomeCategories" : "customCategories";
         const custom = selected[customCollection];
         const label = Array.isArray(custom) ? custom.find(item => isSourceObject(item) && item.id === row) : undefined;
-        report.records.push({ collection, source_id: row, path, status: "accepted", source: { id: row, order: index }, target: { kind: "category", type: categoryOrders[collection], name: isSourceObject(label) ? label.label : row, order: index }, effects: [] });
+        const source = { id: row, order: index };
+        const previous = baseline.get(tarsiIdentityKey(collection, row));
+        const unchanged = previous ? isDeepStrictEqual(source, previous) : false;
+        report.records.push(previous
+          ? { collection, source_id: row, path, status: unchanged ? "skipped" : "conflict", reason: "Previously imported identity is retained; no category order is reapplied.", ...(unchanged ? {} : { previous_source: previous }), source, target: {}, effects: [] }
+          : { collection, source_id: row, path, status: "accepted", source, target: { kind: "category", type: categoryOrders[collection], name: isSourceObject(label) ? label.label : row, order: index }, effects: [] });
         continue;
+      }
+      if (isSourceObject(row) && typeof row.id === "string") {
+        const previous = baseline.get(tarsiIdentityKey(collection, row.id));
+        if (previous) {
+          const unchanged = isDeepStrictEqual(row, previous);
+          const previousTarget = mapTarsiRecord(collection, previous, path).target;
+          report.records.push({ collection, source_id: row.id, path, status: unchanged ? "skipped" : "conflict",
+            reason: unchanged ? "Already imported; no changes reapplied." : "Source changed after import; the existing Chibako record is retained.",
+            ...(unchanged ? {} : { previous_source: previous }), source: structuredClone(row), target: previousTarget, effects: [] });
+          continue;
+        }
       }
       if (isExcluded(path)) {
         count.excluded++;
@@ -151,6 +194,8 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
   }));
   for (const relation of inspection.relationships) {
     if (isExcluded(relation.path)) continue;
+    const record = report.records.find(item => within(relation.path, item.path));
+    if (record?.status === "skipped" || record?.status === "conflict") continue;
     if (removedIds.has(JSON.stringify([relation.target_collection, relation.target_id]))) issue("excluded_reference", relation.path, "Relationship points to an excluded source record. Resolve it or exclude the dependent record.");
   }
   const subcategories = Array.isArray(selected.customSubcategories) ? selected.customSubcategories.filter(isSourceObject) : [];
@@ -163,7 +208,20 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
     const collectionIssue = report.issues.some(item => item.path.startsWith(`${record.collection}.`) && !item.path.includes("["));
     if (record.status === "accepted" && (collectionIssue || report.issues.some(item => within(item.path, record.path) || item.path === record.collection))) record.status = "blocked";
   }
-  const accounts = new Map(report.records.filter(row => row.collection === "accounts" && row.status === "accepted").map(row => [row.source_id, row]));
+  const accounts = new Map(report.records.filter(row => row.collection === "accounts" && row.status !== "blocked" && row.status !== "excluded").map(row => [row.source_id, row]));
+  const newAccounts = new Map([...accounts].filter(([, row]) => row.status === "accepted"));
+  const accountCapacity = new Map<string, bigint>();
+  for (const account of accounts.values()) {
+    if (account.status === "accepted") {
+      const snapshot = account.target.snapshot_cents;
+      if (typeof snapshot === "number") accountCapacity.set(account.source_id, BigInt(Math.max(0, snapshot)));
+      continue;
+    }
+    const accountId = tarsiTargetId("accounts", account.source_id);
+    const current = readAccountBalance(accountId);
+    accountCapacity.set(account.source_id,
+      BigInt(Math.max(0, current.balance_cents)) - BigInt(reservedAccountCents(accountId)));
+  }
   const reservations = new Map<string, bigint>();
   for (const record of report.records.filter(row => row.collection === "goals" && row.status === "accepted")) {
     const accountId = record.source.linkedAccountId;
@@ -175,14 +233,15 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
   }
   for (const [accountId, reserved] of reservations) {
     const account = accounts.get(accountId)!;
-    if (typeof account.target.snapshot_cents === "number" && reserved > BigInt(Math.max(0, account.target.snapshot_cents))) {
+    const capacity = accountCapacity.get(accountId);
+    if (capacity !== undefined && reserved > capacity) {
       for (const goal of report.records.filter(row => row.collection === "goals" && row.source.linkedAccountId === accountId && row.status === "accepted")) {
         issue("allocation_overflow", goal.path, "Goal allocations exceed this account snapshot; settle allocations before approval.");
         goal.status = "blocked";
       }
     }
   }
-  for (const account of accounts.values()) {
+  for (const account of newAccounts.values()) {
     try {
       const sum = report.records.filter(row => row.status === "accepted").flatMap(row => row.effects).filter(effect => effect.account_id === account.source_id).reduce((total, effect) => total + BigInt(effect.amount_cents), 0n);
       const snapshot = account.target.snapshot_cents;
@@ -197,9 +256,19 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
       issue(error.code, account.path, error.message);
     }
   }
-  for (const count of report.counts) for (const record of report.records.filter(row => row.collection === count.collection && row.status !== "excluded")) count[record.status]++;
+  for (const count of report.counts) for (const record of report.records.filter(row => row.collection === count.collection && row.status !== "excluded")) {
+    if (record.status === "skipped" || record.status === "conflict") count[record.status === "skipped" ? "skipped" : "conflicts"]++;
+    else count[record.status]++;
+  }
   report.exclusion_choices = [...choices].map(([path, label]) => ({ path, label }));
-  report.can_approve = inspection.eligible && report.issues.length === 0 && report.counts.every(count => count.blocked === 0) && report.exclusions.every(item => item.acknowledged);
+  const acknowledgedConflicts = new Set(parsed.data.acknowledged_conflicts);
+  const conflicts = report.records.filter(record => record.status === "conflict");
+  for (const key of acknowledgedConflicts) if (!conflicts.some(record => tarsiIdentityKey(record.collection, record.source_id) === key)) {
+    throw new FinanceError("Acknowledgment does not identify a source conflict", 400, "invalid_input");
+  }
+  report.can_approve = inspection.eligible && report.issues.length === 0 && report.counts.every(count => count.blocked === 0)
+    && report.exclusions.every(item => item.acknowledged)
+    && conflicts.every(record => acknowledgedConflicts.has(tarsiIdentityKey(record.collection, record.source_id)));
   report.proposal_hash = createHash("sha256").update(JSON.stringify({
     inspection: report.inspection, can_approve: report.can_approve, issues: report.issues,
     counts: report.counts, records: report.records, balances: report.balances, exclusions: report.exclusions,

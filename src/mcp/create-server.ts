@@ -31,6 +31,7 @@ import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
 import { authorizeFinance, authorizeFinanceNotes } from "../server/auth/finance-authorization";
 import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
+import { listTarsiImportSummaries, listTarsiImportSummariesSchema } from "../features/finance/import-read";
 import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
 import { postTransfer, reconcileAccount, valueAsset } from "../features/finance/movements";
 import { correctActivity, hideActivity, revertActivity, recordRefund } from "../features/finance/corrections";
@@ -420,6 +421,12 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
   }
   if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_imports", {
+      title: "Read Tarsi import summaries",
+      description: "List completed Tarsi migrations with compact counts. Explicitly set include_details=true to read private import results and retained source records. Requires finance:read; this tool cannot commit or restore imports.",
+      inputSchema: listTarsiImportSummariesSchema,
+      annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => listTarsiImportSummaries(actor, args)));
     server.registerTool("list_finance_obligations", {
       title: "List debts and receivables", description: "Paginated obligations with optional due dates and overdue flags as_of a local calendar day (default today). Outstanding debt and receivable totals include archived definitions and remain separate from cash/assets. Creating a definition has no cash effect.",
       inputSchema: listObligationsSchema, annotations: READ_ONLY,

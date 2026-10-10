@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { formatPHP, financeControl as control } from "@/features/finance/presentation";
+import { tarsiIdentityKey } from "@/features/finance/import-preview-types";
 import type { TarsiPreview, TarsiProposalRecord } from "@/features/finance/import-preview-types";
 
 const summaryClass =
@@ -12,11 +13,15 @@ const statusLabels: Record<TarsiProposalRecord["status"], string> = {
   accepted: "Accepted",
   blocked: "Blocked",
   excluded: "Excluded",
+  skipped: "Already imported · skipped",
+  conflict: "Changed source · conflict",
 };
 const statusClasses: Record<TarsiProposalRecord["status"], string> = {
   accepted: "font-medium",
   blocked: "font-medium text-destructive",
   excluded: "font-medium text-muted-foreground",
+  skipped: "font-medium text-muted-foreground",
+  conflict: "font-medium text-destructive",
 };
 
 function detailRows(record: TarsiProposalRecord): [string, string][] {
@@ -89,10 +94,12 @@ export function FinanceImportPreview({
   needsUpdate,
   exclusions,
   acknowledged,
+  acknowledgedConflicts,
   locked,
   onUpdate,
   onToggleExclusion,
   onToggleAcknowledgment,
+  onToggleConflictAcknowledgment,
   commit,
 }: {
   preview: TarsiPreview;
@@ -101,20 +108,23 @@ export function FinanceImportPreview({
   needsUpdate: boolean;
   exclusions: string[];
   acknowledged: string[];
+  acknowledgedConflicts: string[];
   locked: boolean;
   onUpdate: () => void;
   onToggleExclusion: (path: string) => void;
   onToggleAcknowledgment: (path: string) => void;
+  onToggleConflictAcknowledgment: (key: string) => void;
   commit: ReactNode;
 }) {
   const totals = preview.counts.reduce(
     (sum, row) => ({
       accepted: sum.accepted + row.accepted,
       skipped: sum.skipped + row.skipped,
+      conflicts: sum.conflicts + row.conflicts,
       excluded: sum.excluded + row.excluded,
       blocked: sum.blocked + row.blocked,
     }),
-    { accepted: 0, skipped: 0, excluded: 0, blocked: 0 },
+    { accepted: 0, skipped: 0, conflicts: 0, excluded: 0, blocked: 0 },
   );
 
   return (
@@ -131,7 +141,8 @@ export function FinanceImportPreview({
             : " Settle the blockers, exclusions, and acknowledgments below, then update the preview."}
         </p>
         <p className="tabular-nums">
-          Proposal: {totals.accepted} accepted, {totals.skipped} skipped,{" "}
+          {preview.inspection.retry_migration_id ? "Retrying the matching migration: " : "Proposal: "}
+          {totals.accepted} accepted, {totals.skipped} skipped, {totals.conflicts} conflicts,{" "}
           {totals.excluded} excluded, {totals.blocked} blocked across{" "}
           {preview.counts.length} collection{preview.counts.length === 1 ? "" : "s"}.
         </p>
@@ -161,7 +172,7 @@ export function FinanceImportPreview({
             >
               <p className="break-words font-medium">{row.collection}</p>
               <p className="mt-1 tabular-nums text-muted-foreground">
-                {row.accepted} accepted, {row.skipped} skipped,{" "}
+                {row.accepted} accepted, {row.skipped} skipped, {row.conflicts} conflicts,{" "}
                 {row.excluded} excluded,{" "}
                 <span className={row.blocked ? "font-medium text-destructive" : ""}>
                   {row.blocked} blocked
@@ -266,6 +277,16 @@ export function FinanceImportPreview({
                 {effects && <p className="mt-2 break-words tabular-nums">{effects}</p>}
                 {allocations && (
                   <p className="mt-2 break-words tabular-nums">{allocations}</p>
+                )}
+                {record.reason && <p className="mt-2 text-muted-foreground">{record.reason}</p>}
+                {record.status === "conflict" && record.previous_source && (
+                  <details className="mt-2">
+                    <summary className={summaryClass}>Compare original and changed source</summary>
+                    <p className="mt-2 font-medium">Previously imported source</p>
+                    <pre className="mt-1 whitespace-pre-wrap break-all text-xs">{JSON.stringify(record.previous_source, null, 2)}</pre>
+                    <p className="mt-2 font-medium">Current source</p>
+                    <pre className="mt-1 whitespace-pre-wrap break-all text-xs">{JSON.stringify(record.source, null, 2)}</pre>
+                  </details>
                 )}
                 <details className="mt-2">
                   <summary className={summaryClass}>Preserved source data</summary>
@@ -376,6 +397,30 @@ export function FinanceImportPreview({
                 </details>
               </div>
             ))}
+          </fieldset>
+        )}
+        {preview.records.some(row => row.status === "conflict") && (
+          <fieldset className="mt-4 grid gap-2" disabled={busy || locked}>
+            <legend className="text-sm font-medium">Changed source conflicts</legend>
+            <p className="text-sm text-muted-foreground">
+              Review each original and changed source. Acknowledgment keeps the imported Chibako record and ignores the changed source record.
+            </p>
+            {preview.records.filter(row => row.status === "conflict").map(row => {
+              const key = tarsiIdentityKey(row.collection, row.source_id);
+              return (
+                <label key={key} className="flex min-h-11 items-start gap-3 py-1 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1 size-4 accent-primary"
+                    checked={acknowledgedConflicts.includes(key)}
+                    onChange={() => onToggleConflictAcknowledgment(key)}
+                  />
+                  <span className="min-w-0 break-words">
+                    Keep existing {row.collection} {row.source_id}; do not overwrite it.
+                  </span>
+                </label>
+              );
+            })}
           </fieldset>
         )}
         <div className="mt-4 grid gap-2">

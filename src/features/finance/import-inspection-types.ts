@@ -10,6 +10,7 @@ export interface TarsiInspectionIssue {
 export interface TarsiInspection {
   stage: "source-inspection";
   eligible: boolean;
+  retry_migration_id: string | null;
   can_proceed: boolean;
   representation: "top-level" | "profile";
   profile_id: string | null;

@@ -110,7 +110,7 @@ export function FinanceImportCommit({
             onChange={onToggleConfirmed}
           />
           <span className="min-w-0">
-            I reviewed this proposal, including its blockers, exclusions, and reconciled balances.
+            I reviewed this proposal, including its blockers, exclusions, changed-source conflicts, and reconciled balances.
           </span>
         </label>
         <p className="text-muted-foreground">
@@ -150,7 +150,7 @@ function ImportResult({ result }: { result: TarsiImportSummary }) {
     <section aria-label="Import result" className="grid gap-4 rounded-md border border-border p-4 text-sm">
       <p className="font-medium">Import committed</p>
       <p className="tabular-nums">
-        {result.counts.imported} imported, {result.counts.skipped} skipped, {result.counts.excluded} excluded.
+        {result.counts.imported} imported, {result.counts.skipped} skipped, {result.counts.conflicts} conflicts, {result.counts.excluded} excluded.
       </p>
 
       <details open>
@@ -209,8 +209,20 @@ function ImportResult({ result }: { result: TarsiImportSummary }) {
       </details>
 
       <details>
-        <summary className={summaryClass}>Skipped and excluded ({result.skipped.length + result.exclusions.length})</summary>
+        <summary className={summaryClass}>Skipped, conflicts, and excluded ({result.skipped.length + result.conflicts.length + result.exclusions.length})</summary>
         <ul className="mt-3 grid gap-2">
+          {result.conflicts.map(item => (
+            <li key={item.path} className="break-words">
+              <span className="font-medium">Conflict retained:</span> {item.label}. {item.reason}
+              <details className="mt-1">
+                <summary className={summaryClass}>Compare original and changed source</summary>
+                <p className="mt-1 font-medium">Previously imported source</p>
+                <pre className="mt-1 whitespace-pre-wrap break-all text-xs">{JSON.stringify(item.previousSource, null, 2)}</pre>
+                <p className="mt-1 font-medium">Current source</p>
+                <pre className="mt-1 whitespace-pre-wrap break-all text-xs">{JSON.stringify(item.currentSource, null, 2)}</pre>
+              </details>
+            </li>
+          ))}
           {result.skipped.map(item => (
             <li key={item.path} className="break-words">
               <span className="font-medium">Skipped:</span> {item.label}. {item.reason}
@@ -221,7 +233,7 @@ function ImportResult({ result }: { result: TarsiImportSummary }) {
               <span className="font-medium">Excluded:</span> {item.path}. {item.reason}
             </li>
           ))}
-          {!result.skipped.length && !result.exclusions.length && <li className="text-muted-foreground">Nothing skipped or excluded.</li>}
+          {!result.skipped.length && !result.conflicts.length && !result.exclusions.length && <li className="text-muted-foreground">Nothing skipped, conflicted, or excluded.</li>}
         </ul>
       </details>
 

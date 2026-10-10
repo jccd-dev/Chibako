@@ -22,9 +22,11 @@ A balance adjustment referencing an absent account is an exception requiring
 explicit exclusion, never a reason to invent or reassign an account. Preview
 automatically excludes that adjustment and requires owner acknowledgment.
 
-Existing finance rows block initial migration eligibility, including archived
-records and prior finance bookkeeping. Existing Notes do not block eligibility.
-Inspection remains available to explain a blocked source or destination.
+Existing finance rows block a new migration, including archived records and
+prior finance bookkeeping. Existing Notes do not block eligibility. A source
+that uniquely matches a completed migration remains eligible as a retry; an
+unrelated history cannot be merged into populated finance. Inspection remains
+available to explain a blocked source or destination.
 
 `POST /api/finance/import/inspect` accepts the raw `application/json` backup and
 returns a non-cacheable `source-inspection` report. It requires an authenticated
@@ -43,18 +45,22 @@ historical balances remain unverified. Pending source activity has no cash effec
 Recurring definitions remain paused. Saved/paid/collected snapshots become starting
 progress, not new cash activity; goal progress needs a money-account allocation.
 
-Review accepted, blocked, skipped and excluded counts by collection. Skipped is
-zero for an initial proposal; retry handling belongs to the later migration step.
+Review accepted, blocked, skipped, conflicted and excluded counts by collection.
+An unchanged imported identity is skipped. A changed identity shows the original
+and current source and requires explicit acknowledgment to retain the existing
+Chibako record. Retry never reapplies opening-balance reconciliation to completed
+accounts. Newly added identities can be imported in the same migration.
 Unsupported data and individual source records can be explicitly excluded using
 the review controls. Select exclusions, update the preview, acknowledge every
 exclusion, and update again. Required dates/references, invalid money, allocation
 conflicts and mirror divergence cannot be dismissed by acknowledgment. Resolve
 source mappings in the backup or exclude affected records explicitly; dependencies
 on excluded records remain blockers. A proposal is ready for approval only when
-finance is empty, all blockers are settled, and every exclusion is acknowledged.
+the destination is empty or the source matches a prior migration, all blockers
+are settled, every exclusion is acknowledged, and every conflict is reviewed.
 
 `POST /api/finance/import/inspect?preview=1` accepts
-`{ "backup": <Tarsi envelope>, "exclusions": [<source path>], "acknowledged_exclusions": [<source path>] }`
+`{ "backup": <Tarsi envelope>, "exclusions": [<source path>], "acknowledged_exclusions": [<source path>], "acknowledged_conflicts": [<collection/source-ID key>] }`
 and returns a non-cacheable `reconciled-preview` report. Review choices are checked
 server-side against that backup; unknown paths and extra review options are rejected.
 Source and exception details remain private to the owner response and client memory.
@@ -71,14 +77,14 @@ The backend commit contract is available for the owner workflow to call:
   retry record beside the private backup and does not change the live Vault. If the live Vault changed, those
   later Notes and finance changes must be reconciled before any offline restore.
 - `POST /api/finance/import/commit` accepts `{ request_id, backup_id,
-  proposal_hash, backup, exclusions?, acknowledged_exclusions?,
+  proposal_hash, backup, exclusions?, acknowledged_exclusions?, acknowledged_conflicts?,
   final_confirmation: true }`. `proposal_hash` comes from the preview response.
   The server rechecks Vault eligibility, rebuilds the proposal from the supplied
   source and review choices, and requires the backup to still match Notes and
   finance data before committing.
 
 The commit response contains `migration_id`, source and proposal hashes, counts
-for imported/skipped/excluded source records, per-record outcomes and reasons,
+for imported/skipped/conflicted/excluded source records, per-record outcomes and reasons,
 reconciled balances, the source/target identities and paused state of imported
 schedules, starting progress with source/target identities for goals and
 obligations, relationship-preservation entries, and acknowledged exclusions.
@@ -93,12 +99,18 @@ skipped outcome that links back to the parent source ID and explains that
 starting progress is preserved without replaying historical cash. Explicitly
 excluded non-object array values also receive outcomes using their source path
 and a safe index-based identity. Commit is owner-session-only,
-uses `request_id` for idempotent retries, and atomically writes finance rows,
-migration outcomes, request bookkeeping and audit. Notes are never changed and
+uses `request_id` for idempotent request retries and stable collection/source IDs
+for source retries, and atomically writes finance rows, migration outcomes,
+request bookkeeping and audit. Repeated source identities are never overwritten;
+new identities extend the same migration. Notes are never changed and
 finance-to-Note links are not created. Stale proposals, changed Vault data,
-unacknowledged exclusions and nonempty finance are rejected. Backup creation,
+unacknowledged exclusions or conflicts, and unrelated histories in populated
+finance are rejected. Backup creation,
 download and commit reject bearer-authenticated requests, including trusted-local
-MCP at the capability boundary. No MCP import or restore tool is exposed. Backup
+MCP at the capability boundary. `GET /api/finance/import` and MCP
+`list_finance_imports` require `finance:read` and return paginated compact counts.
+Set `include_details=true` to explicitly request private import results and
+retained source rows. No MCP import commit or restore tool is exposed. Backup
 verification is an actual disposable-Vault restore, not a read-only open of the
 backup file. No in-app live restore is exposed. An offline restore must first
 create a current backup, compare current Notes and finance data with the recovery

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FinanceImportCommit } from "../src/features/finance/components/FinanceImportCommit";
+import { FinanceImportPreview } from "../src/features/finance/components/FinanceImportPreview";
 import type { TarsiCommitGate } from "../src/features/finance/import-commit-gate";
 import type { TarsiImportSummary } from "../src/features/finance/import-commit-flow";
+import { tarsiIdentityKey, type TarsiPreview } from "../src/features/finance/import-preview-types";
 
 const backup = {
   id: "7b1f1a4e-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
@@ -29,11 +31,12 @@ function gate(overrides: Partial<TarsiCommitGate> = {}): TarsiCommitGate {
 }
 
 const summary: TarsiImportSummary = {
-  counts: { imported: 2, skipped: 1, excluded: 1 },
+  counts: { imported: 2, skipped: 1, conflicts: 0, excluded: 1 },
   balances: [{ account_id: "cash", name: "TEST cash", source_cents: 10000, effects_cents: -500, opening_cents: 10500, reconciled_cents: 10000, opening_inferred: true, historical_balances_verified: false }],
   pausedSchedules: [{ path: "recurringExpenses:monthly", collection: "recurringExpenses", label: "TEST rent" }],
   startingProgress: [{ path: "goals:goal", collection: "goals", label: "TEST goal", cents: 1500, kind: "saved" }],
   skipped: [{ path: "accountGroups[0]", collection: "accountGroups", label: "TEST group", reason: "No finance capability." }],
+  conflicts: [],
   relationships: [{
     path: "accounts[0].linkedGoalId",
     field: "linkedGoalId",
@@ -128,4 +131,46 @@ test("the offline recovery warning is shown and no in-app restore control is off
 test("a commit error is surfaced as an actionable alert rather than swallowed", () => {
   const html = render({ gate: { ...gate(), ready: true }, confirmed: true, backup, commitError: "The reviewed proposal changed; review the current preview again" });
   assert.match(html, /The reviewed proposal changed; review the current preview again/);
+});
+
+test("the owner preview shows stable skipped identities and requires review of changed-source conflicts", () => {
+  const conflictKey = tarsiIdentityKey("expenses", "TEST expense");
+  const preview: TarsiPreview = {
+    stage: "reconciled-preview",
+    proposal_hash: "a".repeat(64),
+    inspection: { retry_migration_id: "migration-1" } as TarsiPreview["inspection"],
+    can_approve: false,
+    issues: [],
+    counts: [{ collection: "expenses", accepted: 0, skipped: 1, conflicts: 1, excluded: 0, blocked: 0 }],
+    records: [
+      { collection: "expenses", source_id: "already", path: "expenses[0]", status: "skipped", source: {}, target: {}, effects: [], reason: "Already imported; no changes reapplied." },
+      { collection: "expenses", source_id: "TEST expense", path: "expenses[1]", status: "conflict", source: { note: "changed" }, previous_source: { note: "original" }, target: {}, effects: [], reason: "Source changed after import." },
+    ],
+    balances: [],
+    exclusions: [],
+    exclusion_choices: [],
+    commit_notice: "Preview writes nothing.",
+  };
+  const html = renderToStaticMarkup(
+    <FinanceImportPreview
+      preview={preview}
+      busy={false}
+      error=""
+      needsUpdate={true}
+      exclusions={[]}
+      acknowledged={[]}
+      acknowledgedConflicts={[conflictKey]}
+      locked={false}
+      onUpdate={() => {}}
+      onToggleExclusion={() => {}}
+      onToggleAcknowledgment={() => {}}
+      onToggleConflictAcknowledgment={() => {}}
+      commit={null}
+    />,
+  );
+  assert.match(html, /Already imported · skipped/);
+  assert.match(html, /Changed source · conflict/);
+  assert.match(html, /Previously imported source/);
+  assert.match(html, /Current source/);
+  assert.match(html, /Keep existing expenses TEST expense; do not overwrite it/);
 });

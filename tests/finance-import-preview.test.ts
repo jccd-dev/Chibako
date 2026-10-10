@@ -74,7 +74,7 @@ test("missing-account adjustments are excluded from effects and require exact ac
   assert.equal(report.exclusions[0].path, "balanceAdjustments[1]");
   assert.equal(report.exclusions[0].acknowledged, false);
   assert.equal(report.balances[0].effects_cents, 685);
-  assert.deepEqual(report.counts.find(row => row.collection === "balanceAdjustments"), { collection: "balanceAdjustments", accepted: 1, skipped: 0, excluded: 1, blocked: 0 });
+  assert.deepEqual(report.counts.find(row => row.collection === "balanceAdjustments"), { collection: "balanceAdjustments", accepted: 1, skipped: 0, conflicts: 0, excluded: 1, blocked: 0 });
   assert.equal(previewTarsiBackup(owner, backup, { acknowledged_exclusions: ["balanceAdjustments[1]"] }).can_approve, true);
   assert.throws(() => previewTarsiBackup(owner, backup, { acknowledged_exclusions: ["unknown"] }), { code: "invalid_input" });
   assert.deepEqual(getDb().serialize(), before);

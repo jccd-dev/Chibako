@@ -125,6 +125,10 @@ try {
   await connect(reader.key, async client => {
     const names = (await client.listTools()).tools.map(tool => tool.name);
     assert.ok(names.includes("get_finance_summary"));
+    assert.ok(names.includes("list_finance_imports"));
+    assert.equal(names.some(name => /import.*(?:commit|restore)|(?:commit|restore).*import/i.test(name)), false);
+    assert.deepEqual((await client.callTool({ name: "list_finance_imports", arguments: {} })).structuredContent,
+      { migrations: [], total: 0, limit: 20, offset: 0 });
     assert.ok(!names.includes("create_finance_account"));
     assert.ok(names.includes("list_finance_schedules"));
     assert.ok(!names.includes("create_finance_schedule"));

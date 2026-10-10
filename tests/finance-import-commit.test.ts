@@ -9,8 +9,11 @@ import { getDb } from "../src/lib/db";
 import { createNote, getNote } from "../src/lib/notes";
 import { commitTarsiImport, createTarsiImportBackup, readTarsiImportBackup, verifyTarsiImportRecovery } from "../src/features/finance/import-commit";
 import { previewTarsiBackup } from "../src/features/finance/import-preview";
+import { tarsiIdentityKey } from "../src/features/finance/import-preview-types";
 import { getObligation } from "../src/features/finance/obligations";
-import { getAccount, listAccounts } from "../src/features/finance/accounts";
+import { getAccount, listAccounts, updateAccount } from "../src/features/finance/accounts";
+import { correctActivity } from "../src/features/finance/corrections";
+import { postTransaction } from "../src/features/finance/activity";
 import { createSession } from "../src/lib/auth";
 import { POST as createBackupRoute } from "../src/app/api/finance/import/backup/route";
 import { GET as downloadBackupRoute } from "../src/app/api/finance/import/backup/[id]/route";
@@ -79,7 +82,7 @@ test("owner import uses a verified recoverable backup and restores Notes and fin
     backup: source(), ...review,
     final_confirmation: true,
   });
-  assert.deepEqual(result.counts, { imported: 15, skipped: 9, excluded: 4 });
+  assert.deepEqual(result.counts, { imported: 15, skipped: 9, conflicts: 0, excluded: 4 });
   assert.equal(result.records.length, 28);
   assert.ok(result.records.some(row => row.collection === "legacyRows" && row.status === "excluded"));
   assert.deepEqual(result.records.filter(row => row.path.startsWith("legacyRows[")).map(row => [row.source_id, row.status]), [
@@ -156,6 +159,113 @@ test("owner import uses a verified recoverable backup and restores Notes and fin
   assert.equal(readTarsiImportBackup(owner, backup.id).byteLength, backup.size_bytes);
   assert.deepEqual(getDb().prepare("SELECT id,title,folder,content FROM notes WHERE id=?").get(note.id), noteBefore);
   assert.notEqual(vaultSnapshot(getDb()), vaultBefore);
+});
+
+test("same-source retries skip imported identities and preserve later edits and activity", async () => {
+  const source = { app: "Tarsi", data: {
+    accounts: [{ id: "retry-cash", name: "TEST retry cash", type: "debit", currency: "PHP", balance: 100 }],
+    expenses: [{ id: "retry-expense", accountId: "retry-cash", amount: 10, date: "2020-01-01", category: "other", note: "TEST source expense" }],
+  } };
+  const firstBackup = await createTarsiImportBackup(owner);
+  const firstPreview = previewTarsiBackup(owner, source);
+  const first = commitTarsiImport(owner, {
+    request_id: "retry-first", backup_id: firstBackup.id, proposal_hash: firstPreview.proposal_hash,
+    backup: source, final_confirmation: true,
+  });
+  updateAccount(owner, "accounts:retry-cash", { request_id: "retry-account-edit", version: 1, name: "TEST edited cash" });
+  correctActivity(owner, "expenses:retry-expense", { request_id: "retry-activity-edit", version: 1, text: "TEST Chibako edit" });
+  postTransaction(owner, {
+    request_id: "retry-manual-activity", type: "expense", account_id: "accounts:retry-cash",
+    amount: "4.00", transaction_date: "2026-10-10", text: "TEST later Chibako activity",
+  });
+
+  const retryBackup = await createTarsiImportBackup(owner);
+  const retryPreview = previewTarsiBackup(owner, source);
+  assert.equal(retryPreview.inspection.eligible, true);
+  assert.equal(retryPreview.inspection.retry_migration_id, first.migration_id);
+  assert.deepEqual(retryPreview.records.map(row => row.status), ["skipped", "skipped"]);
+  assert.equal(retryPreview.balances.length, 0);
+  const retry = commitTarsiImport(owner, {
+    request_id: "retry-second", backup_id: retryBackup.id, proposal_hash: retryPreview.proposal_hash,
+    backup: source, final_confirmation: true,
+  });
+  assert.equal(retry.migration_id, first.migration_id);
+  assert.deepEqual(retry.counts, { imported: 0, skipped: 2, excluded: 0, conflicts: 0 });
+  assert.equal(getAccount(owner, "accounts:retry-cash").name, "TEST edited cash");
+  assert.equal(getAccount(owner, "accounts:retry-cash").opening_balance_cents, 11000);
+  assert.equal(getAccount(owner, "accounts:retry-cash").balance_cents, 9600);
+  assert.equal(getDb().prepare<[string], { text: string }>("SELECT text FROM finance_transactions WHERE id=?").get("expenses:retry-expense")?.text, "TEST Chibako edit");
+  assert.equal(getDb().prepare<[], { count: number }>("SELECT COUNT(*) AS count FROM finance_transactions").get()?.count, 2);
+  assert.equal(getDb().prepare<[string, string], { count: number }>("SELECT COUNT(*) AS count FROM finance_audit WHERE request_id IN (?,?)").get("retry-first", "retry-second")?.count, 2);
+});
+
+test("source field exclusions do not turn an unchanged imported identity into a conflict", async () => {
+  const backup = { app: "Tarsi", data: {
+    accounts: [{ id: "excluded-field-cash", name: "TEST excluded field cash", type: "debit", currency: "PHP", balance: 10, legacyPrivateField: "TEST retained source detail" }],
+  } };
+  const review = { exclusions: ["accounts.legacyPrivateField"], acknowledged_exclusions: ["accounts.legacyPrivateField"] };
+  const firstBackup = await createTarsiImportBackup(owner);
+  const firstPreview = previewTarsiBackup(owner, backup, review);
+  const first = commitTarsiImport(owner, {
+    request_id: "excluded-field-first", backup_id: firstBackup.id, proposal_hash: firstPreview.proposal_hash,
+    backup, ...review, final_confirmation: true,
+  });
+  const retryPreview = previewTarsiBackup(owner, backup);
+  assert.equal(retryPreview.inspection.retry_migration_id, first.migration_id);
+  assert.equal(retryPreview.records[0].status, "skipped");
+  assert.equal(retryPreview.can_approve, true);
+});
+
+test("changed source identities require review and never overwrite the imported or edited records", async () => {
+  const original = { app: "Tarsi", data: {
+    accounts: [{ id: "conflict-cash", name: "TEST conflict cash", type: "debit", currency: "PHP", balance: 100 }],
+    expenses: [{ id: "conflict-expense", accountId: "conflict-cash", amount: 10, date: "2020-01-01", category: "other", note: "TEST source expense" }],
+  } };
+  const backup = await createTarsiImportBackup(owner);
+  const proposal = previewTarsiBackup(owner, original);
+  const first = commitTarsiImport(owner, {
+    request_id: "conflict-first", backup_id: backup.id, proposal_hash: proposal.proposal_hash,
+    backup: original, final_confirmation: true,
+  });
+  correctActivity(owner, "expenses:conflict-expense", { request_id: "conflict-edit", version: 1, text: "TEST preserved Chibako edit" });
+
+  const changed = { app: "Tarsi", data: {
+    accounts: [{ ...original.data.accounts[0], balance: 75 }],
+    expenses: [
+      { ...original.data.expenses[0], note: "TEST changed source expense" },
+      { id: "new-expense", accountId: "conflict-cash", amount: 3, date: "2020-02-01", category: "other", note: "TEST new source expense" },
+    ],
+  } };
+  const retryBackup = await createTarsiImportBackup(owner);
+  const retryPreview = previewTarsiBackup(owner, changed);
+  assert.equal(retryPreview.inspection.retry_migration_id, first.migration_id);
+  assert.equal(retryPreview.can_approve, false);
+  assert.deepEqual(retryPreview.records.map(row => row.status), ["conflict", "conflict", "accepted"]);
+  assert.ok(retryPreview.records.filter(row => row.status === "conflict").every(row => row.previous_source !== undefined));
+  const acknowledged = [tarsiIdentityKey("accounts", "conflict-cash"), tarsiIdentityKey("expenses", "conflict-expense")];
+  const reviewed = previewTarsiBackup(owner, changed, { acknowledged_conflicts: acknowledged });
+  assert.equal(reviewed.can_approve, true);
+  const result = commitTarsiImport(owner, {
+    request_id: "conflict-retry", backup_id: retryBackup.id, proposal_hash: reviewed.proposal_hash,
+    backup: changed, acknowledged_conflicts: acknowledged, final_confirmation: true,
+  });
+  assert.deepEqual(result.counts, { imported: 1, skipped: 0, excluded: 0, conflicts: 2 });
+  assert.deepEqual(result.records.filter(row => row.status === "conflict").map(row => tarsiIdentityKey(row.collection, row.source_id)), acknowledged);
+  assert.equal(getAccount(owner, "accounts:conflict-cash").opening_balance_cents, 11000);
+  assert.equal(getAccount(owner, "accounts:conflict-cash").balance_cents, 9700);
+  assert.equal(getDb().prepare<[string], { text: string }>("SELECT text FROM finance_transactions WHERE id=?").get("expenses:conflict-expense")?.text, "TEST preserved Chibako edit");
+  assert.equal(getDb().prepare<[], { count: number }>("SELECT COUNT(*) AS count FROM finance_transactions").get()?.count, 2);
+
+  const unrelated = { app: "Tarsi", data: {
+    accounts: [{ id: "other-cash", name: "TEST unrelated cash", type: "debit", currency: "PHP", balance: 20 }],
+    expenses: [{ id: "other-expense", accountId: "other-cash", amount: 2, date: "2020-01-01", category: "other" }],
+  } };
+  assert.equal(previewTarsiBackup(owner, unrelated).inspection.eligible, false);
+  const sharedAccountOnly = { app: "Tarsi", data: {
+    accounts: [{ id: "conflict-cash", name: "TEST unrelated shared cash", type: "debit", currency: "PHP", balance: 20 }],
+    expenses: [{ id: "unrelated-shared-account-expense", accountId: "conflict-cash", amount: 2, date: "2020-01-01", category: "other" }],
+  } };
+  assert.equal(previewTarsiBackup(owner, sharedAccountOnly).inspection.eligible, false);
 });
 
 test("import revalidates approval, eligibility and owner-only access before writes", async () => {
@@ -245,6 +355,37 @@ test("audit failure rolls back imported finance rows, migration outcomes, and re
   for (const table of ["finance_accounts", "finance_transactions", "finance_requests", "finance_audit", "finance_import_migrations", "finance_import_records"]) {
     assert.equal(getDb().prepare<[], { count: number }>(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count, 0, table);
   }
+});
+
+test("audit failure during a same-migration retry rolls back added identities and summary changes", async () => {
+  const original = { app: "Tarsi", data: {
+    accounts: [{ id: "rollback-cash", name: "TEST rollback cash", type: "debit", currency: "PHP", balance: 20 }],
+    expenses: [{ id: "rollback-first", accountId: "rollback-cash", amount: 2, date: "2020-01-01" }],
+  } };
+  const firstBackup = await createTarsiImportBackup(owner);
+  const firstPreview = previewTarsiBackup(owner, original);
+  const first = commitTarsiImport(owner, {
+    request_id: "rollback-first-import", backup_id: firstBackup.id, proposal_hash: firstPreview.proposal_hash,
+    backup: original, final_confirmation: true,
+  });
+  const changed = { app: "Tarsi", data: {
+    accounts: original.data.accounts,
+    expenses: [...original.data.expenses, { id: "rollback-added", accountId: "rollback-cash", amount: 1, date: "2020-01-02" }],
+  } };
+  const retryBackup = await createTarsiImportBackup(owner);
+  const retryPreview = previewTarsiBackup(owner, changed);
+  assert.equal(retryPreview.inspection.retry_migration_id, first.migration_id);
+  const before = vaultSnapshot(getDb());
+  getDb().exec("CREATE TEMP TRIGGER reject_retry_audit BEFORE INSERT ON finance_audit BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END;");
+  try {
+    assert.throws(() => commitTarsiImport(owner, {
+      request_id: "rollback-retry", backup_id: retryBackup.id, proposal_hash: retryPreview.proposal_hash,
+      backup: changed, final_confirmation: true,
+    }), /audit unavailable/);
+  } finally { getDb().exec("DROP TRIGGER reject_retry_audit"); }
+  assert.equal(vaultSnapshot(getDb()), before);
+  assert.equal(getDb().prepare("SELECT 1 FROM finance_transactions WHERE id='expenses:rollback-added'").get(), undefined);
+  assert.equal(getDb().prepare<[string], { result_json: string }>("SELECT result_json FROM finance_import_migrations WHERE id=?").get(first.migration_id)?.result_json, JSON.stringify(first));
 });
 
 test("long source identities remain accessible through normal finance capabilities", async () => {

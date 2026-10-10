@@ -10,12 +10,14 @@ import {
 import { FinanceClientError, financeJson } from "../src/features/finance/client-json";
 import type { TarsiImportResult } from "../src/features/finance/import-commit";
 import type { TarsiPreview } from "../src/features/finance/import-preview-types";
+import { tarsiIdentityKey } from "../src/features/finance/import-preview-types";
 
 const review = {
   backupId: "7b1f1a4e-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
   proposalHash: "a".repeat(64),
   exclusions: ["legacyRows", "legacyConfig"],
   acknowledged: ["legacyRows", "legacyConfig"],
+  acknowledgedConflicts: [],
 };
 
 test("the commit fingerprint is stable for the same review and changes with the proposal, backup, or choices", () => {
@@ -24,6 +26,7 @@ test("the commit fingerprint is stable for the same review and changes with the 
   assert.notEqual(commitFingerprint(review), commitFingerprint({ ...review, proposalHash: "b".repeat(64) }));
   assert.notEqual(commitFingerprint(review), commitFingerprint({ ...review, backupId: "00000000-0000-4000-8000-000000000000" }));
   assert.notEqual(commitFingerprint(review), commitFingerprint({ ...review, exclusions: ["legacyRows"] }));
+  assert.notEqual(commitFingerprint(review), commitFingerprint({ ...review, acknowledgedConflicts: [tarsiIdentityKey("expenses", "expense-1")] }));
 });
 
 test("a retry of the same review reuses its request ID, so a repeated commit cannot repeat effects", () => {
@@ -53,6 +56,7 @@ test("the commit payload carries the exact server contract, including final conf
     backup: source,
     exclusions: review.exclusions,
     acknowledged_exclusions: review.acknowledged,
+    acknowledged_conflicts: [],
     final_confirmation: true,
   });
 });
@@ -86,7 +90,7 @@ function result(): TarsiImportResult {
     migration_id: "migration-1",
     source_hash: "d".repeat(64),
     proposal_hash: review.proposalHash,
-    counts: { imported: 2, skipped: 2, excluded: 1 },
+    counts: { imported: 2, skipped: 2, conflicts: 0, excluded: 1 },
     records: [
       { collection: "goals", source_id: "goal", path: "goals[0]", parent_source_id: null, status: "imported", reason: null },
       { collection: "recurringExpenses", source_id: "monthly", path: "recurringExpenses[0]", parent_source_id: null, status: "imported", reason: null },
@@ -109,10 +113,11 @@ function result(): TarsiImportResult {
 
 test("the result summary reports paused schedules, preserved progress, skips, and exclusions from the server outcome", () => {
   const summary = summarizeTarsiImportResult(result(), preview());
-  assert.deepEqual(summary.counts, { imported: 2, skipped: 2, excluded: 1 });
+  assert.deepEqual(summary.counts, { imported: 2, skipped: 2, conflicts: 0, excluded: 1 });
   assert.deepEqual(summary.pausedSchedules, [{ path: "recurringExpenses:monthly", collection: "recurringExpenses", label: "Rent" }]);
   assert.deepEqual(summary.startingProgress, [{ path: "goals:goal", collection: "goals", label: "TEST goal", cents: 1500, kind: "saved" }]);
   assert.deepEqual(summary.skipped.map(row => row.collection), ["goals.contributions", "accountGroups"]);
+  assert.deepEqual(summary.conflicts, []);
   assert.deepEqual(summary.relationships, [{
     path: "accounts[0].linkedGoalId",
     field: "linkedGoalId",

@@ -1,7 +1,15 @@
+import { createHash } from "node:crypto";
 import { decimalCents, exactCents } from "./money";
 import { FinanceError } from "./types";
 import { isCalendarDay, isSourceObject } from "./import-source-format";
 import type { TarsiProposalRecord } from "./import-preview-types";
+
+export function tarsiTargetId(collection: string, sourceId: string): string {
+  const id = `${collection}:${sourceId}`;
+  // Keep target IDs decodable in routes, with hashed IDs for long or unsafe source IDs.
+  return /^[A-Za-z0-9._-]+$/.test(sourceId) && id.length <= 110 ? id
+    : `${collection}:hash:${createHash("sha256").update(sourceId).digest("hex")}`;
+}
 
 export function mapTarsiRecord(collection: string, source: Record<string, unknown>, path: string): TarsiProposalRecord {
   // Retain source metadata and relationships alongside normalized finance values.

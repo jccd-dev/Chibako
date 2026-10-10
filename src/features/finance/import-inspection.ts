@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { getDb } from "../../lib/db";
 import { FinanceError, type FinanceActor } from "./types";
@@ -12,6 +13,31 @@ const financeTables = [
   "finance_import_migrations", "finance_import_records",
 ] as const;
 const profileKeys = new Set(["profiles", "activeProfileId", "profileMetas"]);
+const retryAnchorCollections = new Set(["expenses", "incomes", "transfers", "balanceAdjustments", "recurringExpenses", "recurringIncomes", "goals", "debts", "receivables"]);
+
+function findRetryMigration(input: Record<string, unknown>, selected: Record<string, unknown>): string | null {
+  const db = getDb();
+  const sourceHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  const exact = db.prepare<[string], { id: string }>("SELECT id FROM finance_import_migrations WHERE source_hash=?").get(sourceHash);
+  if (exact) return exact.id;
+
+  const incoming = new Set<string>();
+  for (const collection of retryAnchorCollections) {
+    const rows = selected[collection];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) if (isSourceObject(row) && typeof row.id === "string") {
+      incoming.add(JSON.stringify([collection, row.id]));
+    }
+  }
+  if (!incoming.size) return null;
+  const candidates = new Set<string>();
+  for (const row of db.prepare<[], { migration_id: string; collection: string; source_id: string }>(
+    "SELECT migration_id,collection,source_id FROM finance_import_records WHERE status='imported'",
+  ).all()) {
+    if (incoming.has(JSON.stringify([row.collection, row.source_id]))) candidates.add(row.migration_id);
+  }
+  return candidates.size === 1 ? [...candidates][0] : null;
+}
 
 export function inspectTarsiBackup(actor: FinanceActor, input: unknown): TarsiInspection {
   if (actor.kind !== "owner") {
@@ -21,16 +47,15 @@ export function inspectTarsiBackup(actor: FinanceActor, input: unknown): TarsiIn
     throw new FinanceError("Choose a Tarsi JSON backup with an app and data envelope", 400, "invalid_input");
   }
   const db = getDb();
-  const eligible = !financeTables.some(table => db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get());
+  const emptyFinance = !financeTables.some(table => db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get());
   const report: TarsiInspection = {
-    stage: "source-inspection", eligible, can_proceed: false, representation: "top-level", profile_id: null,
+    stage: "source-inspection", eligible: emptyFinance, retry_migration_id: null, can_proceed: false, representation: "top-level", profile_id: null,
     mirrors: [], sections: [], currencies: [], relationships: [], dates: [], issues: [],
   };
   const issue = (code: string, path: string, message: string, severity: "blocker" | "exception" = "blocker") => {
     report.issues.push({ code, path, message, severity });
   };
   for (const field of Object.keys(input)) if (!["app", "data", "exportedAt"].includes(field)) issue("unsupported_field", field, "Backup envelope field requires review.");
-  if (!eligible) issue("finance_not_empty", "destination", "Initial migration requires empty finance data. Existing Notes are allowed.");
   const data = input.data;
   const hasTopLevelCollections = Object.keys(sourceFields).some(key => Object.hasOwn(data, key));
   const profiles = isSourceObject(data.profiles) ? data.profiles : {};
@@ -60,6 +85,9 @@ export function inspectTarsiBackup(actor: FinanceActor, input: unknown): TarsiIn
     if (!profileKeys.has(key) && !Object.hasOwn(selected, key)) issue("unselected_top_level_section", `data.${key}`, "Top-level section is absent from the selected profile and requires review; records are never combined.");
   }
   if (typeof data.activeProfileId === "string" && !isSourceObject(profiles[data.activeProfileId])) issue("missing_active_profile", "data.activeProfileId", "The selected profile ID does not resolve.");
+  report.retry_migration_id = findRetryMigration(input, selected);
+  report.eligible = emptyFinance || report.retry_migration_id !== null;
+  if (!report.eligible) issue("finance_not_empty", "destination", "A populated Vault accepts retries of a previously imported migration only. Another Tarsi history cannot be merged.");
   const identities = new Map<string, Set<string>>();
   for (const [name, value] of Object.entries(selected)) {
     if (profileKeys.has(name)) continue;
@@ -138,6 +166,6 @@ export function inspectTarsiBackup(actor: FinanceActor, input: unknown): TarsiIn
   }
   for (const [name, value] of Object.entries(selected)) if (!profileKeys.has(name)) inspect({ [name]: value }, "", name);
   report.currencies = [...currencies].sort();
-  report.can_proceed = eligible && report.issues.length === 0;
+  report.can_proceed = report.eligible && report.issues.length === 0;
   return report;
 }

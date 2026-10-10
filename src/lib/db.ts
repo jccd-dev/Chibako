@@ -375,10 +375,26 @@ export function getDb(): Database.Database {
       id TEXT PRIMARY KEY, source_hash TEXT NOT NULL UNIQUE, proposal_hash TEXT NOT NULL,
       created_at INTEGER NOT NULL, result_json TEXT NOT NULL
     ); CREATE TABLE IF NOT EXISTS finance_import_records (
+      id INTEGER PRIMARY KEY,
       migration_id TEXT NOT NULL REFERENCES finance_import_migrations(id), collection TEXT NOT NULL,
       source_id TEXT NOT NULL, source_path TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('imported','skipped','excluded')),
-      reason TEXT, source_json TEXT NOT NULL, PRIMARY KEY (migration_id,source_path)
-    ); CREATE INDEX IF NOT EXISTS idx_finance_import_records_status ON finance_import_records(migration_id,status,collection);`);
+      reason TEXT, source_json TEXT NOT NULL
+    );`);
+    const importRecordColumns = new Set((db.prepare("PRAGMA table_info(finance_import_records)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!importRecordColumns.has("id")) {
+      db.exec(`ALTER TABLE finance_import_records RENAME TO finance_import_records_legacy;
+        CREATE TABLE finance_import_records (
+          id INTEGER PRIMARY KEY,
+          migration_id TEXT NOT NULL REFERENCES finance_import_migrations(id), collection TEXT NOT NULL,
+          source_id TEXT NOT NULL, source_path TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('imported','skipped','excluded')),
+          reason TEXT, source_json TEXT NOT NULL
+        );
+        INSERT INTO finance_import_records (id,migration_id,collection,source_id,source_path,status,reason,source_json)
+          SELECT rowid,migration_id,collection,source_id,source_path,status,reason,source_json FROM finance_import_records_legacy;
+        DROP TABLE finance_import_records_legacy;`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_finance_import_records_status ON finance_import_records(migration_id,status,collection);
+      CREATE INDEX IF NOT EXISTS idx_finance_import_records_identity ON finance_import_records(migration_id,collection,source_id);`);
     const planColumns = new Set((db.prepare("PRAGMA table_info(finance_plans)").all() as Array<{ name: string }>).map(column => column.name));
     if (!planColumns.has("schedule_id")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_id TEXT REFERENCES finance_schedules(id)");
     if (!planColumns.has("occurrence_date")) db.exec("ALTER TABLE finance_plans ADD COLUMN occurrence_date TEXT");

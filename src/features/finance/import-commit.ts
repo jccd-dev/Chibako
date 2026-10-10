@@ -9,6 +9,8 @@ import { FinanceError, type FinanceActor } from "./types";
 import { financeMutation, parseFinance } from "./mutations";
 import { decimalCents } from "./money";
 import { previewTarsiBackup } from "./import-preview";
+import { tarsiTargetId as targetId } from "./import-preview-mapping";
+import { isSourceObject } from "./import-source-format";
 import type { TarsiPreview, TarsiProposalRecord } from "./import-preview-types";
 
 const backupIdSchema = z.string().uuid();
@@ -20,6 +22,7 @@ const commitSchema = z.object({
   backup: z.unknown(),
   exclusions: z.array(z.string().min(1).max(512)).max(10_000).default([]),
   acknowledged_exclusions: z.array(z.string().min(1).max(512)).max(10_000).default([]),
+  acknowledged_conflicts: z.array(z.string().min(1).max(512)).max(10_000).default([]),
   final_confirmation: z.literal(true),
 }).strict();
 
@@ -41,8 +44,8 @@ export interface TarsiImportResult {
   migration_id: string;
   source_hash: string;
   proposal_hash: string;
-  counts: { imported: number; skipped: number; excluded: number };
-  records: { collection: string; source_id: string; path: string; parent_source_id: string | null; status: "imported" | "skipped" | "excluded"; reason: string | null }[];
+  counts: { imported: number; skipped: number; conflicts: number; excluded: number };
+  records: { collection: string; source_id: string; path: string; parent_source_id: string | null; status: "imported" | "skipped" | "conflict" | "excluded"; reason: string | null; previous_source?: Record<string, unknown>; current_source?: Record<string, unknown> }[];
   balances: TarsiPreview["balances"];
   schedules: { source_collection: string; source_id: string; target_id: string; paused: true }[];
   progress: { source_collection: string; source_id: string; target_collection: "goals" | "obligations"; target_id: string; kind: "saved" | "paid" | "collected"; starting_progress_cents: number }[];
@@ -220,11 +223,17 @@ function tagIds(record: TarsiProposalRecord): string[] {
   return tag ? [targetId("tags", tag)] : [];
 }
 
-function targetId(collection: string, sourceId: string): string {
-  const id = `${collection}:${sourceId}`;
-  // Keep route decoding stable and leave room for occurrence IDs within 128 characters.
-  return /^[A-Za-z0-9._-]+$/.test(sourceId) && id.length <= 110 ? id
-    : `${collection}:hash:${createHash("sha256").update(sourceId).digest("hex")}`;
+function originalSource(backup: unknown, record: TarsiProposalRecord, profileId: string | null): unknown {
+  if (!isSourceObject(backup) || !isSourceObject(backup.data)) return record.source;
+  const data = backup.data;
+  const selected = profileId !== null && isSourceObject(data.profiles) ? data.profiles[profileId] : data;
+  const path = record.path.match(/^([^.[\]]+)\[(\d+)\]$/);
+  if (!isSourceObject(selected) || !path) return record.source;
+  const rows = selected[path[1]];
+  if (!Array.isArray(rows)) return record.source;
+  const source = rows[Number(path[2])];
+  if (typeof source === "string" && path[1].includes("CategoryOrder")) return { id: source, order: Number(path[2]) };
+  return source ?? record.source;
 }
 
 function categoryId(records: TarsiProposalRecord[], sourceId: string, type: string, subcategory = false): string {
@@ -367,7 +376,11 @@ function importRecord(record: TarsiProposalRecord, records: TarsiProposalRecord[
 export function commitTarsiImport(actor: FinanceActor, input: unknown): TarsiImportResult {
   requireOwner(actor);
   const parsed = parseFinance(commitSchema, input);
-  const reviewOptions = { exclusions: parsed.exclusions, acknowledged_exclusions: parsed.acknowledged_exclusions };
+  const reviewOptions = {
+    exclusions: parsed.exclusions,
+    acknowledged_exclusions: parsed.acknowledged_exclusions,
+    acknowledged_conflicts: parsed.acknowledged_conflicts,
+  };
   const sourceHash = createHash("sha256").update(JSON.stringify(parsed.backup)).digest("hex");
   const payload = {
     backup_id: parsed.backup_id,
@@ -375,6 +388,7 @@ export function commitTarsiImport(actor: FinanceActor, input: unknown): TarsiImp
     proposal_hash: parsed.proposal_hash,
     exclusions: [...parsed.exclusions].sort(),
     acknowledged_exclusions: [...parsed.acknowledged_exclusions].sort(),
+    acknowledged_conflicts: [...parsed.acknowledged_conflicts].sort(),
     final_confirmation: parsed.final_confirmation,
   };
   return financeMutation(actor, parsed.request_id, "finance.import.commit", payload, () => {
@@ -385,13 +399,36 @@ export function commitTarsiImport(actor: FinanceActor, input: unknown): TarsiImp
     const { db: verified } = verifyBackup(backupPath(parsed.backup_id));
     try {
       const db = getDb();
-      const migrationId = randomUUID(), timestamp = now();
+      const migrationId = proposal.inspection.retry_migration_id ?? randomUUID(), timestamp = now();
       const outcomes: TarsiImportResult["records"] = [];
-      const counts = { imported: 0, skipped: 0, excluded: 0 };
-      db.prepare("INSERT INTO finance_import_migrations (id,source_hash,proposal_hash,created_at,result_json) VALUES (?,?,?,?,?)")
-        .run(migrationId, sourceHash, proposal.proposal_hash, timestamp, "{}");
+      const counts = { imported: 0, skipped: 0, conflicts: 0, excluded: 0 };
+      if (proposal.inspection.retry_migration_id) {
+        db.prepare("UPDATE finance_import_migrations SET proposal_hash=? WHERE id=?").run(proposal.proposal_hash, migrationId);
+      } else {
+        db.prepare("INSERT INTO finance_import_migrations (id,source_hash,proposal_hash,created_at,result_json) VALUES (?,?,?,?,?)")
+          .run(migrationId, sourceHash, proposal.proposal_hash, timestamp, "{}");
+      }
       const insertOutcome = db.prepare(`INSERT INTO finance_import_records
         (migration_id,collection,source_id,source_path,status,reason,source_json) VALUES (?,?,?,?,?,?,?)`);
+      const findImported = db.prepare<[string, string, string], { id: number }>(
+        "SELECT id FROM finance_import_records WHERE migration_id=? AND collection=? AND source_id=? AND status='imported' LIMIT 1",
+      );
+      const updateOutcome = db.prepare("UPDATE finance_import_records SET source_path=?,status=?,reason=?,source_json=? WHERE id=?");
+      const findByPath = db.prepare<[string, string], { id: number }>(
+        "SELECT id FROM finance_import_records WHERE migration_id=? AND source_path=? LIMIT 1",
+      );
+      const findUnimported = db.prepare<[string, string, string], { id: number }>(
+        "SELECT id FROM finance_import_records WHERE migration_id=? AND collection=? AND source_id=? AND status!='imported' LIMIT 1",
+      );
+      const persistOutcome = (record: TarsiProposalRecord, status: "imported" | "skipped" | "excluded", reason: string | null) => {
+        if (findImported.get(migrationId, record.collection, record.source_id)) return;
+        const existing = record.collection.includes(".")
+          ? findByPath.get(migrationId, record.path)
+          : findUnimported.get(migrationId, record.collection, record.source_id);
+        const sourceJson = JSON.stringify(originalSource(parsed.backup, record, proposal.inspection.profile_id));
+        if (existing) updateOutcome.run(record.path, status, reason, sourceJson, existing.id);
+        else insertOutcome.run(migrationId, record.collection, record.source_id, record.path, status, reason, sourceJson);
+      };
       const ordered = [...proposal.records].sort((a, b) => {
         const ai = collectionOrder.indexOf(a.collection), bi = collectionOrder.indexOf(b.collection);
         return (ai < 0 ? collectionOrder.length : ai) - (bi < 0 ? collectionOrder.length : bi);
@@ -403,13 +440,17 @@ export function commitTarsiImport(actor: FinanceActor, input: unknown): TarsiImp
           ensureMappedCategories(ordered, timestamp);
           classificationsReady = true;
         }
-        let status: "imported" | "skipped" | "excluded", reason: string | null;
+        let status: "imported" | "skipped" | "conflict" | "excluded", reason: string | null;
         if (record.status === "excluded") { status = "excluded"; reason = "Owner-approved exclusion."; }
+        else if (record.status === "skipped" || record.status === "conflict") { status = record.status; reason = record.reason ?? null; }
         else ({ status, reason } = importRecord(record, ordered, timestamp));
-        counts[status]++;
-        const result = { collection: record.collection, source_id: record.source_id, path: record.path, parent_source_id: null, status, reason };
+        counts[status === "conflict" ? "conflicts" : status]++;
+        const result = {
+          collection: record.collection, source_id: record.source_id, path: record.path, parent_source_id: null, status, reason,
+          ...(status === "conflict" && record.previous_source ? { previous_source: record.previous_source, current_source: record.source } : {}),
+        };
         outcomes.push(result);
-        insertOutcome.run(migrationId, record.collection, record.source_id, record.path, status, reason, JSON.stringify(record.source));
+        if (status !== "conflict") persistOutcome(record, status, reason);
         if (status === "imported") for (const [field, referenceCollection] of [
           ["accountGroupId", "accountGroups"], ["linkedGoalId", "goals"], ["contactId", "sharedBalanceContacts"],
         ] as const) {
@@ -443,17 +484,23 @@ export function commitTarsiImport(actor: FinanceActor, input: unknown): TarsiImp
             const path = `${record.path}.${field}[${index}]`;
             const nestedStatus = status === "excluded" ? "excluded" : "skipped";
             const nestedReason = nestedStatus === "excluded" ? "Parent source record was owner-excluded."
+              : status === "conflict" ? "Parent source changed; existing starting progress is retained and history is not replayed."
+              : status === "skipped" ? "Parent identity was already imported; historical cash is not replayed."
               : "Starting progress is preserved on the parent record; historical cash is not replayed.";
             counts[nestedStatus]++;
             outcomes.push({ collection, source_id: sourceId, path, parent_source_id: record.source_id, status: nestedStatus, reason: nestedReason });
-            insertOutcome.run(migrationId, collection, sourceId, path, nestedStatus, nestedReason, JSON.stringify(source));
+            const old = findByPath.get(migrationId, path);
+            if (old) updateOutcome.run(path, nestedStatus, nestedReason, JSON.stringify(source), old.id);
+            else insertOutcome.run(migrationId, collection, sourceId, path, nestedStatus, nestedReason, JSON.stringify(source));
           }
         }
       }
-      const schedules = ordered.filter(record => ["recurringExpenses", "recurringIncomes"].includes(record.collection) && record.status !== "excluded")
+      const schedules = ordered.filter(record => ["recurringExpenses", "recurringIncomes"].includes(record.collection)
+        && outcomes.some(row => row.collection === record.collection && row.source_id === record.source_id && row.status === "imported"))
         .map(record => ({ source_collection: record.collection, source_id: record.source_id, target_id: targetId(record.collection, record.source_id), paused: true as const }));
       const progress: TarsiImportResult["progress"] = [];
-      for (const record of ordered.filter(record => ["goals", "debts", "receivables"].includes(record.collection) && record.status !== "excluded")) {
+      for (const record of ordered.filter(record => ["goals", "debts", "receivables"].includes(record.collection)
+        && outcomes.some(row => row.collection === record.collection && row.source_id === record.source_id && row.status === "imported"))) {
         const amount = record.target.starting_progress_cents;
         if (typeof amount !== "number") continue;
         progress.push({

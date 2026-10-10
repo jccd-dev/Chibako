@@ -18,6 +18,7 @@ export function useFinanceImportCommit({
   preview,
   exclusions,
   acknowledged,
+  acknowledgedConflicts,
   confirmed,
   onBackupInvalidated,
 }: {
@@ -25,6 +26,7 @@ export function useFinanceImportCommit({
   preview: TarsiPreview | null;
   exclusions: string[];
   acknowledged: string[];
+  acknowledgedConflicts: string[];
   confirmed: boolean;
   onBackupInvalidated: () => void;
 }) {
@@ -85,10 +87,10 @@ export function useFinanceImportCommit({
     active.current = true;
     setCommitBusy(true);
     setCommitError("");
-    const fingerprint = commitFingerprint({ backupId: backup.id, proposalHash: preview.proposal_hash, exclusions, acknowledged });
+    const fingerprint = commitFingerprint({ backupId: backup.id, proposalHash: preview.proposal_hash, exclusions, acknowledged, acknowledgedConflicts });
     const attempt = commitRequestFor(request.current, fingerprint, () => crypto.randomUUID());
     request.current = attempt;
-    const review = { backupId: backup.id, proposalHash: preview.proposal_hash, exclusions, acknowledged };
+    const review = { backupId: backup.id, proposalHash: preview.proposal_hash, exclusions, acknowledged, acknowledgedConflicts };
     try {
       const response = await fetch("/api/finance/import/commit", {
         method: "POST",
@@ -114,7 +116,7 @@ export function useFinanceImportCommit({
         setCommitBusy(false);
       }
     }
-  }, [acknowledged, backup, committed, confirmed, exclusions, getSource, onBackupInvalidated, preview]);
+  }, [acknowledged, acknowledgedConflicts, backup, committed, confirmed, exclusions, getSource, onBackupInvalidated, preview]);
 
   return {
     backup,

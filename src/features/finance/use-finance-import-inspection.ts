@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { financeJson } from "./client-json";
 import { evaluateTarsiCommitGate } from "./import-commit-gate";
 import { TARSI_BACKUP_MAX_BYTES } from "./import-inspection-types";
+import { tarsiIdentityKey } from "./import-preview-types";
 import type { TarsiInspection } from "./import-inspection-types";
 import type { TarsiPreview } from "./import-preview-types";
 import { useFinanceImportCommit } from "./use-finance-import-commit";
@@ -20,6 +21,7 @@ export function useFinanceImportInspection() {
   const [previewNeedsUpdate, setPreviewNeedsUpdate] = useState(false);
   const [exclusions, setExclusions] = useState<string[]>([]);
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
+  const [acknowledgedConflicts, setAcknowledgedConflicts] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState(false);
   const backup = useRef<unknown>(null);
   const sequence = useRef(0);
@@ -30,6 +32,7 @@ export function useFinanceImportInspection() {
     preview,
     exclusions,
     acknowledged,
+    acknowledgedConflicts,
     confirmed,
     onBackupInvalidated: invalidateConfirmation,
   });
@@ -53,6 +56,7 @@ export function useFinanceImportInspection() {
     setPreviewNeedsUpdate(false);
     setExclusions([]);
     setAcknowledged([]);
+    setAcknowledgedConflicts([]);
     setConfirmed(false);
     resetCommit();
   }, [resetCommit]);
@@ -128,6 +132,7 @@ export function useFinanceImportInspection() {
     async (sent: {
       exclusions: string[];
       acknowledged_exclusions: string[];
+      acknowledged_conflicts: string[];
     }): Promise<TarsiPreview | null> => {
       if (!backup.current || locked) return null;
       const current = ++sequence.current;
@@ -144,6 +149,7 @@ export function useFinanceImportInspection() {
             backup: backup.current,
             exclusions: sent.exclusions,
             acknowledged_exclusions: sent.acknowledged_exclusions,
+            acknowledged_conflicts: sent.acknowledged_conflicts,
           }),
         }).then(financeJson<TarsiPreview>);
         if (current === sequence.current) {
@@ -172,12 +178,14 @@ export function useFinanceImportInspection() {
     const result = await requestPreview({
       exclusions: [],
       acknowledged_exclusions: [],
+      acknowledged_conflicts: [],
     });
     if (result) {
       setExclusions([]);
       setAcknowledged(
         result.exclusions.filter(row => row.acknowledged).map(row => row.path),
       );
+      setAcknowledgedConflicts([]);
     }
   }, [requestPreview]);
 
@@ -185,6 +193,7 @@ export function useFinanceImportInspection() {
     const result = await requestPreview({
       exclusions,
       acknowledged_exclusions: acknowledged,
+      acknowledged_conflicts: acknowledgedConflicts,
     });
     if (result) {
       setAcknowledged(prev =>
@@ -192,8 +201,11 @@ export function useFinanceImportInspection() {
           .filter(row => prev.includes(row.path) || row.acknowledged)
           .map(row => row.path),
       );
+      setAcknowledgedConflicts(prev => result.records
+        .filter(row => row.status === "conflict" && prev.includes(tarsiIdentityKey(row.collection, row.source_id)))
+        .map(row => tarsiIdentityKey(row.collection, row.source_id)));
     }
-  }, [requestPreview, exclusions, acknowledged]);
+  }, [requestPreview, exclusions, acknowledged, acknowledgedConflicts]);
 
   const toggleExclusion = useCallback((path: string) => {
     if (locked) return;
@@ -221,6 +233,14 @@ export function useFinanceImportInspection() {
         ? prev.filter(row => row !== path)
         : [...prev, path],
     );
+  }, [locked, resetCommit]);
+
+  const toggleConflictAcknowledgment = useCallback((key: string) => {
+    if (locked) return;
+    setPreviewNeedsUpdate(true);
+    setConfirmed(false);
+    resetCommit();
+    setAcknowledgedConflicts(prev => prev.includes(key) ? prev.filter(row => row !== key) : [...prev, key]);
   }, [locked, resetCommit]);
 
   const toggleConfirmed = useCallback(() => {
@@ -256,12 +276,14 @@ export function useFinanceImportInspection() {
     previewNeedsUpdate,
     exclusions,
     acknowledged,
+    acknowledgedConflicts,
     confirmed,
     commitGate,
     startPreview,
     updatePreview,
     toggleExclusion,
     toggleAcknowledgment,
+    toggleConflictAcknowledgment,
     toggleConfirmed,
     backup: commitFlow.backup,
     backupBusy: commitFlow.backupBusy,
