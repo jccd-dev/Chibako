@@ -85,6 +85,18 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     } catch (error) { if (run === inspection.current) setInspectError(error instanceof Error ? error.message : "Could not inspect obligation."); }
     finally { if (run === inspection.current) setInspecting(false); }
   }
+  async function openById(id: string) {
+    const run = ++inspection.current;
+    try {
+      const result = await fetch(`/api/finance/obligations/${id}`).then(financeJson<{ obligation: FinanceObligation }>);
+      if (run !== inspection.current) return false;
+      await openEdit(result.obligation);
+      return true;
+    } catch (error) {
+      if (run === inspection.current) setInspectError(error instanceof Error ? error.message : "Could not inspect obligation.");
+      return false;
+    }
+  }
   function close() { inspection.current++; candidates.current++; historySequence.current++; setPanel(null); setEditing(null); pending.current = null; setInspecting(false); }
 
   async function loadCandidates(nextOffset: number) {
@@ -253,7 +265,7 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     if (await mutate({ version: editing.version, archived: !editing.archived })) setNotice("Archive state saved. Cash, paid and written-off amounts are retained.");
   }
   return { page, archived, overdue, offset, setOffset, setArchived: (v: boolean) => { setArchived(v); setOffset(0); }, setOverdue: (v: boolean) => { setOverdue(v); setOffset(0); }, loading, loadError, refresh,
-    panel, setPanel, editing, inspecting, inspectError, openCreate, openEdit, close, kind, setKind, name, setName, principal, setPrincipal, dueDate, setDueDate, amount, setAmount, accountId, setAccountId, date, setDate, text, setText,
+    panel, setPanel, editing, inspecting, inspectError, openCreate, openEdit, openById, close, kind, setKind, name, setName, principal, setPrincipal, dueDate, setDueDate, amount, setAmount, accountId, setAccountId, date, setDate, text, setText,
     busy: busy || activity.busy, saveError: saveError || activity.saveError, notice, errors, save, archive, startMovement,
     pSource, choosePaymentSource, pSelected, selectCandidate, clearCandidate, pCandidates, pTotal, pOffset, pLoading, pError, loadCandidates, startPayment, pay, payConfirmed, setPaymentReview, paymentReview,
     closeReason, setCloseReason, startClose, reviewClose, closureReview, setClosureReview, executeClose,

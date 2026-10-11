@@ -31,6 +31,19 @@ export function getPlan(actor: FinanceActor, id: string, input: unknown = {}): F
   const query = parseFinance(getPlanSchema, { ...input as object, id });
   return readPlan(query.id, query.include_details);
 }
+export function listAttentionPlans(actor: FinanceActor, input: { through_date: string; limit: number }) {
+  authorizeFinance(actor, "finance:read");
+  const db = getDb();
+  return db.transaction(() => {
+    const where = "WHERE p.status = 'pending' AND p.due_date <= ?";
+    const { total } = db.prepare(`SELECT COUNT(*) AS total FROM finance_plans p ${where}`).get(input.through_date) as { total: number };
+    const rows = db.prepare(`${selection} ${where}
+      ORDER BY p.due_date, COALESCE(c.name, CASE p.type WHEN 'income' THEN 'Income plan' ELSE 'Expense plan' END), p.id LIMIT ?`)
+      .all(input.through_date, input.limit) as PlanRow[];
+    return { plans: rows.map(row => fromRow(row, false)), total };
+  })();
+}
+
 export function listPlans(actor: FinanceActor, input: unknown = {}): PlanPage {
   authorizeFinance(actor, "finance:read");
   const query = parseFinance(listPlansSchema, input), clauses: string[] = [], values: (string | number)[] = [];

@@ -16,6 +16,8 @@ Select a category to open Activity with that category, report dates, all account
 ## REST
 
 - `GET /api/finance/reports?date_from=2026-10-01&date_to=2026-10-31&limit=50&offset=0`, `finance:read`.
+- `GET /api/finance/overview`, `finance:read`, returns separate money, assets, reserved allocations, and obligation totals.
+- `GET /api/finance/attention?as_of=2026-10-10&through_date=2026-10-31&limit=50&offset=0`, `finance:read`, returns compact pending-plan, due-obligation, budget-overrun, and allocation-shortfall items. The horizon is ordered and at most 92 days; `limit` is 1–100 and `offset` is 0–1000. Queue items include review target IDs but omit plan text, obligation names, and account names.
 - `GET /api/finance/budgets?category_id=<id>&month=2026-10`, `finance:read`.
 - `PUT /api/finance/budgets`, `finance:manage`:
 
@@ -34,7 +36,7 @@ Use mode `correction` for a single month. A mutation returns `{ budget }` with `
 
 ## MCP
 
-`get_finance_report`, `get_finance_budget`, and `set_finance_budget` share the REST capability validation and results. Read and manage are independent scopes; neither manage nor write grants read. Existing keys gain no finance permissions. No personal transaction text is returned by reports.
+`get_finance_report`, `get_finance_budget`, `set_finance_budget`, `get_finance_overview`, and `get_finance_attention` share the REST capability validation and results. Read and manage are independent scopes; neither manage nor write grants read. Existing keys gain no finance permissions. No personal transaction text is returned by reports or compact overview/attention reads.
 
 ## Verification
 
@@ -42,6 +44,7 @@ Automated capability/protocol checks use disposable SQLite databases:
 
 ```sh
 node --import tsx --test tests/finance-budgets-reports.test.ts tests/finance-budgets-protocol.test.ts
+node --import tsx --test tests/finance-overview.test.ts tests/finance-protocol.test.ts
 npm run typecheck
 npm test
 npm run test:mcp-stdio

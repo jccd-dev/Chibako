@@ -106,10 +106,29 @@ export function FinanceReports({ reports, onCategory }: { reports: FinanceReport
   </section>;
 }
 
-export function FinanceBudgets({ budget, activity }: { budget: FinanceBudgetController; activity: FinanceActivityController }) {
+export function FinanceBudgets({
+  budget,
+  activity,
+  focusCategoryId,
+  focusMonth,
+  onFocusHandled,
+}: {
+  budget: FinanceBudgetController;
+  activity: FinanceActivityController;
+  focusCategoryId?: string | null;
+  focusMonth?: string | null;
+  onFocusHandled?: () => void;
+}) {
   const { open, setOpen, category, setCategory, month, setMonth, mode, setMode, amount, setAmount, snapshot, loadError, busy, saveError } = budget;
+  useEffect(() => {
+    if (!focusCategoryId || !focusMonth) return;
+    void activity.ensureClassification(focusCategoryId).finally(() => {
+      budget.openForReview(focusCategoryId, focusMonth);
+      onFocusHandled?.();
+    });
+  }, [focusCategoryId, focusMonth, onFocusHandled, budget.openForReview]);
   const categories = activity.classifications.filter(row => row.kind === "category" && row.type === "expense" && !row.parent_id);
-  return <section aria-label="Monthly budgets">
+  return <section id="finance-budgets" aria-label="Monthly budgets">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Monthly budgets</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Expense-category limits include all subcategories and accounts. Calendar months start on day 1, without rollover.</p></div><Button className={control} onClick={() => setOpen(true)}>Set budget</Button></div>
     <p className="mt-5 text-sm text-muted-foreground">Review spending against limits in Overview. Forward changes preserve earlier months. Use an explicit correction for one month.</p>
     {budget.notice && <p role="status" className="mt-4 text-sm">{budget.notice}</p>}

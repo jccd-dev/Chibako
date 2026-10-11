@@ -71,6 +71,19 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   useEffect(() => { void refreshTotals(); return () => { totalsSequence.current++; }; }, [refreshTotals]);
   useEffect(() => { void refreshOptions(); }, [refreshOptions]);
 
+  async function ensureClassification(id: string) {
+    if (classifications.some(row => row.id === id)) return true;
+    let nextOffset = classifications.length;
+    while (true) {
+      const result = await fetch(`/api/finance/classifications?archived=all&limit=100&offset=${nextOffset}`).then(json<ClassificationPage>);
+      const found = result.classifications.some(row => row.id === id);
+      setClassifications(current => [...current, ...result.classifications.filter(row => !current.some(item => item.id === row.id))]);
+      if (found) return true;
+      nextOffset += result.classifications.length;
+      if (nextOffset >= result.total || result.classifications.length === 0) return false;
+    }
+  }
+
   async function loadMoreOptions(kind: "accounts" | "classifications") {
     if (optionLoading.current) return;
     optionLoading.current = true;
@@ -94,6 +107,7 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
     try {
       const result = await fetch(`/api/finance/${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, request_id: pending.current.requestId }) }).then(json<T>);
       pending.current = null;
+      window.dispatchEvent(new Event("finance-changed"));
       await onSuccess(result);
       return result;
     } catch (error) { setSaveError(error instanceof Error ? error.message : "Could not save. Try again."); return null; }
@@ -147,6 +161,6 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   function applyFilters(value: ActivityFilters) { setOffset(0); setFilters(value); }
   function clearFilters() { applyFilters(emptyFilters); }
   function resetSave() { pending.current = null; setSaveError(""); }
-  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, postObligation, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, loadMoreOptions, resetSave };
+  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, postObligation, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, ensureClassification, loadMoreOptions, resetSave };
 }
 export type FinanceActivityController = ReturnType<typeof useFinanceActivity>;

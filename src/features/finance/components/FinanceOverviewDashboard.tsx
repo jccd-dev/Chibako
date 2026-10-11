@@ -41,6 +41,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { FinanceMonthInput } from "./FinanceDateInputs";
 import { FinanceGoals } from "./FinanceGoals";
+import { FinanceAttentionQueue } from "./FinanceAttentionQueue";
 import {
   Empty,
   EmptyDescription,
@@ -54,6 +55,8 @@ import {
 } from "@/features/finance/presentation";
 import type { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
+import type { FinanceAttentionController } from "@/features/finance/use-finance-attention";
+import type { FinanceAttentionItem } from "@/features/finance/overview-types";
 import type { FinanceReportsController } from "@/features/finance/use-finance-reports";
 import type { FinancePlanningController } from "@/features/finance/use-finance-planning";
 import type { FinanceAccount } from "@/features/finance/types";
@@ -64,6 +67,8 @@ interface FinanceOverviewDashboardProps {
   activity: FinanceActivityController;
   reports: FinanceReportsController;
   planning: FinancePlanningController;
+  attention: FinanceAttentionController;
+  onReviewAttention: (item: FinanceAttentionItem) => void;
   onNavigateTab: (tab: "overview" | "activity" | "planning" | "manage") => void;
   onOpenAccount: (account?: FinanceAccount) => void;
   onCategoryFilter: (categoryId: string) => void;
@@ -119,6 +124,8 @@ export function FinanceOverviewDashboard({
   activity,
   reports,
   planning,
+  attention,
+  onReviewAttention,
   onNavigateTab,
   onOpenAccount,
   onCategoryFilter,
@@ -381,7 +388,7 @@ export function FinanceOverviewDashboard({
             </dl>
           </CardContent>
         </Card>
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Card size="sm">
             <CardHeader>
               <CardTitle>Monthly spending limit</CardTitle>
@@ -442,6 +449,34 @@ export function FinanceOverviewDashboard({
             )}
             data-testid="finance-asset-total"
           />
+          <Tile
+            label="Reserved for goals"
+            value={money(finance.summary?.allocations.reserved_cents ?? 0)}
+            description={countLabel(finance.summary?.allocations.goal_count ?? 0, "active goal")}
+            data-testid="finance-reserved-total"
+          />
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Obligations</CardTitle>
+              <CardDescription>Separate from cash</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-2 gap-3">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Debt</dt>
+                  <dd className="mt-1 break-words text-sm font-semibold tabular-nums">
+                    {money(finance.summary?.obligations.debt_cents ?? 0)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Receivables</dt>
+                  <dd className="mt-1 break-words text-sm font-semibold tabular-nums">
+                    {money(finance.summary?.obligations.receivable_cents ?? 0)}
+                  </dd>
+                </div>
+              </dl>
+            </CardContent>
+          </Card>
         </div>
         <div className="grid min-w-0 gap-3 md:grid-cols-3">
           <Card size="sm" className="">
@@ -629,8 +664,12 @@ export function FinanceOverviewDashboard({
       </div>
       <aside
         className="flex min-w-0 flex-col gap-3"
-        aria-label="Accounts and transaction history"
+        aria-label="Finance review, accounts and transaction history"
       >
+        <FinanceAttentionQueue
+          attention={attention}
+          onReview={onReviewAttention}
+        />
         <Card size="sm" className="">
           <CardHeader>
             <CardTitle>Accounts</CardTitle>

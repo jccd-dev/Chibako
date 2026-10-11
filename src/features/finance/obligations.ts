@@ -87,6 +87,19 @@ export function getObligation(actor: FinanceActor, id: string, input: unknown = 
 const principalSql = `(o.opening_principal_cents - o.starting_progress_cents + COALESCE((SELECT SUM(m.amount_cents) FROM finance_obligation_movements m WHERE m.obligation_id=o.id AND m.reverted=0),0)
   - COALESCE((SELECT SUM(p.amount_cents) FROM finance_obligation_payments p JOIN finance_transactions t ON t.id=p.cash_activity_id WHERE p.obligation_id=o.id AND t.reverted=0),0)
   - COALESCE((SELECT SUM(w.amount_cents) FROM finance_obligation_writeoffs w WHERE w.obligation_id=o.id),0) > 0)`;
+export function listDueAttentionObligations(actor: FinanceActor, input: { as_of: string; through_date: string; limit: number }) {
+  authorizeFinance(actor, "finance:read");
+  const db = getDb();
+  return db.transaction(() => {
+    const where = `WHERE o.archived = 0 AND o.due_date IS NOT NULL AND o.due_date <= ? AND ${principalSql}`;
+    const values = [input.through_date];
+    const { total } = db.prepare(`SELECT COUNT(*) AS total FROM finance_obligations o ${where}`).get(...values) as { total: number };
+    const rows = db.prepare(`SELECT o.id FROM finance_obligations o ${where}
+      ORDER BY o.due_date, CASE o.kind WHEN 'debt' THEN 0 ELSE 1 END, o.id LIMIT ?`).all(...values, input.limit) as { id: string }[];
+    return { obligations: rows.map(row => readObligation(row.id, input.as_of)), total };
+  })();
+}
+
 export function listObligations(actor: FinanceActor, input: unknown = {}): FinanceObligationList {
   authorizeFinance(actor, "finance:read");
   const query = parseFinance(listObligationsSchema, input), asOf = query.as_of ?? today();

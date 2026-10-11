@@ -64,6 +64,26 @@ export function useFinanceGoals() {
     } catch (error) { if (run === inspection.current) setSaveError(error instanceof Error ? error.message : "Could not inspect goal."); }
     finally { if (run === inspection.current) setInspecting(false); }
   }
+  async function openForAccount(accountId: string) {
+    const run = ++inspection.current;
+    try {
+      let nextOffset = 0;
+      while (true) {
+        const result = await fetch(`/api/finance/goals?limit=100&offset=${nextOffset}&archived=false`).then(financeJson<FinanceGoalList>);
+        if (run !== inspection.current) return false;
+        const goal = result.goals.find((row) => row.allocations.some((allocation) => allocation.account_id === accountId));
+        if (goal) {
+          await openEdit(goal);
+          return true;
+        }
+        nextOffset += result.goals.length;
+        if (nextOffset >= result.total || result.goals.length === 0) return false;
+      }
+    } catch (error) {
+      if (run === inspection.current) setLoadError(error instanceof Error ? error.message : "Could not find the goal allocation.");
+      return false;
+    }
+  }
   function closePanel() { inspection.current++; setPanel(null); setEditing(null); setSaveError(""); setNotice(""); pending.current = null; }
   function selectAccount(id: string) { setAccountId(id); setAmount(decimalPHP(editing?.allocations.find(row => row.account_id === id)?.amount_cents ?? 0)); }
 
@@ -76,6 +96,7 @@ export function useFinanceGoals() {
       const result = await fetch(`/api/finance/goals${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, request_id: pending.current.requestId }) }).then(financeJson<{ goal: FinanceGoal }>);
       pending.current = null;
       await refresh();
+      window.dispatchEvent(new Event("finance-changed"));
       return result.goal;
     } catch (error) { setSaveError(error instanceof Error ? error.message : "Could not save goal. Try again."); return null; }
     finally { saving.current = false; setBusy(false); }
@@ -100,6 +121,6 @@ export function useFinanceGoals() {
     if (await mutate(`/${editing.id}`, "PATCH", { version: editing.version, archived: true })) closePanel();
   }
   return { page, archived, changeArchived: (value: boolean) => { setArchived(value); setOffset(0); }, offset, setOffset, accounts, loading, loadError, busy, inspecting, panel, editing,
-    name, setName, target, setTarget, dueDate, setDueDate, accountId, selectAccount, amount, setAmount, saveError, notice, refresh, save, allocate, archive, openCreate, openEdit, closePanel };
+    name, setName, target, setTarget, dueDate, setDueDate, accountId, selectAccount, amount, setAmount, saveError, notice, refresh, save, allocate, archive, openCreate, openEdit, openForAccount, closePanel };
 }
 export type FinanceGoalsController = ReturnType<typeof useFinanceGoals>;

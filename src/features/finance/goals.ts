@@ -36,6 +36,41 @@ export function getGoal(actor: FinanceActor, id: string): FinanceGoal {
   return getDb().transaction(() => readGoal(id))();
 }
 
+export function listGoalAllocationShortfalls(actor: FinanceActor, input: { limit: number }) {
+  authorizeFinance(actor, "finance:read");
+  const balanceSql = `(
+    a.opening_balance_cents
+    + COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount_cents ELSE -t.amount_cents END)
+      FROM finance_transactions t WHERE t.account_id = a.id AND t.reverted = 0), 0)
+    + COALESCE((SELECT SUM(CASE WHEN m.type = 'transfer' AND m.account_id = a.id THEN -m.amount_cents ELSE m.amount_cents END)
+      FROM finance_movements m WHERE m.reverted = 0 AND (m.account_id = a.id OR m.destination_account_id = a.id)), 0)
+    + COALESCE((SELECT SUM(r.amount_cents) FROM finance_refunds r WHERE r.account_id = a.id AND r.reverted = 0), 0)
+    + COALESCE((SELECT SUM(CASE WHEN m.type = 'borrowing' THEN m.amount_cents ELSE -m.amount_cents END)
+      FROM finance_obligation_movements m WHERE m.account_id = a.id AND m.reverted = 0), 0)
+  )`;
+  const reservedSql = `(SELECT COALESCE(SUM(ga.amount_cents), 0) FROM finance_goal_allocations ga
+    JOIN finance_goals g ON g.id = ga.goal_id AND g.archived = 0 WHERE ga.account_id = a.id)`;
+  const cte = `WITH account_reservations AS (
+    SELECT a.id AS account_id, a.created_at, ${balanceSql} AS balance_cents, ${reservedSql} AS reserved_cents
+    FROM finance_accounts a WHERE a.kind = 'money'
+  ), shortfalls AS (
+    SELECT account_id, balance_cents, reserved_cents,
+      reserved_cents - CASE WHEN balance_cents > 0 THEN balance_cents ELSE 0 END AS shortfall_cents
+    FROM account_reservations
+    WHERE reserved_cents > CASE WHEN balance_cents > 0 THEN balance_cents ELSE 0 END
+  )`;
+  const db = getDb();
+  return db.transaction(() => {
+    const { total } = db.prepare(`${cte} SELECT COUNT(*) AS total FROM shortfalls`).get() as { total: number };
+    const rows = db.prepare(`${cte} SELECT account_id, balance_cents, reserved_cents, shortfall_cents FROM shortfalls
+      ORDER BY account_id LIMIT ?`).safeIntegers().all(input.limit) as { account_id: string; balance_cents: bigint; reserved_cents: bigint; shortfall_cents: bigint }[];
+    return {
+      accounts: rows.map(row => ({ account_id: row.account_id, balance_cents: exactCents(row.balance_cents), reserved_cents: exactCents(row.reserved_cents), shortfall_cents: exactCents(row.shortfall_cents) })),
+      total,
+    };
+  })();
+}
+
 export function listGoalAccounts(actor: FinanceActor, input: unknown = {}) {
   authorizeFinance(actor, "finance:read");
   const query = parseFinance(listGoalAccountsSchema, input);

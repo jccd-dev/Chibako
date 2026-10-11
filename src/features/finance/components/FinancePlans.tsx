@@ -22,7 +22,19 @@ import { FinanceRecurrence } from "./FinanceRecurrence";
 
 export interface ReminderOptions { obligations: FinanceObligation[]; loading: boolean; error: string; reload: () => void; hasMore: boolean; loadMore: () => void }
 
-export function FinancePlans({ planning, activity }: { planning: FinancePlanningController; activity: FinanceActivityController }) {
+export function FinancePlans({
+  planning,
+  activity,
+  focusPlanId,
+  focusObligationId,
+  onFocusHandled,
+}: {
+  planning: FinancePlanningController;
+  activity: FinanceActivityController;
+  focusPlanId?: string | null;
+  focusObligationId?: string | null;
+  onFocusHandled?: () => void;
+}) {
   const [panel, setPanel] = useState<string | null>(null);
   const [detail, setDetail] = useState<FinancePlan | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -36,6 +48,11 @@ export function FinancePlans({ planning, activity }: { planning: FinancePlanning
   const [remindersOffset, setRemindersOffset] = useState(0);
   const [remindersTotal, setRemindersTotal] = useState(0);
   useEffect(() => { setSelected([]); }, [planning.page]);
+  useEffect(() => {
+    if (!focusPlanId) return;
+    setPanel(focusPlanId);
+    onFocusHandled?.();
+  }, [focusPlanId, onFocusHandled]);
   useEffect(() => {
     setDetail(null); setDetailError("");
     if (!panel || panel === "create") return;
@@ -62,7 +79,7 @@ export function FinancePlans({ planning, activity }: { planning: FinancePlanning
   function open(id: string) { planning.resetSave(); setPanel(id); }
   const today = localCalendarDate();
   const reminderLabel = (id: string) => `Reminder: ${reminderName(id) ?? "obligation linked"}`;
-  return <><FinanceRecurrence activity={activity} planning={planning} occurrence={futureOccurrence} onCloseOccurrence={() => setFutureOccurrence(null)} reminders={remindersOptions} /><section aria-label="Planned activity and recurring occurrences" className="mt-8 border-t border-border pt-6">
+  return <><FinanceRecurrence activity={activity} planning={planning} occurrence={futureOccurrence} onCloseOccurrence={() => setFutureOccurrence(null)} reminders={remindersOptions} /><section id="finance-plans" aria-label="Planned activity and recurring occurrences" className="mt-8 border-t border-border pt-6">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Planned activity and occurrences</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Expected income and expenses stay pending until you confirm actual activity. Planning never changes balances or consumes budgets.</p></div><Button className={control} onClick={() => open("create")}>Add plan</Button></div>
     <div className="mt-4 flex flex-wrap gap-3"><Button variant="outline" className={control} disabled={planning.busy} onClick={() => void planning.save(null, "catch-up", {})}>{planning.busy ? "Preparing review…" : planning.hasMoreCatchUp ? "Load more missed occurrences" : "Refresh due occurrences"}</Button>{selected.length > 0 && <Button variant="outline" className={control} disabled={planning.busy} onClick={() => void planning.save(null, "skip", { plans: selected.map(plan => ({ id: plan.id, version: plan.version })) }).then(result => { if (result) setSelected([]); })}>Confirm skip {selected.length} selected occurrences</Button>}</div>
     {planning.hasMoreCatchUp && <p className="mt-2 text-sm text-muted-foreground">More missed occurrences remain. Load the next catch-up batch; each batch stays pending.</p>}
@@ -79,7 +96,11 @@ export function FinancePlans({ planning, activity }: { planning: FinancePlanning
       <SheetHeader className="border-b border-border p-6"><SheetTitle>{panel === "create" ? "Add one-time plan" : "Review planned activity"}</SheetTitle><SheetDescription>Due dates describe expectations. Transaction dates describe money that actually moved.</SheetDescription></SheetHeader>
       {detailError ? <div className="flex flex-col gap-4 p-6"><Alert><AlertDescription>{detailError}</AlertDescription></Alert><Button variant="outline" className={control} onClick={() => setReload(value => value + 1)}>Retry plan inspection</Button><Button variant="outline" className={control} onClick={() => setPanel(null)}>Close plan</Button></div> : panel === "create" || detail ? <PlanPanel key={`${panel}:${detail?.version ?? "new"}:${reload}`} plan={detail} activity={activity} planning={planning} reminders={remindersOptions} onClose={() => setPanel(null)} onFuture={plan => { setPanel(null); setFutureOccurrence(plan); }} onRefresh={() => { planning.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-6"><p role="status">Loading plan…</p><Button variant="outline" className={control} onClick={() => setPanel(null)}>Close plan</Button></div>}
     </SheetContent></Sheet>
-  </section><FinanceObligations activity={activity} /></>;
+  </section><FinanceObligations
+    activity={activity}
+    focusObligationId={focusObligationId}
+    onFocusHandled={onFocusHandled}
+  /></>;
 }
 
 function PlanPanel({ plan, activity, planning, reminders, onClose, onFuture, onRefresh }: { plan: FinancePlan | null; activity: FinanceActivityController; planning: FinancePlanningController; reminders: ReminderOptions; onClose: () => void; onFuture: (plan: FinancePlan) => void; onRefresh: () => void }) {

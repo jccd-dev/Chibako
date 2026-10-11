@@ -55,15 +55,66 @@ function reportDates(input: unknown) {
   for (let index = monthIndex(from); index <= monthIndex(to); index++) months.push(`${Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, "0")}`);
   return { ...query, from, to, months };
 }
+export function listAttentionBudgetOverruns(actor: FinanceActor, input: { month: string; limit: number }) {
+  authorizeFinance(actor, "finance:read");
+  const from = `${input.month}-01`;
+  const [year, month] = input.month.split("-").map(Number);
+  const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  const cte = `WITH activity_spending AS (
+    SELECT CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END AS category_id, SUM(t.amount_cents) AS spending_cents
+    FROM finance_transactions t LEFT JOIN finance_classifications c ON c.id = t.category_id
+    WHERE t.reverted = 0 AND t.type <> 'income' AND t.transaction_date BETWEEN ? AND ?
+      AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id = t.id)
+    GROUP BY CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END
+    UNION ALL
+    SELECT CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END AS category_id, -SUM(r.amount_cents) AS spending_cents
+    FROM finance_refunds r JOIN finance_transactions t ON t.id = r.expense_id
+      LEFT JOIN finance_classifications c ON c.id = t.category_id
+    WHERE r.reverted = 0 AND t.reverted = 0 AND r.transaction_date BETWEEN ? AND ?
+    GROUP BY CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END
+  ), spending AS (
+    SELECT category_id, SUM(spending_cents) AS spending_cents
+    FROM activity_spending GROUP BY category_id
+  ), category_spending AS (
+    SELECT c.id AS category_id, c.name,
+      COALESCE(s.spending_cents, 0) AS spending_cents,
+      (SELECT l.amount_cents FROM finance_budget_limits l
+       WHERE l.category_id = c.id
+         AND ((l.mode = 'correction' AND l.month = ?) OR (l.mode = 'forward' AND l.month <= ?))
+       ORDER BY CASE l.mode WHEN 'correction' THEN 0 ELSE 1 END, l.month DESC LIMIT 1) AS budget_cents
+    FROM finance_classifications c LEFT JOIN spending s ON s.category_id = c.id
+    WHERE c.kind = 'category' AND c.type = 'expense' AND c.parent_id IS NULL
+  ), overruns AS (
+    SELECT category_id, name, spending_cents, budget_cents
+    FROM category_spending
+    WHERE budget_cents IS NOT NULL AND spending_cents > budget_cents
+  )`;
+  const values = [from, to, from, to, input.month, input.month];
+  const db = getDb();
+  return db.transaction(() => {
+    const { total } = db.prepare(`${cte} SELECT COUNT(*) AS total FROM overruns`).get(...values) as { total: number };
+    const rows = db.prepare(`${cte} SELECT category_id, name, spending_cents, budget_cents FROM overruns ORDER BY name, category_id LIMIT ?`)
+      .safeIntegers().all(...values, input.limit) as { category_id: string; name: string; spending_cents: bigint; budget_cents: bigint }[];
+    return {
+      categories: rows.map(row => ({ category_id: row.category_id, name: row.name, spending_cents: exactCents(row.spending_cents), budget_cents: exactCents(row.budget_cents) })),
+      total,
+    };
+  })();
+}
+
 export function getFinanceReport(actor: FinanceActor, input: unknown = {}): FinanceReport {
   authorizeFinance(actor, "finance:read");
   const query = reportDates(input), db = getDb();
   return db.transaction((): FinanceReport => {
     const months = new Map(query.months.map(month => [month, { income: 0n, spending: 0n }]));
     const spending = new Map<string | null, Map<string, bigint>>();
-    const rows = db.prepare(`SELECT type, category_id, amount_cents, transaction_date FROM finance_transactions WHERE reverted = 0 AND transaction_date BETWEEN ? AND ?
-      AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id=finance_transactions.id)
-      UNION ALL SELECT 'refund', t.category_id, -r.amount_cents, r.transaction_date FROM finance_refunds r JOIN finance_transactions t ON t.id = r.expense_id WHERE r.reverted = 0 AND t.reverted = 0 AND r.transaction_date BETWEEN ? AND ?`)
+    const rows = db.prepare(`SELECT t.type, CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END AS category_id, t.amount_cents, t.transaction_date
+      FROM finance_transactions t LEFT JOIN finance_classifications c ON c.id = t.category_id
+      WHERE t.reverted = 0 AND t.transaction_date BETWEEN ? AND ?
+      AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id=t.id)
+      UNION ALL SELECT 'refund', CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END, -r.amount_cents, r.transaction_date
+      FROM finance_refunds r JOIN finance_transactions t ON t.id = r.expense_id LEFT JOIN finance_classifications c ON c.id = t.category_id
+      WHERE r.reverted = 0 AND t.reverted = 0 AND r.transaction_date BETWEEN ? AND ?`)
       .safeIntegers().iterate(query.from, query.to, query.from, query.to) as Iterable<{ type: string; category_id: string | null; amount_cents: bigint; transaction_date: string }>;
     for (const row of rows) {
       const month = row.transaction_date.slice(0, 7), totals = months.get(month)!;

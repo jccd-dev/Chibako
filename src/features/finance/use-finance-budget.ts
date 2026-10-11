@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BudgetSnapshot } from "./budget-types";
 import { setBudgetSchema } from "./budget-types";
 import { financeJson } from "./client-json";
@@ -19,6 +19,9 @@ export function useFinanceBudget(onSaved: () => Promise<void>) {
   const [notice, setNotice] = useState("");
   const saving = useRef(false);
   const pending = useRef<{ fingerprint: string; requestId: string } | null>(null);
+  const openForReview = useCallback((categoryId: string, monthValue: string) => {
+    setSnapshot(null); setAmount(""); setCategory(categoryId); setMonth(monthValue); setOpen(true);
+  }, []);
   useEffect(() => {
     setSnapshot(null); setLoadError(""); setSaveError(""); setAmount(""); pending.current = null;
     if (!open || !category || !month) return;
@@ -42,10 +45,12 @@ export function useFinanceBudget(onSaved: () => Promise<void>) {
     try {
       await fetch("/api/finance/budgets", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, request_id: pending.current.requestId }) }).then(financeJson<{ budget: BudgetSnapshot }>);
       pending.current = null; setOpen(false); setNotice("Budget saved. Earlier monthly limits are preserved.");
-      await onSaved(); return true;
+      await onSaved();
+      window.dispatchEvent(new Event("finance-changed"));
+      return true;
     } catch (error) { setSaveError(error instanceof Error ? error.message : "Could not save budget. Try again."); return false; }
     finally { saving.current = false; setBusy(false); }
   }
-  return { open, setOpen, category, setCategory, month, setMonth, mode, setMode, amount, setAmount, snapshot, loadError, saveError, busy, notice, refresh, save };
+  return { open, setOpen, category, setCategory, month, setMonth, mode, setMode, amount, setAmount, snapshot, loadError, saveError, busy, notice, refresh, save, openForReview };
 }
 export type FinanceBudgetController = ReturnType<typeof useFinanceBudget>;

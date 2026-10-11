@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import { useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,14 +19,32 @@ import { financeControl as control, financeSelect as select, financeSheet, forma
 
 const obligationStatus = (status: FinanceObligation["status"]) => ({ open: "Open", paid: "Paid in full", written_off: "Written off", settled: "Settled" })[status];
 
-export function FinanceObligations({ activity }: { activity: FinanceActivityController }) {
+export function FinanceObligations({
+  activity,
+  focusObligationId,
+  onFocusHandled,
+}: {
+  activity: FinanceActivityController;
+  focusObligationId?: string | null;
+  onFocusHandled?: () => void;
+}) {
   const obligations = useFinanceObligations(activity), router = useRouter();
+  useEffect(() => {
+    if (!focusObligationId || !obligations.page) return;
+    const obligation = obligations.page.obligations.find((row) => row.id === focusObligationId);
+    if (obligation) {
+      void obligations.openEdit(obligation);
+      onFocusHandled?.();
+      return;
+    }
+    void obligations.openById(focusObligationId).finally(() => onFocusHandled?.());
+  }, [focusObligationId, obligations.page, onFocusHandled]);
   function inspectActivity() {
     if (!obligations.editing) return;
     activity.applyFilters({ q: "", account_id: "", category_id: "", date_from: "", date_to: "", type: "", hidden: "all", reverted: "all", obligation_id: obligations.editing.id });
     obligations.close(); router.replace("/app/finance?tab=activity", { scroll: false });
   }
-  return <section aria-label="Debts and receivables" className="mt-8 border-t border-border pt-6">
+  return <section id="finance-obligations" aria-label="Debts and receivables" className="mt-8 border-t border-border pt-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-lg font-semibold">Debts and receivables</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Money you owe and money owed to you. Outstanding principal is separate from cash and assets.</p></div><div className="flex flex-wrap gap-3"><Button variant="outline" className={control} onClick={() => obligations.openCreate("definition")}>Add obligation</Button><Button className={control} onClick={() => obligations.openCreate("movement")}>Record borrowing / lending</Button></div></div>
     {obligations.page && <dl className="my-5 grid gap-4 sm:grid-cols-2"><div><dt className="text-sm text-muted-foreground">Outstanding debt (you owe)</dt><dd className="mt-1 break-words text-xl font-semibold tabular-nums">{formatPHP(obligations.page.debt_cents)}</dd></div><div><dt className="text-sm text-muted-foreground">Outstanding receivables (owed to you)</dt><dd className="mt-1 break-words text-xl font-semibold tabular-nums">{formatPHP(obligations.page.receivable_cents)}</dd></div></dl>}
     <p className="my-3 text-sm text-muted-foreground">Totals include archived obligations. Borrowing, lending, principal payments and collections never count as income or spending.</p>

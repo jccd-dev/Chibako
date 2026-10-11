@@ -15,6 +15,7 @@ import { FinancePlans } from "./FinancePlans";
 import { FinanceGoals } from "./FinanceGoals";
 import { useFinancePlanning } from "@/features/finance/use-finance-planning";
 import { useFinanceReports } from "@/features/finance/use-finance-reports";
+import { useFinanceAttention } from "@/features/finance/use-finance-attention";
 import { FinanceAdjustment } from "./FinanceAdjustment";
 import { FinanceClassifications } from "./FinanceClassifications";
 import { FinanceImportInspection } from "./FinanceImportInspection";
@@ -24,6 +25,7 @@ import {
   formatPHP as money,
 } from "@/features/finance/presentation";
 import type { FinanceAccount } from "@/features/finance/types";
+import type { FinanceAttentionItem } from "@/features/finance/overview-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -62,9 +64,11 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     reports.refresh,
   ]);
   const planning = useFinancePlanning(activity.notice, refreshAfterPlan);
+  const attention = useFinanceAttention(`${activity.notice}:${finance.notice}:${planning.notice}`);
   useEffect(() => {
     window.dispatchEvent(new Event("finance-changed"));
   }, [activity.notice, finance.notice, planning.notice]);
+  const [attentionTarget, setAttentionTarget] = useState<FinanceAttentionItem | null>(null);
   const [transactionOpen, setTransactionOpen] = useState(false);
   const [inspectionOpen, setInspectionOpen] = useState(false);
   const [adjusting, setAdjusting] = useState<FinanceAccount | null>(null);
@@ -87,6 +91,13 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     setTab(value);
     router.replace(`/app/finance?tab=${value}`, { scroll: false });
   }
+
+  function reviewAttention(item: FinanceAttentionItem) {
+    setAttentionTarget(item);
+    changeTab("planning");
+  }
+
+  const clearAttentionTarget = useCallback(() => setAttentionTarget(null), []);
 
   function open(account?: FinanceAccount) {
     finance.resetSave();
@@ -276,6 +287,8 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
                   activity={activity}
                   reports={reports}
                   planning={planning}
+                  attention={attention}
+                  onReviewAttention={reviewAttention}
                   onNavigateTab={changeTab}
                   onOpenAccount={open}
                   onCategoryFilter={(id) => {
@@ -325,9 +338,24 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           <FinanceActivityList activity={activity} />
         </TabsContent>
         <TabsContent value="planning">
-          <FinanceBudgets budget={budget} activity={activity} />
-          <FinancePlans planning={planning} activity={activity} />
-          <FinanceGoals />
+          <FinanceBudgets
+            budget={budget}
+            activity={activity}
+            focusCategoryId={attentionTarget?.kind === "budget_overrun" ? attentionTarget.reference_id : null}
+            focusMonth={attentionTarget?.kind === "budget_overrun" ? attentionTarget.due_date?.slice(0, 7) : null}
+            onFocusHandled={clearAttentionTarget}
+          />
+          <FinancePlans
+            planning={planning}
+            activity={activity}
+            focusPlanId={attentionTarget?.kind === "pending_plan" ? attentionTarget.reference_id : null}
+            focusObligationId={attentionTarget?.kind === "obligation_due" ? attentionTarget.reference_id : null}
+            onFocusHandled={clearAttentionTarget}
+          />
+          <FinanceGoals
+            focusAccountId={attentionTarget?.kind === "allocation_shortfall" ? attentionTarget.reference_id : null}
+            onFocusHandled={clearAttentionTarget}
+          />
         </TabsContent>
         <TabsContent value="manage">
           <div className="flex flex-wrap items-center justify-between gap-4">

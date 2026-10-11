@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,10 +45,28 @@ import {
   localCalendarDate,
 } from "@/features/finance/presentation";
 
-export function FinanceGoals() {
+export function FinanceGoals({
+  focusAccountId,
+  onFocusHandled,
+}: {
+  focusAccountId?: string | null;
+  onFocusHandled?: () => void;
+} = {}) {
   const goals = useFinanceGoals();
+  useEffect(() => {
+    if (!focusAccountId || !goals.page) return;
+    const goal = goals.page.goals.find((row) =>
+      row.allocations.some((allocation) => allocation.account_id === focusAccountId),
+    );
+    if (goal) {
+      void goals.openEdit(goal);
+      onFocusHandled?.();
+      return;
+    }
+    void goals.openForAccount(focusAccountId).finally(() => onFocusHandled?.());
+  }, [focusAccountId, goals.page, onFocusHandled]);
   return (
-    <Card size="sm">
+    <Card id="finance-goals" size="sm">
       <CardHeader>
         <CardTitle>Savings goals</CardTitle>
         <CardDescription>

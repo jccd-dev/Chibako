@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FinanceAccount, FinanceSummary } from "./types";
+import type { FinanceAccount } from "./types";
+import type { FinanceOverview } from "./overview-types";
 
 type AccountPage = { accounts: FinanceAccount[]; total: number };
 
@@ -13,7 +14,7 @@ async function readJson<T>(response: Response): Promise<T> {
 
 export function useFinanceAccounts() {
   const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
-  const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [summary, setSummary] = useState<FinanceOverview | null>(null);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -33,7 +34,7 @@ export function useFinanceAccounts() {
     try {
       const [page, position] = await Promise.all([
         fetch(`/api/finance/accounts?limit=50&offset=${offset}&archived=${includeArchived ? "all" : "false"}`).then(readJson<AccountPage>),
-        fetch("/api/finance/summary").then(readJson<FinanceSummary>),
+        fetch("/api/finance/overview").then(readJson<FinanceOverview>),
       ]);
       if (sequence !== loadSequence.current) return;
       if (offset > 0 && offset >= page.total) {

@@ -44,11 +44,13 @@ import { createSchedule, getSchedule, listSchedules, updateSchedule, pauseSchedu
 import { createScheduleSchema, getScheduleSchema, listSchedulesSchema, updateScheduleSchema, scheduleActionSchema, catchUpPlansSchema, skipPlansSchema } from "../features/finance/recurrence-types";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema } from "../features/finance/planning-types";
 import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
+import { getFinanceAttention, getFinanceOverview } from "../features/finance/overview";
 import { createObligation, updateObligation, getObligation, listObligations, postObligationMovement, postObligationPayment, closeObligation, getObligationPaymentHistory } from "../features/finance/obligations";
 import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema, postObligationPaymentSchema, closeObligationSchema, obligationHistorySchema } from "../features/finance/obligation-types";
 import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts } from "../features/finance/goals";
 import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema } from "../features/finance/goal-types";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
+import { financeAttentionSchema } from "../features/finance/overview-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
 import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
 import { createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema, FinanceError, type FinanceActor, type FinanceScope } from "../features/finance/types";
@@ -503,6 +505,14 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       title: "Finance summary", description: "Separate money and asset totals in PHP integer cents, including archived holdings. Openings do not count as income or spending.",
       inputSchema: z.object({}).strict(), annotations: READ_ONLY,
     }, () => financeResult("finance:read", actor => ({ ...getFinanceSummary(actor) })));
+    server.registerTool("get_finance_overview", {
+      title: "Finance overview", description: "Compact summary-first holdings with cash, assets, reserved goal money, debt and receivable totals. Reservation and obligation totals remain separate from cash.",
+      inputSchema: z.object({}).strict(), annotations: READ_ONLY,
+    }, () => financeResult("finance:read", actor => ({ ...getFinanceOverview(actor) })));
+    server.registerTool("get_finance_attention", {
+      title: "Finance attention queue", description: "Bounded upcoming and overdue plans, obligation due dates, current-month budget overruns and account allocation shortfalls. Text and personal obligation names are omitted; use the linked review capability for detail.",
+      inputSchema: financeAttentionSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...getFinanceAttention(actor, args) })));
   }
   if (financeAuthorized("finance:write")) {
     const annotations = { ...MUTATING, idempotentHint: true };
