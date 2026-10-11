@@ -32,7 +32,7 @@ export function useFinanceAdjustment(activity: FinanceActivityController, accoun
   if (account && postAdjustmentSchema.shape.actual_balance.safeParse(actual).success) {
     try { difference = exactCents(BigInt(decimalCents(actual)) - BigInt(account.balance_cents)); } catch { /* Validation below explains invalid or out-of-range amounts. */ }
   }
-  async function save() {
+  function validate() {
     if (!account) return false;
     const input = { account_id: account.id, actual_balance: actual, expected_balance_cents: account.balance_cents, transaction_date: date, text };
     const parsed = postAdjustmentSchema.safeParse({ request_id: "validate", ...input });
@@ -40,8 +40,12 @@ export function useFinanceAdjustment(activity: FinanceActivityController, accoun
     if (!parsed.success) for (const issue of parsed.error.issues) validation[String(issue.path[0])] = issue.message;
     if (!validation.actual_balance && difference === null) validation.actual_balance = "Enter a PHP balance and difference within the exact-cent range.";
     setErrors(validation);
-    if (Object.keys(validation).length) return false;
+    return Object.keys(validation).length === 0;
+  }
+  async function save() {
+    if (!account || !validate()) return false;
+    const input = { account_id: account.id, actual_balance: actual, expected_balance_cents: account.balance_cents, transaction_date: date, text };
     return !!await activity.postMovement(account.kind === "asset" ? "valuations" : "reconciliations", input);
   }
-  return { account, actual, setActual, date, setDate, text, setText, loadError, errors, difference, refresh, save };
+  return { account, actual, setActual, date, setDate, text, setText, loadError, errors, difference, refresh, validate, save };
 }

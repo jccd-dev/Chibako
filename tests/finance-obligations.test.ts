@@ -8,7 +8,7 @@ import { after, beforeEach, test } from "node:test";
 import { getDb } from "../src/lib/db";
 import { createNote, getNote } from "../src/lib/notes";
 import { getActivityNoteLinks, setActivityNoteLinks } from "../src/features/finance/note-links";
-import { createAccount, getAccount, getFinanceSummary } from "../src/features/finance/accounts";
+import { createAccount, getAccount, getFinanceSummary, updateAccount } from "../src/features/finance/accounts";
 import { createObligation, getObligation, listObligations, updateObligation, postObligationMovement } from "../src/features/finance/obligations";
 import { getActivityTotals, getTransaction, listTransactions } from "../src/features/finance/activity";
 import { correctActivity, hideActivity, revertActivity, recordRefund } from "../src/features/finance/corrections";
@@ -21,6 +21,19 @@ const owner: FinanceActor = { kind: "owner" };
 beforeEach(() => getDb().exec("DELETE FROM finance_audit; DELETE FROM finance_requests; DELETE FROM finance_obligation_writeoffs; DELETE FROM finance_obligation_payments; DELETE FROM finance_obligation_movements; DELETE FROM finance_plans; DELETE FROM finance_refunds; DELETE FROM finance_transactions; DELETE FROM finance_obligations; DELETE FROM finance_accounts;"));
 after(() => { getDb().close(); rmSync(vault, { recursive: true, force: true }); });
 const request = () => randomUUID();
+
+test("excluded borrowing and lending retain obligations without contributing summary cash", () => {
+  const cash = createAccount(owner, { request_id: request(), name: "Excluded borrowing", kind: "money", currency: "PHP", opening_balance: "100", include_in_summary: false }).account;
+  postObligationMovement(owner, { request_id: request(), type: "borrowing", name: "Debt", account_id: cash.id, amount: "50", transaction_date: "2026-10-02" });
+  postObligationMovement(owner, { request_id: request(), type: "lending", name: "Receivable", account_id: cash.id, amount: "20", transaction_date: "2026-10-02" });
+  assert.equal(getAccount(owner, cash.id).balance_cents, 13000);
+  assert.deepEqual(getFinanceSummary(owner).money, { balance_cents: 0, account_count: 0 });
+  const obligations = listObligations(owner);
+  assert.equal(obligations.debt_cents, 5000);
+  assert.equal(obligations.receivable_cents, 2000);
+  updateAccount(owner, cash.id, { request_id: request(), version: 1, include_in_summary: true });
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 13000);
+});
 
 test("obligation definitions carry principal and optional due dates without changing cash or assets", () => {
   createAccount(owner, { request_id: request(), name: "Obligation test cash", kind: "money", opening_balance: "100", currency: "PHP" });

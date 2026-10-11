@@ -12,11 +12,14 @@ const requestId = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const accountId = z.string().min(1).max(128);
 const name = z.string().trim().min(1).max(120);
 export const accountKindSchema = z.enum(["money", "asset"]);
+export const accountGroupSchema = z.string().trim().max(80);
 
 export const createAccountSchema = z.object({
   request_id: requestId,
   name,
   kind: accountKindSchema,
+  account_group: accountGroupSchema.default(""),
+  include_in_summary: z.boolean().default(true),
   currency: z.literal("PHP"),
   opening_balance: z.string().max(32).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a PHP decimal string with at most two decimal places"),
 }).strict();
@@ -26,7 +29,9 @@ export const updateAccountSchema = z.object({
   version: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   name: name.optional(),
   archived: z.boolean().optional(),
-}).strict().refine(input => input.name !== undefined || input.archived !== undefined, "Provide name or archived");
+  account_group: accountGroupSchema.optional(),
+  include_in_summary: z.boolean().optional(),
+}).strict().refine(input => input.name !== undefined || input.archived !== undefined || input.account_group !== undefined || input.include_in_summary !== undefined, "Provide account settings to update");
 
 export const getAccountSchema = z.object({ id: accountId }).strict();
 export const listAccountsSchema = z.object({
@@ -43,6 +48,8 @@ export interface FinanceAccount {
   id: string;
   name: string;
   kind: z.infer<typeof accountKindSchema>;
+  account_group: string;
+  include_in_summary: boolean;
   currency: "PHP";
   opening_balance_cents: number;
   balance_cents: number;

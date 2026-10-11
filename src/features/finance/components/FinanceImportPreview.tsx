@@ -2,8 +2,9 @@
 
 import type { ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { formatPHP, financeControl as control } from "@/features/finance/presentation";
+import { formatPHP } from "@/features/finance/presentation";
 import { tarsiIdentityKey, type TarsiPreview, type TarsiProposalRecord } from "@/features/finance/import-preview-types";
 
 const summaryClass =
@@ -347,11 +348,10 @@ export function FinanceImportPreview({
                 key={choice.path}
                 className="flex min-h-11 items-start gap-3 py-1 text-sm"
               >
-                <input
-                  type="checkbox"
-                  className="mt-1 size-4 accent-primary"
+                <Checkbox
+                  className="mt-1"
                   checked={exclusions.includes(choice.path)}
-                  onChange={() => onToggleExclusion(choice.path)}
+                  onCheckedChange={() => onToggleExclusion(choice.path)}
                 />
                 <span className="min-w-0">
                   <span className="break-words">{choice.label}</span>
@@ -377,11 +377,10 @@ export function FinanceImportPreview({
                 <label
                   className="flex min-h-11 items-start gap-3 py-1 text-sm"
                 >
-                  <input
-                    type="checkbox"
-                    className="mt-1 size-4 accent-primary"
+                  <Checkbox
+                    className="mt-1"
                     checked={acknowledged.includes(row.path)}
-                    onChange={() => onToggleAcknowledgment(row.path)}
+                    onCheckedChange={() => onToggleAcknowledgment(row.path)}
                   />
                   <span className="min-w-0">
                     <span className="break-words">{row.reason}</span>
@@ -408,11 +407,10 @@ export function FinanceImportPreview({
               const key = tarsiIdentityKey(row.collection, row.source_id);
               return (
                 <label key={key} className="flex min-h-11 items-start gap-3 py-1 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1 size-4 accent-primary"
+                  <Checkbox
+                    className="mt-1"
                     checked={acknowledgedConflicts.includes(key)}
-                    onChange={() => onToggleConflictAcknowledgment(key)}
+                    onCheckedChange={() => onToggleConflictAcknowledgment(key)}
                   />
                   <span className="min-w-0 break-words">
                     Keep existing {row.collection} {row.source_id}; do not overwrite it.
@@ -426,7 +424,6 @@ export function FinanceImportPreview({
           <Button
             type="button"
             variant="outline"
-            className={control}
             disabled={busy || locked}
             onClick={onUpdate}
           >

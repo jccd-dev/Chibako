@@ -41,7 +41,9 @@
     ".next/test-builds/password-routes/types/**/*.ts",
     ".next/test-builds/password-routes/dev/types/**/*.ts",
     ".scratch/tarsi-finance/checks/e2e-build/types/**/*.ts",
-    ".scratch/tarsi-finance/checks/e2e-build/dev/types/**/*.ts"
+    ".scratch/tarsi-finance/checks/e2e-build/dev/types/**/*.ts",
+    ".scratch/tarsi-finance/checks/e2e-build/dev/dev/types/**/*.ts",
+    ".next/test-builds/password-routes/dev/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

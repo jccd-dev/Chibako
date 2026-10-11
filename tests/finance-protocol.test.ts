@@ -89,6 +89,27 @@ test("REST and request-scoped remote MCP share results, retries, edits, and attr
   assert.equal(forbidden.result.isError, true);
 });
 
+test("REST and MCP persist account settings and agree on summary exclusion", async () => {
+  const principal = createApiKey("Account settings", ["finance:read", "finance:manage"]);
+  const created = await (await create(rest(principal.key, { ...opening, account_group: "Savings", include_in_summary: false }), context)).json();
+  assert.equal(created.account.account_group, "Savings");
+  assert.equal(created.account.include_in_summary, false);
+  const restSummary = await (await summary(rest(principal.key), context)).json();
+  assert.deepEqual(restSummary.money, { balance_cents: 0, account_count: 0 });
+  const mcpSummary = await rpc(principal.key, "tools/call", { name: "get_finance_summary", arguments: {} });
+  assert.deepEqual(mcpSummary.result.structuredContent, restSummary);
+  const patched = await rpc(principal.key, "tools/call", { name: "update_finance_account", arguments: { id: created.account.id, request_id: "include-settings", version: 1, account_group: "Emergency", include_in_summary: true } });
+  assert.equal(patched.result.isError, undefined);
+  const listed = await (await list(rest(principal.key), context)).json();
+  assert.equal(listed.accounts[0].account_group, "Emergency");
+  assert.equal(listed.accounts[0].include_in_summary, true);
+  assert.equal((await (await summary(rest(principal.key), context)).json()).money.balance_cents, 12345);
+  const reader = createApiKey("Read settings", ["finance:read"]);
+  const denied = await rpc(reader.key, "tools/call", { name: "update_finance_account", arguments: { id: created.account.id, request_id: "denied-settings", version: 2, include_in_summary: false } });
+  assert.ok(denied.error || denied.result?.isError);
+  assert.equal((await (await list(rest(principal.key), context)).json()).accounts[0].include_in_summary, true);
+});
+
 test("MCP local trust stays local and keyed catalogs cannot widen finance scopes", async () => {
   for (const options of [
     { exposure: "local" as const, scopes: null },

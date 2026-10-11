@@ -11,7 +11,6 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import {
-  financeControl as control,
   financeSheet,
 } from "@/features/finance/presentation";
 import { useFinanceImportInspection } from "@/features/finance/use-finance-import-inspection";
@@ -83,7 +82,7 @@ export function FinanceImportInspection({
   return (
     <Sheet open={open} onOpenChange={close}>
       <SheetContent className={financeSheet} showCloseButton={false}>
-        <SheetHeader className="border-b border-border p-6">
+        <SheetHeader className="border-b border-border p-4">
           <SheetTitle>Source inspection</SheetTitle>
           <SheetDescription className="text-sm">
             Choose a backup to review its structure and preview a reconciled
@@ -93,7 +92,7 @@ export function FinanceImportInspection({
             and is never saved.
           </SheetDescription>
         </SheetHeader>
-        <div className="flex flex-1 flex-col gap-6 p-6">
+        <div className="flex flex-1 flex-col gap-4 p-4">
           <input
             ref={inputRef}
             id="tarsi-backup-file"
@@ -109,7 +108,6 @@ export function FinanceImportInspection({
             <Button
               type="button"
               variant="outline"
-              className={control}
               disabled={inspection.busy || inspection.previewBusy || inspection.locked}
               onClick={() => inputRef.current?.click()}
             >
@@ -205,7 +203,6 @@ export function FinanceImportInspection({
                 <div className="grid gap-2">
                   <Button
                     type="button"
-                    className={control}
                     disabled={inspection.busy || inspection.previewBusy || inspection.locked}
                     onClick={() => void inspection.startPreview()}
                   >
@@ -464,7 +461,6 @@ export function FinanceImportInspection({
             <Button
               type="button"
               variant="outline"
-              className={control}
               disabled={inspection.busy || inspection.previewBusy || inspection.commitBusy || inspection.backupBusy}
               onClick={() => close(false)}
             >

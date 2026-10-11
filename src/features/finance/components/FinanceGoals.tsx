@@ -2,6 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { IconPlus } from "@tabler/icons-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -38,8 +40,6 @@ import {
   type FinanceGoalsController,
 } from "@/features/finance/use-finance-goals";
 import {
-  financeControl as control,
-  financeSelect as select,
   financeSheet,
   formatPHP,
   localCalendarDate,
@@ -77,7 +77,6 @@ export function FinanceGoals({
           <Button
             variant="ghost"
             size="icon"
-            className={control}
             aria-label="Add savings goal"
             onClick={goals.openCreate}
           >
@@ -86,12 +85,10 @@ export function FinanceGoals({
         </CardAction>
       </CardHeader>
       <CardContent>
-        <label className="mb-4 flex min-h-11 items-center gap-3 text-sm">
-          <input
-            type="checkbox"
-            className="size-4 accent-primary"
+        <label className="mb-4 flex min-h-7 items-center gap-2 text-xs">
+          <Checkbox
             checked={goals.archived}
-            onChange={(event) => goals.changeArchived(event.target.checked)}
+            onCheckedChange={checked => goals.changeArchived(checked)}
           />
           View archived goals
         </label>
@@ -101,7 +98,6 @@ export function FinanceGoals({
               {goals.loadError}
               <Button
                 variant="outline"
-                className={control}
                 onClick={() => void goals.refresh()}
               >
                 Retry goals
@@ -125,7 +121,6 @@ export function FinanceGoals({
             {!goals.archived && (
               <Button
                 variant="outline"
-                className={control}
                 onClick={goals.openCreate}
               >
                 Add goal
@@ -150,7 +145,6 @@ export function FinanceGoals({
           >
             <Button
               variant="outline"
-              className={control}
               disabled={!goals.offset || goals.loading}
               onClick={() => goals.setOffset(Math.max(0, goals.offset - 25))}
             >
@@ -162,7 +156,6 @@ export function FinanceGoals({
             </span>
             <Button
               variant="outline"
-              className={control}
               disabled={goals.offset + 25 >= goals.page.total || goals.loading}
               onClick={() => goals.setOffset(goals.offset + 25)}
             >
@@ -178,7 +171,7 @@ export function FinanceGoals({
         }}
       >
         <SheetContent className={financeSheet} showCloseButton={false}>
-          <SheetHeader className="border-b border-border p-6">
+          <SheetHeader className="border-b border-border p-4">
             <SheetTitle>
               {goals.panel === "create"
                 ? "Add goal"
@@ -279,7 +272,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
     void goals.save();
   }
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6">
+    <div className="flex flex-1 flex-col gap-4 p-4">
       {goals.inspecting && <p role="status">Loading goal…</p>}
       {goals.saveError && (
         <Alert>
@@ -297,7 +290,6 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
             <Input
               id="goal-name"
               maxLength={120}
-              className={control}
               value={goals.name}
               disabled={disabled || readOnly}
               onChange={(event) => goals.setName(event.target.value)}
@@ -308,7 +300,6 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
             <Input
               id="goal-target"
               inputMode="decimal"
-              className={control}
               value={goals.target}
               disabled={disabled || readOnly}
               onChange={(event) => goals.setTarget(event.target.value)}
@@ -324,7 +315,6 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
               type="date"
               min="1000-01-01"
               max="9999-12-31"
-              className={control}
               value={goals.dueDate}
               disabled={disabled || readOnly}
               onChange={(event) => goals.setDueDate(event.target.value)}
@@ -333,7 +323,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
         </FieldGroup>
         {!readOnly && (
           <div className="mt-4 flex justify-end">
-            <Button type="submit" className={control} disabled={disabled}>
+            <Button type="submit" disabled={disabled}>
               {goals.busy ? "Saving…" : goal ? "Save goal changes" : "Add goal"}
             </Button>
           </div>
@@ -375,14 +365,14 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
             <>
               <Field>
                 <FieldLabel htmlFor="goal-account">Money account</FieldLabel>
-                <select
+                <NativeSelect
                   id="goal-account"
-                  className={select}
+                  className="w-full"
                   disabled={disabled}
                   value={goals.accountId}
                   onChange={(event) => goals.selectAccount(event.target.value)}
                 >
-                  <option value="">Choose an account</option>
+                  <NativeSelectOption value="">Choose an account</NativeSelectOption>
                   {goals.accounts
                     .filter(
                       (row) =>
@@ -393,12 +383,12 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
                         ),
                     )
                     .map((row) => (
-                      <option key={row.account_id} value={row.account_id}>
+                      <NativeSelectOption key={row.account_id} value={row.account_id}>
                         {row.account_name}
                         {row.archived ? " (archived; releases only)" : ""}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                </select>
+                </NativeSelect>
               </Field>
               {selected && (
                 <p className="text-sm">
@@ -420,7 +410,6 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
                 <Input
                   id="goal-allocation"
                   inputMode="decimal"
-                  className={control}
                   disabled={disabled || !selected}
                   value={goals.amount}
                   onChange={(event) => goals.setAmount(event.target.value)}
@@ -430,17 +419,15 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
                   selected account. Cash never moves.
                 </FieldDescription>
               </Field>
-              <div className="flex flex-wrap justify-end gap-3">
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button
                   variant="outline"
-                  className={control}
                   disabled={disabled || !existing}
                   onClick={() => void goals.allocate("0")}
                 >
                   Release allocation
                 </Button>
                 <Button
-                  className={control}
                   disabled={disabled || !selected}
                   onClick={() => void goals.allocate()}
                 >
@@ -451,11 +438,10 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           )}
         </section>
       )}
-      <div className="mt-auto flex flex-wrap justify-end gap-3 border-t border-border pt-5">
+      <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-border pt-5">
         {goal && !readOnly && <ArchiveButton goals={goals} />}
         <Button
           variant="outline"
-          className={control}
           disabled={goals.busy}
           onClick={goals.closePanel}
         >
@@ -477,7 +463,6 @@ function ArchiveButton({ goals }: { goals: FinanceGoalsController }) {
       )}
       <Button
         variant="outline"
-        className={control}
         disabled={goals.busy || goals.inspecting}
         onClick={() => {
           if (confirming) void goals.archive();

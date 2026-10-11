@@ -640,11 +640,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: updateClassificationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateClassification(actor, id, args)));
     server.registerTool("create_finance_account", {
-      title: "Create finance account", description: "Create a PHP money or asset account with an exact decimal-string opening_balance. Requires request_id; identical retries return the original account.",
+      title: "Create finance account", description: "Create a PHP money (Debit in the UI) or asset account with an exact decimal-string opening_balance, optional account_group and include_in_summary (default true). Requires request_id; identical retries return the original account.",
       inputSchema: createAccountSchema, annotations,
     }, args => financeResult("finance:manage", actor => createAccount(actor, args)));
     server.registerTool("update_finance_account", {
-      title: "Manage finance account", description: "Rename or archive an account. Requires request_id and current version; opening, currency and kind cannot change. Archive preserves holdings.",
+      title: "Manage finance account", description: "Rename, group, archive, or set include_in_summary on an account. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
       inputSchema: updateAccountSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateAccount(actor, id, args)));
   }

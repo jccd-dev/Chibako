@@ -1,9 +1,9 @@
 "use client";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { formatPHP, financeControl as control } from "@/features/finance/presentation";
-import { cn } from "@/lib/utils";
+import { formatPHP } from "@/features/finance/presentation";
 import type { TarsiCommitGate } from "@/features/finance/import-commit-gate";
 import type { TarsiImportBackup } from "@/features/finance/import-commit";
 import { tarsiBackupHref } from "@/features/finance/import-commit-flow";
@@ -71,7 +71,6 @@ export function FinanceImportCommit({
           <Button
             type="button"
             variant="outline"
-            className={control}
             disabled={busy || locked || !reviewSettled || backup !== null}
             onClick={onCreateBackup}
           >
@@ -81,7 +80,7 @@ export function FinanceImportCommit({
             <a
               href={tarsiBackupHref(backup.id)}
               download
-              className={cn(buttonVariants({ variant: "outline" }), control)}
+              className={buttonVariants({ variant: "outline" })}
             >
               Download backup
             </a>
@@ -102,12 +101,11 @@ export function FinanceImportCommit({
       <div className="grid gap-2 border-t border-border pt-3">
         <p className="font-medium">2. Confirm and commit</p>
         <label className="flex min-h-11 items-start gap-3 py-1">
-          <input
-            type="checkbox"
-            className="mt-1 size-4 accent-primary"
+          <Checkbox
+            className="mt-1"
             checked={confirmed}
             disabled={busy || locked || !gate.canConfirm || backup === null}
-            onChange={onToggleConfirmed}
+            onCheckedChange={onToggleConfirmed}
           />
           <span className="min-w-0">
             I reviewed this proposal, including its blockers, exclusions, changed-source conflicts, and reconciled balances.
@@ -118,7 +116,6 @@ export function FinanceImportCommit({
         </p>
         <Button
           type="button"
-          className={control}
           disabled={!gate.ready || locked}
           onClick={onCommit}
         >

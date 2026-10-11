@@ -52,12 +52,23 @@ negative after net refunds. Refund categories follow corrections to their expens
 Each action explains its effect before confirmation. Hidden and reverted filters
 expose retained records. Saving refreshes balances without changing tab or filters.
 
-In Manage, **Reconcile** compares a money account's latest derived balance to
-an actual signed PHP balance. **Adjust value** does the same for assets, without
-cash movement. Preview the difference and choose a calendar date before
-recording it. Neither action overwrites the opening or history. A changed balance
+In Accounts, select a card to see details and connected history, then choose
+**Edit account**. The same form edits the name and current balance (or asset value).
+Leave the current balance blank to keep it; enter a signed PHP amount to preview
+a dated reconciliation or valuation. Neither action overwrites the opening or history. A changed balance
 rejects the comparison; refresh and review again. The dated difference, compared
 balance and supplied actual value remain inspectable in Activity.
+
+Accounts use grouped cards with separate debit and asset totals per group.
+"Debit" is the UI label for the existing `money` account type. Group names and
+**Include in total balance and summary** are persisted account settings.
+Exclusion changes the Overview, REST, and MCP summary totals and account preview,
+including archived account balances, but leaves activity, spending reports,
+goals, obligations, and each account's recorded balance unchanged.
+Group totals show every displayed account in the group, including accounts excluded
+from the Overview summary. Account settings and balance adjustments use separate
+existing endpoints; if the latter fails, the form identifies saved details and
+keeps the balance input for a safe retry.
 
 ## REST and MCP
 

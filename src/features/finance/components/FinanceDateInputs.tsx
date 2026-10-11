@@ -8,7 +8,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { MonthPicker } from "@/components/ui/monthpicker";
 import { Button } from "@/components/ui/button";
-import { financeControl as control } from "@/features/finance/presentation";
 import { cn } from "cn";
 
 // Shared finance date controls for site forms. The popover trigger keeps the
@@ -35,7 +34,7 @@ function ValidationInput({ type, value, min, max, required, disabled, name, onCh
 }
 
 function triggerClasses(valid: boolean, hasValue: boolean, className?: string) {
-  return cn(control, "flex items-center justify-between gap-2 pl-3 pr-2 text-left font-normal", valid || hasValue ? "" : "text-muted-foreground", className);
+  return cn("w-full justify-between text-left font-normal", valid || hasValue ? "" : "text-muted-foreground", className);
 }
 
 export function FinanceDateInput({ value, onChange, min, max, placeholder = "Choose a date", required, className, ...props }: FinanceControlProps) {

@@ -120,3 +120,24 @@ test("invalid movements reject account kinds, dates, currencies, fees and unsafe
   assert.equal(listTransactions(owner).total, 0);
   assert.equal(getAccount(owner, source.id).balance_cents, 10000);
 });
+
+test("summary exclusion follows both transfer sides and adjustments while retaining balances and history", () => {
+  const cash = account("Cash"), bank = account("Savings", "0"), asset = account("Asset", "50", "asset");
+  postTransfer(owner, transfer(cash.id, bank.id));
+  updateAccount(owner, bank.id, { request_id: "exclude-bank", version: bank.version, include_in_summary: false });
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 7499);
+  postTransfer(owner, transfer(bank.id, cash.id));
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 10000);
+  reconcileAccount(owner, { request_id: "adjust-excluded", account_id: bank.id, actual_balance: "20", expected_balance_cents: 0, transaction_date: "2026-10-03" });
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 10000);
+  updateAccount(owner, cash.id, { request_id: "exclude-cash", version: cash.version, include_in_summary: false, archived: true });
+  assert.deepEqual(getFinanceSummary(owner).money, { balance_cents: 0, account_count: 0 });
+  assert.equal(getAccount(owner, cash.id).balance_cents, 10000);
+  assert.equal(listTransactions(owner).total, 3);
+  updateAccount(owner, bank.id, { request_id: "include-bank", version: 2, include_in_summary: true });
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 2000);
+  updateAccount(owner, asset.id, { request_id: "exclude-asset", version: 1, include_in_summary: false });
+  valueAsset(owner, { request_id: "excluded-value", account_id: asset.id, actual_balance: "60", expected_balance_cents: 5000, transaction_date: "2026-10-03" });
+  assert.deepEqual(getFinanceSummary(owner).assets, { balance_cents: 0, account_count: 0 });
+  assert.equal(getAccount(owner, asset.id).balance_cents, 6000);
+});

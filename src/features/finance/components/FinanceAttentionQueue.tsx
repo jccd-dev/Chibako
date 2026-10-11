@@ -18,7 +18,7 @@ import {
 import type { FinanceAttentionItem } from "@/features/finance/overview-types";
 import { MAX_FINANCE_ATTENTION_OFFSET } from "@/features/finance/overview-types";
 import type { FinanceAttentionController } from "@/features/finance/use-finance-attention";
-import { financeControl, formatPHP } from "@/features/finance/presentation";
+import { formatPHP } from "@/features/finance/presentation";
 
 interface FinanceAttentionQueueProps {
   attention: FinanceAttentionController;
@@ -70,7 +70,7 @@ export function FinanceAttentionQueue({ attention, onReview }: FinanceAttentionQ
             {attention.error}
             <Button
               variant="outline"
-              className={`${financeControl} mt-3`}
+              className="mt-3"
               onClick={() => void attention.refresh()}
             >
               Retry attention queue
@@ -127,7 +127,6 @@ export function FinanceAttentionQueue({ attention, onReview }: FinanceAttentionQ
           <nav aria-label="Attention pages" className="mt-3 flex items-center justify-between gap-3">
             <Button
               variant="outline"
-              className={financeControl}
               disabled={page.offset === 0 || attention.loading}
               onClick={() => attention.setOffset(Math.max(0, page.offset - page.limit))}
             >
@@ -138,7 +137,6 @@ export function FinanceAttentionQueue({ attention, onReview }: FinanceAttentionQ
             </span>
             <Button
               variant="outline"
-              className={financeControl}
               disabled={page.offset + page.items.length >= page.total || page.offset + page.limit > MAX_FINANCE_ATTENTION_OFFSET || attention.loading}
               onClick={() => attention.setOffset(page.offset + page.limit)}
             >

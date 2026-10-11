@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import { chooseFinanceDate } from "./finance-date-controls";
 
 const PASSWORD = "correct horse battery staple";
 test.setTimeout(120_000);
@@ -26,7 +27,7 @@ async function addAccount(page: Page, name: string, balance: string) {
   await page.getByLabel("Opening balance (PHP)", { exact: true }).fill(balance);
   await page.getByRole("button", { name: "Create account", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: `Manage ${name}`, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: `View ${name}`, exact: true })).toBeVisible();
 }
 
 type Note = { id: string; title: string; content: string; created_at: number; updated_at: number };
@@ -82,7 +83,7 @@ for (const device of ["desktop", "mobile"]) {
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error" && !/Failed to load resource/.test(message.text())) errors.push(message.text()); });
     await authenticate(page);
-    await page.goto("/app/finance?tab=manage");
+    await page.goto("/app/finance?tab=accounts");
 
     const stamp = Date.now().toString(36);
     const account = `${device} note cash`;
@@ -97,7 +98,8 @@ for (const device of ["desktop", "mobile"]) {
     const trashed = await createNote(page, trashedTitle, "trashed body");
     expect((await page.request.delete(`/api/notes/${trashed.id}`)).ok()).toBeTruthy();
 
-    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await page.getByRole("tab", { name: "History", exact: true }).click();
+    if (device === "mobile") await page.getByRole("button", { name: "Filters", exact: true }).click();
     await page.getByLabel("Filter account", { exact: true }).selectOption(accountId);
     await page.getByRole("button", { name: "Apply filters", exact: true }).click();
 
@@ -106,7 +108,7 @@ for (const device of ["desktop", "mobile"]) {
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.getByLabel("Amount (PHP)", { exact: true }).fill("12.34");
     await page.getByLabel("Account", { exact: true }).selectOption({ label: account });
-    await page.getByLabel("Transaction date", { exact: true }).fill("2026-10-03");
+    await chooseFinanceDate(page, "Transaction date", "2026-10-03");
     await openEntryDetails(page);
     await page.getByLabel("Transaction text", { exact: true }).fill("synthetic note-link expense");
 
@@ -134,8 +136,13 @@ for (const device of ["desktop", "mobile"]) {
     await expect(page.getByText("Selected Notes (1/20)", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Save transaction", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByRole("tab", { name: "Activity", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "History", exact: true })).toHaveAttribute("aria-selected", "true");
+    if (device === "mobile") await page.getByRole("button", { name: "Filters", exact: true }).click();
     await expect(page.getByLabel("Filter account", { exact: true })).toHaveValue(accountId);
+    if (device === "mobile") {
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "History filters", exact: true })).toHaveCount(0);
+    }
     expect(await accountBalance(page, accountId)).toBe(8766);
     expect(await page.getByRole("button", { name: "Inspect expense PHP 12.34 on 2026-10-03", exact: true }).count()).toBe(1);
 
@@ -184,7 +191,7 @@ for (const device of ["desktop", "mobile"]) {
     await page.getByRole("button", { name: "Add transaction", exact: true }).click();
     await page.getByLabel("Amount (PHP)", { exact: true }).fill("1.11");
     await page.getByLabel("Account", { exact: true }).selectOption({ label: account });
-    await page.getByLabel("Transaction date", { exact: true }).fill("2026-10-04");
+    await chooseFinanceDate(page, "Transaction date", "2026-10-04");
     await openEntryDetails(page);
     await pickNote(page, note.title);
     await expect(page.getByText("Selected Notes (1/20)", { exact: true })).toBeVisible();

@@ -141,3 +141,43 @@ test("account reads are bounded, paginated and filter kind and archive explicitl
   assert.equal(listAccounts(owner, { archived: "true" }).total, 1);
   for (const query of [{ limit: 101 }, { offset: -1 }]) assert.throws(() => listAccounts(owner, query), { status: 400 });
 });
+
+test("account groups and summary inclusion persist with validation, scope, version and replay checks", () => {
+  const created = createAccount(owner, { ...input, account_group: " Savings ", include_in_summary: false }).account;
+  assert.equal(created.account_group, "Savings");
+  assert.equal(created.include_in_summary, false);
+  assert.deepEqual(getFinanceSummary(owner).money, { balance_cents: 0, account_count: 0 });
+  assert.equal(getAccount(owner, created.id).balance_cents, 12345);
+  assert.deepEqual(listAccounts(owner).accounts[0], created);
+  const patch = { request_id: "settings", version: 1, account_group: "Emergency", include_in_summary: true };
+  const saved = updateAccount(owner, created.id, patch);
+  assert.deepEqual(updateAccount(owner, created.id, patch), saved);
+  assert.equal(saved.account.version, 2);
+  assert.equal(saved.account.account_group, "Emergency");
+  assert.deepEqual(getFinanceSummary(owner).money, { balance_cents: 12345, account_count: 1 });
+  assert.throws(() => updateAccount(owner, created.id, { ...patch, request_id: "stale-settings" }), { code: "version_conflict" });
+  for (const fields of [{ account_group: "x".repeat(81) }, { include_in_summary: "false" }, { account_group: null }]) {
+    assert.throws(() => updateAccount(owner, created.id, { request_id: randomUUID(), version: 2, ...fields }), { status: 400 });
+  }
+  for (const scopes of [["finance:read"], ["finance:write"]]) {
+    assert.throws(() => updateAccount({ kind: "api-key", id: "denied", scopes }, created.id, { request_id: randomUUID(), version: 2, include_in_summary: false }), { status: 403 });
+  }
+  assert.deepEqual(getAccount(owner, created.id), saved.account);
+  const normal = create("1");
+  assert.equal(normal.account_group, "");
+  assert.equal(normal.include_in_summary, true);
+  const db = getDb();
+  db.exec("CREATE TEMP TRIGGER reject_settings_audit BEFORE INSERT ON finance_audit BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END;");
+  try {
+    assert.throws(() => updateAccount(owner, created.id, { request_id: "atomic-settings", version: 2, account_group: "Other", include_in_summary: false }), /audit unavailable/);
+    assert.deepEqual(getAccount(owner, created.id), saved.account);
+    assert.equal(db.prepare("SELECT 1 FROM finance_requests WHERE request_id = 'atomic-settings'").get(), undefined);
+  } finally { db.exec("DROP TRIGGER reject_settings_audit"); }
+});
+
+test("account retries created before settings keep their fingerprints and receive default fields", () => {
+  const original = createAccount(owner, input);
+  const { account_group: _group, include_in_summary: _included, ...legacyAccount } = original.account;
+  getDb().prepare("UPDATE finance_requests SET result = ? WHERE request_id = ?").run(JSON.stringify({ account: legacyAccount }), input.request_id);
+  assert.deepEqual(createAccount(owner, input), original);
+});

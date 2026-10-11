@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import {
   IconAlertTriangle,
@@ -41,7 +42,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { FinanceMonthInput } from "./FinanceDateInputs";
 import { FinanceGoals } from "./FinanceGoals";
-import { FinanceAttentionQueue } from "./FinanceAttentionQueue";
+import { FinanceCostAnalysis } from "./FinanceCostAnalysis";
 import {
   Empty,
   EmptyDescription,
@@ -55,8 +56,6 @@ import {
 } from "@/features/finance/presentation";
 import type { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
-import type { FinanceAttentionController } from "@/features/finance/use-finance-attention";
-import type { FinanceAttentionItem } from "@/features/finance/overview-types";
 import type { FinanceReportsController } from "@/features/finance/use-finance-reports";
 import type { FinancePlanningController } from "@/features/finance/use-finance-planning";
 import type { FinanceAccount } from "@/features/finance/types";
@@ -67,8 +66,6 @@ interface FinanceOverviewDashboardProps {
   activity: FinanceActivityController;
   reports: FinanceReportsController;
   planning: FinancePlanningController;
-  attention: FinanceAttentionController;
-  onReviewAttention: (item: FinanceAttentionItem) => void;
   onNavigateTab: (tab: "overview" | "activity" | "planning" | "manage") => void;
   onOpenAccount: (account?: FinanceAccount) => void;
   onCategoryFilter: (categoryId: string) => void;
@@ -79,13 +76,6 @@ const chartConfig = {
   expenses: { label: "Expenses", color: "var(--chart-2)" },
   net: { label: "Net cash flow", color: "var(--foreground)" },
 } satisfies ChartConfig;
-const categoryColors = [
-  "bg-chart-1",
-  "bg-chart-2",
-  "bg-chart-3",
-  "bg-chart-4",
-  "bg-chart-5",
-];
 
 function countLabel(count: number, noun: string) {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -124,8 +114,6 @@ export function FinanceOverviewDashboard({
   activity,
   reports,
   planning,
-  attention,
-  onReviewAttention,
   onNavigateTab,
   onOpenAccount,
   onCategoryFilter,
@@ -134,9 +122,6 @@ export function FinanceOverviewDashboard({
   const income = report?.income_cents ?? activity.totals?.income_cents ?? 0;
   const expenses =
     report?.spending_cents ?? activity.totals?.expense_cents ?? 0;
-  const categories = [...(report?.categories ?? [])]
-    .filter((category) => category.spending_cents > 0)
-    .sort((a, b) => b.spending_cents - a.spending_cents);
   const budgetCents = (report?.categories ?? []).reduce(
     (sum, category) => sum + (category.budget_cents ?? 0),
     0,
@@ -168,8 +153,8 @@ export function FinanceOverviewDashboard({
     };
   });
   const transactions = activity.page?.transactions.slice(0, 7) ?? [];
-  const accounts = finance.accounts.filter(
-    (account) => account.kind === "money" && !account.archived,
+  const accounts = finance.allAccounts.filter(
+    (account) => account.kind === "money" && !account.archived && account.include_in_summary,
   );
   const pending =
     planning.page?.plans.filter((plan) => plan.status === "pending") ?? [];
@@ -388,7 +373,7 @@ export function FinanceOverviewDashboard({
             </dl>
           </CardContent>
         </Card>
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-3">
           <Card size="sm">
             <CardHeader>
               <CardTitle>Monthly spending limit</CardTitle>
@@ -450,111 +435,14 @@ export function FinanceOverviewDashboard({
             data-testid="finance-asset-total"
           />
           <Tile
-            label="Reserved for goals"
-            value={money(finance.summary?.allocations.reserved_cents ?? 0)}
-            description={countLabel(finance.summary?.allocations.goal_count ?? 0, "active goal")}
-            data-testid="finance-reserved-total"
+            label="Owed to me"
+            value={money(finance.summary?.obligations.receivable_cents ?? 0)}
+            description="Outstanding receivables, separate from cash"
+            data-testid="finance-receivable-total"
           />
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Obligations</CardTitle>
-              <CardDescription>Separate from cash</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <dl className="grid grid-cols-2 gap-3">
-                <div>
-                  <dt className="text-xs text-muted-foreground">Debt</dt>
-                  <dd className="mt-1 break-words text-sm font-semibold tabular-nums">
-                    {money(finance.summary?.obligations.debt_cents ?? 0)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted-foreground">Receivables</dt>
-                  <dd className="mt-1 break-words text-sm font-semibold tabular-nums">
-                    {money(finance.summary?.obligations.receivable_cents ?? 0)}
-                  </dd>
-                </div>
-              </dl>
-            </CardContent>
-          </Card>
         </div>
         <div className="grid min-w-0 gap-3 md:grid-cols-3">
-          <Card size="sm" className="">
-            <CardHeader>
-              <CardTitle>Cost analysis</CardTitle>
-              <CardDescription>Spending by category</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <p className="text-2xl font-semibold tabular-nums">
-                {money(reportSpending)}
-              </p>
-              {categories.length ? (
-                <div className="flex flex-col divide-y divide-border/60">
-                  {categories.slice(0, 5).map((category, index) => (
-                    <button
-                      key={category.category_id ?? "uncategorized"}
-                      type="button"
-                      disabled={!category.category_id}
-                      onClick={() => {
-                        if (category.category_id)
-                          onCategoryFilter(category.category_id);
-                      }}
-                      className="flex min-h-10 w-full flex-col gap-1.5 rounded-sm px-1 py-2 text-left enabled:hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                    >
-                      <span className="flex min-w-0 items-baseline justify-between gap-3">
-                        <span className="flex min-w-0 items-center gap-2 text-xs">
-                          <span
-                            className={cn(
-                              "size-2 shrink-0 rounded-sm",
-                              categoryColors[Math.min(index, 4)],
-                            )}
-                          />
-                          <span className="truncate font-medium">
-                            {category.name}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                          {reportSpending > 0
-                            ? Math.round(
-                                (category.spending_cents / reportSpending) *
-                                  100,
-                              )
-                            : 0}
-                          %
-                        </span>
-                      </span>
-                      <span className="block h-1.5 overflow-hidden rounded-sm bg-muted">
-                        <span
-                          className={cn(
-                            "block h-full rounded-sm",
-                            category.overspent
-                              ? "bg-destructive"
-                              : "bg-primary",
-                          )}
-                          style={{
-                            width: `${Math.min(100, reportSpending > 0 ? Math.round((category.spending_cents / reportSpending) * 100) : 0)}%`,
-                          }}
-                        />
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Category rows appear after expenses are recorded or budgets
-                  are set.
-                </p>
-              )}
-              {report && report.unbudgeted_cents !== 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Unbudgeted spending ·{" "}
-                  <span className="tabular-nums">
-                    {money(report.unbudgeted_cents)}
-                  </span>
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          <FinanceCostAnalysis report={report} onCategoryFilter={onCategoryFilter} />
           <FinanceGoals />
           <Card size="sm" className="">
             <CardHeader>
@@ -666,14 +554,10 @@ export function FinanceOverviewDashboard({
         className="flex min-w-0 flex-col gap-3"
         aria-label="Finance review, accounts and transaction history"
       >
-        <FinanceAttentionQueue
-          attention={attention}
-          onReview={onReviewAttention}
-        />
         <Card size="sm" className="">
           <CardHeader>
             <CardTitle>Accounts</CardTitle>
-            <CardDescription>Active money accounts</CardDescription>
+            <CardDescription>Active debit accounts</CardDescription>
             <CardAction className="flex items-center gap-1">
               {accounts.length > 1 && (
                 <div className="flex items-center gap-1">
@@ -697,9 +581,8 @@ export function FinanceOverviewDashboard({
                   </Button>
                 </div>
               )}
-              <Button variant="ghost" size="sm" onClick={() => onOpenAccount()}>
+              <Button variant="ghost" size="icon" aria-label="Add account" title="Add account" onClick={() => onOpenAccount()}>
                 <IconPlus aria-hidden="true" data-icon="inline-start" />
-                Add
               </Button>
             </CardAction>
           </CardHeader>
@@ -715,7 +598,7 @@ export function FinanceOverviewDashboard({
                   <button
                     key={account.id}
                     type="button"
-                    aria-label={`Manage ${account.name}`}
+                    aria-label={`View ${account.name}`}
                     onClick={() => onOpenAccount(account)}
                     className="flex min-w-0 snap-start flex-col rounded-lg bg-primary/15 p-4 text-left ring-1 ring-foreground/5 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                   >
@@ -732,7 +615,7 @@ export function FinanceOverviewDashboard({
                       {money(account.balance_cents)}
                     </span>
                     <span className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <span>Money account</span>
+                      <span>Debit account</span>
                       {account.balance_cents < 0 ? (
                         <span className="flex items-center gap-1 text-destructive">
                           <IconAlertTriangle
@@ -754,7 +637,7 @@ export function FinanceOverviewDashboard({
                   <EmptyMedia variant="icon">
                     <IconWallet aria-hidden="true" />
                   </EmptyMedia>
-                  <EmptyTitle>No money accounts yet</EmptyTitle>
+                  <EmptyTitle>No debit accounts yet</EmptyTitle>
                   <EmptyDescription>
                     Add an account with its opening balance to get started.
                   </EmptyDescription>
@@ -853,6 +736,30 @@ export function FinanceOverviewDashboard({
           </CardContent>
         </Card>
       </aside>
+      <section aria-label="Obligations summary" className="grid min-w-0 gap-3 xl:col-span-2">
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle>Obligations</CardTitle>
+            <CardDescription>Separate from cash</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-2 gap-3">
+              <div>
+                <dt className="text-xs text-muted-foreground">Debt</dt>
+                <dd className="mt-1 break-words text-sm font-semibold tabular-nums">
+                  {money(finance.summary?.obligations.debt_cents ?? 0)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Receivables</dt>
+                <dd className="mt-1 break-words text-sm font-semibold tabular-nums">
+                  {money(finance.summary?.obligations.receivable_cents ?? 0)}
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 }

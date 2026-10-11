@@ -4,9 +4,11 @@ Activity records can carry up to 20 manually chosen Note links. This covers inco
 
 ## Owner workflow
 
+History shows filters in a left sidebar on desktop. On smaller screens, choose **Filters** to open the drawer; applying or clearing filters closes it. Existing `?tab=activity` links still open History.
+
 In Add transaction, expand **Additional details**, find a Note by title, inspect its read-only content, then select it. Save transaction and Save and add another attach the selection atomically with the posted activity. Save and add another clears the selection for the next entry.
 
-In Activity, inspect a record and expand **Additional details: Note links**. Find/select Notes or remove selected links, then choose **Save Note links**. Selection alone does not save. Closing an unsaved panel discards its selection. The Activity tab and filters stay in place. Link edits can also annotate hidden or reverted activity without changing financial effects.
+In History, inspect a record and expand **Additional details: Note links**. Find/select Notes or remove selected links, then choose **Save Note links**. Selection alone does not save. Closing an unsaved panel discards its selection. The History tab and filters stay in place. Link edits can also annotate hidden or reverted activity without changing financial effects.
 
 The picker shows at most 25 titles per page, searches titles literally, and excludes Trash. Note inspection requests content separately through the existing Notes API. Renamed Notes display their current title. Trashed Notes are not displayed or available for new attachment; permanent deletion removes their stored relationship. Existing Notes remain separate from finance history.
 
@@ -30,7 +32,7 @@ Run in the T3 Code browser against your existing dev server. **Synthetic test ac
 
 On desktop and phone-sized viewports, in light and dark themes:
 
-1. Record the synthetic Note's content and date. In Finance > Activity, retain a filter matching your synthetic account.
+1. Record the synthetic Note's content and date. In Finance > History, retain a filter matching your synthetic account.
 2. Add a small synthetic Expense with distinct transaction text. Expand Additional details, find the Note by title, inspect it, close Note inspection, and select it. Save transaction. Confirm the tab/filter remain and the expense posts exactly once.
 3. Inspect that transaction. Expand Note links, inspect the linked Note, remove it, save links, and verify the account balance did not change. Reopen to confirm removal persisted.
 4. Attach the same Note again and save. Confirm the Note's content/date are unchanged, and the transaction text still belongs to finance.

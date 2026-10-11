@@ -94,7 +94,7 @@ matching accepts an already recorded principal payment of the same obligation
 with current transaction and obligation versions. One transaction satisfies one
 occurrence. Linking never pays principal twice.
 
-Correct the principal in Activity to update cash, principal progress, and any
+Correct the principal in History to update cash, principal progress, and any
 linked fee together. A linked fee follows account/date changes. Delete preserves
 both payment progress and occurrence satisfaction. Revert cancels the principal
 and linked fee, restores outstanding principal, and reopens the occurrence.

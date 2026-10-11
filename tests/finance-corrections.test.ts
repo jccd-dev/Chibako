@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { getDb } from "../src/lib/db";
-import { createAccount, getAccount, getFinanceSummary } from "../src/features/finance/accounts";
+import { createAccount, getAccount, getFinanceSummary, updateAccount } from "../src/features/finance/accounts";
 import { getActivityTotals, getTransaction, listTransactions, postTransaction } from "../src/features/finance/activity";
 import { createClassification } from "../src/features/finance/classifications";
 import { postTransfer, reconcileAccount, valueAsset } from "../src/features/finance/movements";
@@ -24,6 +24,20 @@ function expense(account_id: string, extra: object = {}) {
   return postTransaction(owner, { request_id: randomUUID(), account_id, amount: "20", transaction_date: "2026-09-30", ...extra }).transaction;
 }
 function action(version: number) { return { request_id: randomUUID(), version }; }
+
+test("excluded account refunds and reversals retain activity reporting without summary holdings", () => {
+  const cash = account("Excluded cash"), bank = account("Included bank");
+  updateAccount(owner, cash.id, { request_id: "exclude-refund-account", version: 1, include_in_summary: false });
+  const original = expense(bank.id);
+  const refund = recordRefund(owner, original.id, { ...action(original.version), account_id: cash.id, amount: "5", transaction_date: "2026-10-02" });
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 8000);
+  assert.equal(getAccount(owner, cash.id).balance_cents, 10500);
+  assert.equal(getActivityTotals(owner, { month: "2026-10" }).expense_cents, -500);
+  revertActivity(owner, refund.transaction.id, action(refund.transaction.version));
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 8000);
+  updateAccount(owner, cash.id, { request_id: "include-refund-account", version: 2, include_in_summary: true });
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 18000);
+});
 
 test("amount/account corrections replace effects atomically; hidden activity still counts and Revert cancels once", () => {
   const old = account("Old"), next = account("Next");

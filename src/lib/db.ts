@@ -127,6 +127,8 @@ const MIGRATIONS: string[] = [
     currency TEXT NOT NULL CHECK (currency = 'PHP'),
     opening_balance_cents INTEGER NOT NULL CHECK (typeof(opening_balance_cents) = 'integer' AND opening_balance_cents BETWEEN -9007199254740991 AND 9007199254740991),
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    account_group TEXT NOT NULL DEFAULT '',
+    include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1)),
     version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -308,6 +310,42 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_finance_obligation_movements_principal ON finance_obligation_movements(obligation_id, reverted);
   CREATE INDEX IF NOT EXISTS idx_finance_obligation_movements_account ON finance_obligation_movements(account_id, reverted);
   `,
+  `
+  WITH defaults(type, slug, name) AS (VALUES
+    ('income', 'salary', 'Salary'),
+    ('income', 'bonus', 'Bonus'),
+    ('income', 'freelance', 'Freelance'),
+    ('income', 'commission', 'Commission'),
+    ('income', 'business', 'Business'),
+    ('income', 'side-hustles', 'Side hustles'),
+    ('income', 'allowance', 'Allowance'),
+    ('income', 'gift', 'Gift'),
+    ('income', 'refund', 'Refund'),
+    ('income', 'cashback', 'Cashback'),
+    ('income', 'interest', 'Interest'),
+    ('income', 'dividend', 'Dividend'),
+    ('income', 'rental', 'Rental'),
+    ('income', 'others', 'Others'),
+    ('expense', 'food', 'Food'),
+    ('expense', 'transport', 'Transport'),
+    ('expense', 'phone', 'Phone'),
+    ('expense', 'bills', 'Bills'),
+    ('expense', 'shopping', 'Shopping'),
+    ('expense', 'fun', 'Fun'),
+    ('expense', 'health', 'Health'),
+    ('expense', 'fees', 'Fees'),
+    ('expense', 'subscriptions', 'Subscriptions'),
+    ('expense', 'other', 'Other')
+  )
+  INSERT OR IGNORE INTO finance_classifications (id, kind, type, name, created_at, updated_at)
+    SELECT 'default-' || type || ':' || slug, 'category', type, name, unixepoch(), unixepoch()
+    FROM defaults
+    WHERE NOT EXISTS (
+      SELECT 1 FROM finance_classifications c
+      WHERE c.kind = 'category' AND c.type = defaults.type AND c.parent_id IS NULL
+        AND c.name = defaults.name COLLATE NOCASE
+    );
+  `,
 ];
 
 export function getDb(): Database.Database {
@@ -339,6 +377,10 @@ export function getDb(): Database.Database {
     if (!embNames.has("content_hash")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`);
     if (!embNames.has("dim")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN dim INTEGER NOT NULL DEFAULT 0`);
     if (!embNames.has("input_version")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN input_version INTEGER NOT NULL DEFAULT 1`);
+    const accountColumns = db.prepare("PRAGMA table_info(finance_accounts)").all() as Array<{ name: string }>;
+    const accountNames = new Set(accountColumns.map(column => column.name));
+    if (!accountNames.has("account_group")) db.exec("ALTER TABLE finance_accounts ADD COLUMN account_group TEXT NOT NULL DEFAULT ''");
+    if (!accountNames.has("include_in_summary")) db.exec("ALTER TABLE finance_accounts ADD COLUMN include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1))");
     for (const table of ["finance_transactions", "finance_movements"]) {
       const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
       const existing = new Set(columns.map(column => column.name));
