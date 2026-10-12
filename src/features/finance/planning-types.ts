@@ -7,7 +7,7 @@ import type { FinanceTransaction } from "./activity-types";
 
 const id = getAccountSchema.shape.id;
 const version = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
-export const createPlanSchema = postTransactionSchema.omit({ transaction_date: true, note_ids: true }).extend({ due_date: calendarDateSchema }).strict();
+export const createPlanSchema = postTransactionSchema.omit({ transaction_date: true, note_ids: true, cashback: true }).extend({ due_date: calendarDateSchema }).strict();
 export const planActionSchema = z.object({ request_id: createPlanSchema.shape.request_id, version }).strict();
 export const updatePlanSchema = z.object({
   ...planActionSchema.shape,

@@ -21,9 +21,11 @@ const labels = {
 export function FinanceAccountHistory({
   accountId,
   onHistory,
+  onInspect,
 }: {
   accountId: string;
   onHistory: () => void;
+  onInspect: (id: string) => void;
 }) {
   const [page, setPage] = useState<ActivityPage | null>(null);
   const [error, setError] = useState("");
@@ -87,10 +89,13 @@ export function FinanceAccountHistory({
       ) : (
         <ul className="divide-y divide-border">
           {page.transactions.map((row) => (
-            <li
-              key={row.id}
-              className="flex flex-wrap items-start justify-between gap-2 py-3"
-            >
+            <li key={row.id}>
+              <button
+                type="button"
+                onClick={() => onInspect(row.id)}
+                aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${row.transaction_date}`}
+                className="flex w-full flex-wrap items-start justify-between gap-2 rounded-md px-1 py-3 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+              >
               <div className="min-w-0 flex-1">
                 <p className="break-words text-sm font-medium">
                   {row.obligation_payment
@@ -113,6 +118,7 @@ export function FinanceAccountHistory({
               <p className="text-sm tabular-nums">
                 {formatPHP(row.amount_cents)}
               </p>
+              </button>
             </li>
           ))}
         </ul>

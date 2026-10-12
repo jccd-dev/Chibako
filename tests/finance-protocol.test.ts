@@ -110,6 +110,32 @@ test("REST and MCP persist account settings and agree on summary exclusion", asy
   assert.equal((await (await list(rest(principal.key), context)).json()).accounts[0].include_in_summary, true);
 });
 
+test("REST and MCP create and update nonzero maintaining balances with the same account contract", async () => {
+  const principal = createApiKey("Maintaining balances", ["finance:read", "finance:manage"]);
+  const restCreated = await (await create(rest(principal.key, { ...opening, request_id: "rest-maintaining", opening_balance: "8000", maintaining_balance: "2000" }), context)).json();
+  const mcpCreated = await rpc(principal.key, "tools/call", { name: "create_finance_account", arguments: { ...opening, request_id: "mcp-maintaining", opening_balance: "1000", maintaining_balance: "250" } });
+  assert.equal(mcpCreated.result.isError, undefined);
+
+  const restUpdated = await update(new Request(`https://chibako.test/api/finance/accounts/${restCreated.account.id}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${principal.key}`, "content-type": "application/json" },
+    body: JSON.stringify({ request_id: "rest-maintaining-edit", version: 1, maintaining_balance: "3000" }),
+  }), { params: Promise.resolve({ id: restCreated.account.id }) });
+  assert.equal(restUpdated.status, 200);
+  const mcpUpdated = await rpc(principal.key, "tools/call", { name: "update_finance_account", arguments: {
+    id: mcpCreated.result.structuredContent.account.id, request_id: "mcp-maintaining-edit", version: 1, maintaining_balance: "350",
+  } });
+  assert.equal(mcpUpdated.result.isError, undefined);
+
+  const restAccount = (await (await list(rest(principal.key), context)).json()).accounts.find((account: { id: string }) => account.id === restCreated.account.id);
+  assert.equal(restAccount.maintaining_balance_cents, 300000);
+  assert.equal(restAccount.balance_cents, 1100000);
+  assert.equal(restAccount.spendable_cents, 800000);
+  assert.equal(mcpUpdated.result.structuredContent.account.maintaining_balance_cents, 35000);
+  assert.equal(mcpUpdated.result.structuredContent.account.balance_cents, 135000);
+  assert.equal(mcpUpdated.result.structuredContent.account.spendable_cents, 100000);
+});
+
 test("MCP local trust stays local and keyed catalogs cannot widen finance scopes", async () => {
   for (const options of [
     { exposure: "local" as const, scopes: null },

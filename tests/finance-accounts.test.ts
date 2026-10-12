@@ -30,6 +30,40 @@ test("PHP openings preserve signed exact cents and reject unsupported inputs", (
   assert.throws(() => createAccount(owner, { ...input, currency: "USD" }), { status: 400, code: "invalid_input" });
 });
 
+test("maintaining balance adds to net balance but stays unavailable to spend", () => {
+  const account = createAccount(owner, {
+    ...input,
+    request_id: randomUUID(),
+    opening_balance: "8000",
+    maintaining_balance: "2000",
+  }).account;
+  assert.equal(account.opening_balance_cents, 800000);
+  assert.equal(account.maintaining_balance_cents, 200000);
+  assert.equal(account.balance_cents, 1000000);
+  assert.equal(account.spendable_cents, 800000);
+  assert.equal(getFinanceSummary(owner).money.balance_cents, 1000000);
+
+  for (const value of ["-0.01", "1.234", "abc", "90071992547409.92"]) {
+    assert.throws(() => createAccount(owner, { ...input, request_id: randomUUID(), maintaining_balance: value }), { status: 400 });
+  }
+  assert.throws(() => createAccount(owner, { ...input, request_id: randomUUID(), kind: "asset", maintaining_balance: "1" }), { status: 400 });
+});
+
+test("maintaining balance edits change net balance while preserving opening and enforce version and replay rules", () => {
+  const account = createAccount(owner, { ...input, request_id: randomUUID(), opening_balance: "80", maintaining_balance: "20" }).account;
+  const patch = { request_id: "maintaining-edit", version: account.version, maintaining_balance: "30" };
+  const updated = updateAccount(owner, account.id, patch);
+  assert.equal(updated.account.opening_balance_cents, 8000);
+  assert.equal(updated.account.maintaining_balance_cents, 3000);
+  assert.equal(updated.account.balance_cents, 11000);
+  assert.equal(updated.account.spendable_cents, 8000);
+  assert.deepEqual(updateAccount(owner, account.id, patch), updated);
+  assert.throws(() => updateAccount(owner, account.id, { ...patch, request_id: "maintaining-stale" }), { status: 409, code: "version_conflict" });
+  assert.throws(() => updateAccount(owner, account.id, { request_id: "maintaining-negative", version: updated.account.version, maintaining_balance: "-1" }), { status: 400 });
+  assert.throws(() => updateAccount({ kind: "api-key", id: "reader", scopes: ["finance:read"] }, account.id, { request_id: "maintaining-denied", version: updated.account.version, maintaining_balance: "0" }), { status: 403 });
+  assert.equal(getAccount(owner, account.id).opening_balance_cents, 8000);
+});
+
 test("money and assets stay separate while rename, archive and restore retain holdings", () => {
   const money = create("123.45");
   create("-10.01");

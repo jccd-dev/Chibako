@@ -6,6 +6,7 @@ import { accountGroupSchema, createAccountSchema } from "./types";
 import type { FinanceAccountsController } from "./use-finance-accounts";
 import type { FinanceActivityController } from "./use-finance-activity";
 import { useFinanceAdjustment } from "./use-finance-adjustment";
+import { decimalPHP } from "./presentation";
 import { decimalCents } from "./money";
 
 export function useFinanceAccountEditor(
@@ -19,12 +20,13 @@ export function useFinanceAccountEditor(
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState(initial?.kind ?? "money");
   const [opening, setOpening] = useState("0.00");
+  const [maintaining, setMaintaining] = useState(decimalPHP(initial?.maintaining_balance_cents ?? 0));
   const [group, setGroup] = useState(initial?.account_group ?? "");
   const [included, setIncluded] = useState(initial?.include_in_summary ?? true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const saveLock = useRef(false);
-  const adjustment = useFinanceAdjustment(activity, account?.id ?? null);
+  const adjustment = useFinanceAdjustment(activity, account?.id ?? null, kind === "money" ? maintaining : undefined);
   useEffect(() => {
     if (adjustment.account) {
       setAccount(adjustment.account);
@@ -32,6 +34,7 @@ export function useFinanceAccountEditor(
         setName(adjustment.account.name);
         setGroup(adjustment.account.account_group);
         setIncluded(adjustment.account.include_in_summary);
+        setMaintaining(decimalPHP(adjustment.account.maintaining_balance_cents));
       }
     }
   }, [adjustment.account, editing]);
@@ -56,6 +59,14 @@ export function useFinanceAccountEditor(
       );
       return false;
     }
+    const parsedMaintaining = createAccountSchema.shape.maintaining_balance.safeParse(kind === "money" ? maintaining : "0");
+    if (!parsedMaintaining.success) {
+      setError("Enter a non-negative maintaining balance with at most two decimal places.");
+      return false;
+    }
+    let maintainingCents: number;
+    try { maintainingCents = decimalCents(parsedMaintaining.data); }
+    catch { setError("Maintaining balance exceeds the exact-cent range."); return false; }
     const adjust = !!account && !!adjustment.actual.trim();
     if (adjust && !adjustment.validate()) return false;
     saveLock.current = true;
@@ -66,7 +77,8 @@ export function useFinanceAccountEditor(
         !account ||
         parsedName.data !== account.name ||
         parsedGroup.data !== account.account_group ||
-        included !== account.include_in_summary
+        included !== account.include_in_summary ||
+        maintainingCents !== account.maintaining_balance_cents
       ) {
         const saved = await finance.save(
           account?.id ?? null,
@@ -75,6 +87,7 @@ export function useFinanceAccountEditor(
                 name: parsedName.data,
                 account_group: parsedGroup.data,
                 include_in_summary: included,
+                maintaining_balance: parsedMaintaining.data,
                 version: account.version,
               }
             : {
@@ -84,6 +97,7 @@ export function useFinanceAccountEditor(
                 include_in_summary: included,
                 currency: "PHP",
                 opening_balance: opening,
+                maintaining_balance: parsedMaintaining.data,
               },
           account ? "Account details saved." : "Account created.",
         );
@@ -92,11 +106,8 @@ export function useFinanceAccountEditor(
         setAccount(saved);
       }
       if (!savedAccount) return false;
-      if (
-        adjust &&
-        adjustment.account &&
-        decimalCents(adjustment.actual) !== adjustment.account.balance_cents
-      ) {
+      if (adjust && adjustment.account) {
+        if (decimalCents(adjustment.actual) === adjustment.expectedBalance) return true;
         if (!(await adjustment.save())) {
           setError(
             "Account details are saved. The balance adjustment was not confirmed. Retry safely, or refresh the balance before comparing again.",
@@ -132,6 +143,8 @@ export function useFinanceAccountEditor(
     setKind,
     opening,
     setOpening,
+    maintaining,
+    setMaintaining,
     group,
     setGroup,
     included,

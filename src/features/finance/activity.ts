@@ -6,6 +6,7 @@ import { readAccountBalance } from "./accounts";
 import { financeBalanceWarnings } from "./reservations";
 import { parseFinance, financeMutation } from "./mutations";
 import { decimalCents, exactCents } from "./money";
+import { cashbackCents } from "./cashback-types";
 import { readClassification } from "./classifications";
 import { replaceActivityNoteLinks } from "./note-link-storage";
 import {
@@ -22,12 +23,13 @@ export function activityTable(record: FinanceTransaction) {
 const activityRows = `WITH activity AS (
   SELECT t.id, t.type, t.account_id, t.amount_cents, t.transaction_date, t.category_id, t.subcategory_id, t.text, t.tag_ids,
     t.version, t.created_at, t.updated_at, t.hidden, t.reverted,
-    NULL AS destination_account_id, COALESCE(m.id, pf.cash_activity_id) AS linked_record_id, pp.fee_transaction_id AS fee_transaction_id,
+    NULL AS destination_account_id, COALESCE(m.id, pf.cash_activity_id, cb.expense_id) AS linked_record_id, pp.fee_transaction_id AS fee_transaction_id,
     NULL AS compared_balance_cents, NULL AS actual_balance_cents, NULL AS expense_id,
     COALESCE((SELECT SUM(r.amount_cents) FROM finance_refunds r WHERE r.expense_id = t.id AND r.reverted = 0), 0) AS refunded_cents
   FROM finance_transactions t LEFT JOIN finance_movements m ON m.fee_transaction_id = t.id
   LEFT JOIN finance_obligation_payments pp ON pp.cash_activity_id = t.id
   LEFT JOIN finance_obligation_payments pf ON pf.fee_transaction_id = t.id
+  LEFT JOIN finance_cashbacks cb ON cb.income_id = t.id
   UNION ALL
   SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at, hidden, reverted,
     destination_account_id, NULL, fee_transaction_id, compared_balance_cents, actual_balance_cents, NULL, 0 FROM finance_movements
@@ -39,7 +41,7 @@ const activityRows = `WITH activity AS (
   SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at, hidden, reverted,
     NULL, NULL, NULL, NULL, NULL, NULL, 0 FROM finance_obligation_movements
 )`;
-const transactionSelect = "SELECT t.*, COALESCE(om.obligation_id,op.obligation_id) AS obligation_id, CASE WHEN op.id IS NOT NULL THEN 1 ELSE 0 END AS obligation_payment, o.version AS obligation_version, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id LEFT JOIN finance_obligation_movements om ON om.id = t.id LEFT JOIN finance_obligation_payments op ON op.cash_activity_id=t.id LEFT JOIN finance_obligations o ON o.id = COALESCE(om.obligation_id,op.obligation_id)";
+const transactionSelect = "SELECT t.*, cp.income_id AS cashback_transaction_id, cc.expense_id AS cashback_expense_id, COALESCE(cp.mode,cc.mode) AS cashback_mode, COALESCE(cp.value,cc.value) AS cashback_value, COALESCE(om.obligation_id,op.obligation_id) AS obligation_id, CASE WHEN op.id IS NOT NULL THEN 1 ELSE 0 END AS obligation_payment, o.version AS obligation_version, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t LEFT JOIN finance_cashbacks cp ON cp.expense_id=t.id LEFT JOIN finance_cashbacks cc ON cc.income_id=t.id JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id LEFT JOIN finance_obligation_movements om ON om.id = t.id LEFT JOIN finance_obligation_payments op ON op.cash_activity_id=t.id LEFT JOIN finance_obligations o ON o.id = COALESCE(om.obligation_id,op.obligation_id)";
 
 type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids" | "hidden" | "reverted" | "obligation_payment"> & { hidden: number; reverted: number; obligation_payment: number; text: string; tag_ids: string; created_at: number; updated_at: number };
 function transactionFromRow(row: TransactionRow, details: boolean): FinanceTransaction {
@@ -62,15 +64,28 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
   if (note_ids.length) authorizeFinanceNotes(actor);
   const amount = decimalCents(payload.amount);
   if (amount <= 0) throw new FinanceError("Amount must be greater than zero", 400, "invalid_input");
+  if (payload.cashback && payload.type !== "expense") throw new FinanceError("Cashback is available only for expenses", 400, "invalid_cashback");
+  const cashbackAmount = payload.cashback ? cashbackCents(amount, payload.cashback) : 0;
   return financeMutation(actor, request_id, "transaction.post", note_ids.length ? { ...payload, note_ids } : payload, () => {
     const account = readAccountBalance(payload.account_id);
     if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
     validateTransactionClassifications(payload);
-    const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)));
+    const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)) + BigInt(cashbackAmount));
     const id = insertTransaction({ ...payload, amount_cents: amount });
     replaceActivityNoteLinks(id, note_ids);
-    const result: PostedTransaction = { transaction: readTransaction(id, false), balance_cents: balance, ...financeBalanceWarnings([{ account_id: account.id, balance_cents: balance }]) };
-    return { result, affectedIds: [id, account.id, ...note_ids], before: null, after: { ...readTransaction(id, true), note_ids } };
+    let cashbackId: string | null = null;
+    if (payload.cashback) {
+      const category = getDb().prepare("SELECT id FROM finance_classifications WHERE kind='category' AND type='income' AND parent_id IS NULL AND archived=0 AND name=? COLLATE NOCASE ORDER BY id LIMIT 1")
+        .get("Cashback") as { id: string } | undefined;
+      if (!category) throw new FinanceError("Create or restore an active income category named Cashback before adding cashback", 400, "invalid_category");
+      cashbackId = insertTransaction({ type: "income", account_id: account.id, amount_cents: cashbackAmount,
+        transaction_date: payload.transaction_date, category_id: category.id, subcategory_id: null, text: "Cashback", tag_ids: [] });
+      getDb().prepare("INSERT INTO finance_cashbacks (expense_id,income_id,mode,value) VALUES (?,?,?,?)").run(id, cashbackId, payload.cashback.mode, payload.cashback.value);
+    }
+    const cashback = cashbackId ? readTransaction(cashbackId, false) : null;
+    const result: PostedTransaction = { transaction: readTransaction(id, false), ...(cashback ? { cashback } : {}), balance_cents: balance, ...financeBalanceWarnings([{ account_id: account.id, balance_cents: balance }]) };
+    return { result, affectedIds: [id, account.id, ...note_ids, ...(cashbackId ? [cashbackId] : [])], before: null,
+      after: { ...readTransaction(id, true), note_ids, ...(cashbackId ? { cashback: readTransaction(cashbackId, true) } : {}) } };
   });
 }
 
@@ -113,7 +128,8 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
     AND EXISTS (SELECT 1 FROM finance_accounts a WHERE a.id=t.account_id AND a.kind='money' AND a.archived=0)
     AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id=t.id)
     AND NOT EXISTS (SELECT 1 FROM finance_refunds r WHERE r.expense_id=t.id)
-    AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id=t.id)`);
+    AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id=t.id)
+    AND NOT EXISTS (SELECT 1 FROM finance_cashbacks c WHERE c.expense_id=t.id OR c.income_id=t.id)`);
   if (query.account_id) { clauses.push("(t.account_id = ? OR t.destination_account_id = ?)"); values.push(query.account_id, query.account_id); }
   if (query.obligation_id) {
     clauses.push("(EXISTS (SELECT 1 FROM finance_obligation_movements om WHERE om.id = t.id AND om.obligation_id = ?) OR EXISTS (SELECT 1 FROM finance_obligation_payments op WHERE op.cash_activity_id = t.id AND op.obligation_id = ?))");

@@ -1,7 +1,7 @@
 import { getDb } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
-import { getFinanceSummary } from "./accounts";
+import { getFinanceSummary, readAccountBalance } from "./accounts";
 import { listAttentionBudgetOverruns } from "./budgets";
 import { listGoalAllocationShortfalls } from "./goals";
 import { listDueAttentionObligations, listObligations } from "./obligations";
@@ -56,9 +56,13 @@ export function getFinanceOverview(actor: FinanceActor): FinanceOverview {
     LEFT JOIN finance_goal_allocations a ON a.goal_id = g.id
     WHERE g.archived = 0
   `).safeIntegers().get() as { goal_count: number | bigint; reserved_cents: bigint };
+  const accounts = db.prepare("SELECT id FROM finance_accounts WHERE kind = 'money' AND include_in_summary = 1").all() as { id: string }[];
+  let spendable = 0n;
+  for (const account of accounts) spendable += BigInt(readAccountBalance(account.id).spendable_cents);
   const obligations = listObligations(actor, { limit: 1, offset: 0, archived: "all" });
   return {
     ...summary,
+    spendable_cents: exactCents(spendable),
     allocations: {
       reserved_cents: exactCents(allocation.reserved_cents),
       goal_count: Number(allocation.goal_count),

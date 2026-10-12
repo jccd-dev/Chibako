@@ -68,6 +68,7 @@ interface FinanceOverviewDashboardProps {
   planning: FinancePlanningController;
   onNavigateTab: (tab: "overview" | "activity" | "planning" | "manage") => void;
   onOpenAccount: (account?: FinanceAccount) => void;
+  onInspectTransaction: (id: string) => void;
   onCategoryFilter: (categoryId: string) => void;
 }
 
@@ -116,6 +117,7 @@ export function FinanceOverviewDashboard({
   planning,
   onNavigateTab,
   onOpenAccount,
+  onInspectTransaction,
   onCategoryFilter,
 }: FinanceOverviewDashboardProps) {
   const report = reports.report;
@@ -200,7 +202,7 @@ export function FinanceOverviewDashboard({
               {money(finance.summary?.money.balance_cents ?? 0)}
             </CardTitle>
             <CardDescription>
-              Money balance ·{" "}
+              Net balance ·{" "}
               {countLabel(finance.summary?.money.account_count ?? 0, "account")}
             </CardDescription>
             <CardAction>
@@ -373,6 +375,12 @@ export function FinanceOverviewDashboard({
             </dl>
           </CardContent>
         </Card>
+        <Tile
+          label="Spendable this month"
+          value={money(finance.summary?.spendable_cents ?? 0)}
+          description="Projected availability after maintaining balances and this month’s unpaid expenses, including overdue and recurring payments"
+          data-testid="finance-spendable-total"
+        />
         <div className="grid min-w-0 gap-3 sm:grid-cols-3">
           <Card size="sm">
             <CardHeader>
@@ -611,8 +619,12 @@ export function FinanceOverviewDashboard({
                         aria-hidden="true"
                       />
                     </span>
-                    <span className="mt-5 block break-words text-lg font-semibold tracking-tight tabular-nums">
+                    <span className="mt-5 text-xs text-muted-foreground">Net balance</span>
+                    <span className="mt-1 block break-words text-2xl font-semibold tracking-tight tabular-nums">
                       {money(account.balance_cents)}
+                    </span>
+                    <span className="mt-1 text-xs tabular-nums">
+                      Spendable this month {money(account.spendable_cents)}
                     </span>
                     <span className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                       <span>Debit account</span>
@@ -687,7 +699,7 @@ export function FinanceOverviewDashboard({
                     <button
                       key={transaction.id}
                       type="button"
-                      onClick={() => onNavigateTab("activity")}
+                      onClick={() => onInspectTransaction(transaction.id)}
                       className="flex min-h-11 items-center gap-3 rounded-sm px-1 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">

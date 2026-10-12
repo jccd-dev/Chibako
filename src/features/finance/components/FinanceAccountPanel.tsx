@@ -38,12 +38,14 @@ export function FinanceAccountPanel({
   activity,
   onClose,
   onHistory,
+  onInspectTransaction,
 }: {
   selected: "create" | FinanceAccount;
   finance: FinanceAccountsController;
   activity: FinanceActivityController;
   onClose: () => void;
   onHistory: (id: string) => void;
+  onInspectTransaction: (id: string) => void;
 }) {
   const editor = useFinanceAccountEditor(selected, finance, activity);
   const { account, adjustment, busy } = editor;
@@ -81,7 +83,7 @@ export function FinanceAccountPanel({
             <dl className="grid grid-cols-2 gap-4 text-sm">
               <div className="col-span-2">
                 <dt className="text-muted-foreground">
-                  Current {asset ? "value" : "balance"}
+                  {asset ? "Current value" : "Net balance"}
                 </dt>
                 <dd className="mt-2 break-words text-2xl font-semibold tabular-nums">
                   {formatPHP(current?.balance_cents ?? 0)}
@@ -101,11 +103,23 @@ export function FinanceAccountPanel({
                 </dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Opening balance</dt>
+                <dt className="text-muted-foreground">{asset ? "Opening value" : "Spendable this month"}</dt>
                 <dd className="mt-1 break-words tabular-nums">
-                  {formatPHP(account.opening_balance_cents)}
+                  {formatPHP(asset ? account.opening_balance_cents : current?.spendable_cents ?? 0)}
                 </dd>
               </div>
+              {!asset && (
+                <>
+                  <div>
+                    <dt className="text-muted-foreground">Maintaining balance</dt>
+                    <dd className="mt-1 tabular-nums">{formatPHP(current?.maintaining_balance_cents ?? 0)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Unpaid expenses this month</dt>
+                    <dd className="mt-1 tabular-nums">{formatPHP(current?.planned_expense_cents ?? 0)}</dd>
+                  </div>
+                </>
+              )}
               <div>
                 <dt className="text-muted-foreground">Summary</dt>
                 <dd className="mt-1">
@@ -133,6 +147,7 @@ export function FinanceAccountPanel({
             <FinanceAccountHistory
               accountId={account.id}
               onHistory={() => onHistory(account.id)}
+              onInspect={onInspectTransaction}
             />
             <div className="mt-auto flex justify-end">
               <Button variant="outline" onClick={onClose}>
@@ -219,6 +234,24 @@ export function FinanceAccountPanel({
                   </FieldDescription>
                 </div>
               </Field>
+              {!asset && (
+                <Field>
+                  <FieldLabel htmlFor="finance-maintaining">Maintaining balance (PHP)</FieldLabel>
+                  <Input
+                    id="finance-maintaining"
+                    inputMode="decimal"
+                    required
+                    pattern="\d+(\.\d{1,2})?"
+                    value={editor.maintaining}
+                    disabled={busy}
+                    onChange={(event) => editor.setMaintaining(event.target.value)}
+                  />
+                  <FieldDescription>
+                    Reserved money, separate from opening balance. Both portions make up the net balance.
+                    Changing this amount changes the net balance by the same difference.
+                  </FieldDescription>
+                </Field>
+              )}
               {!account ? (
                 <Field>
                   <FieldLabel htmlFor="finance-opening">
@@ -234,8 +267,8 @@ export function FinanceAccountPanel({
                     onChange={(event) => editor.setOpening(event.target.value)}
                   />
                   <FieldDescription>
-                    The balance before recorded activity. Openings are fixed and
-                    do not count as income or spending.
+                    {asset ? "The value before recorded activity." : "The available portion before recorded activity, excluding maintaining balance."}
+                    Openings are fixed and do not count as income or spending.
                   </FieldDescription>
                 </Field>
               ) : (

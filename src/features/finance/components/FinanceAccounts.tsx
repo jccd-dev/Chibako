@@ -182,9 +182,15 @@ export function FinanceAccounts({
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <p className="break-words text-xl font-semibold tabular-nums">
+                    <p className="text-xs text-muted-foreground">{account.kind === "money" ? "Net balance" : "Current value"}</p>
+                    <p className="mt-1 break-words text-2xl font-semibold tabular-nums">
                       {formatPHP(account.balance_cents)}
                     </p>
+                    {account.kind === "money" && (
+                      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                        Spendable this month {formatPHP(account.spendable_cents)}
+                      </p>
+                    )}
                   </CardContent>
                   <CardFooter className="flex-wrap justify-between gap-2">
                     <p className="text-xs text-muted-foreground">

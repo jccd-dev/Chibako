@@ -17,6 +17,7 @@ export interface FinanceOverview {
   currency: "PHP";
   money: { balance_cents: number; account_count: number };
   assets: { balance_cents: number; account_count: number };
+  spendable_cents: number;
   allocations: { reserved_cents: number; goal_count: number };
   obligations: { debt_cents: number; receivable_cents: number };
 }

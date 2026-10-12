@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createAccountSchema, getAccountSchema } from "./types";
 import { noteIdsSchema } from "./note-link-types";
 import type { FinanceAllocationShortfall } from "./goal-types";
+import { cashbackSchema } from "./cashback-types";
 
 const id = getAccountSchema.shape.id;
 const requestId = createAccountSchema.shape.request_id;
@@ -28,6 +29,7 @@ export const postTransactionSchema = z.object({
   text: z.string().max(2000).default(""),
   note_ids: noteIdsSchema.default([]),
   tag_ids: z.array(id).max(20).default([]).refine(ids => new Set(ids).size === ids.length, "Tags must be unique"),
+  cashback: cashbackSchema.optional(),
 }).strict();
 export const listTransactionsSchema = z.object({
   ...page,
@@ -68,6 +70,8 @@ export interface FinanceTransaction {
   account_name: string; category_name: string | null; subcategory_name: string | null;
   destination_account_id?: string | null; destination_account_name?: string | null;
   linked_record_id?: string | null; fee_transaction_id?: string | null;
+  cashback_transaction_id?: string | null; cashback_expense_id?: string | null;
+  cashback_mode?: "percent" | "amount" | null; cashback_value?: string | null;
   obligation_id?: string | null; obligation_version?: number | null;
   obligation_payment?: boolean;
   compared_balance_cents?: number | null; actual_balance_cents?: number | null;
@@ -77,4 +81,4 @@ export interface FinanceTransaction {
 export interface ActivityPage { transactions: FinanceTransaction[]; total: number; limit: number; offset: number }
 export interface ClassificationPage { classifications: FinanceClassification[]; total: number; limit: number; offset: number }
 export interface ActivityTotals { currency: "PHP"; month: string; income_cents: number; expense_cents: number }
-export interface PostedTransaction { transaction: FinanceTransaction; balance_cents: number; warnings: string[]; allocation_shortfalls?: FinanceAllocationShortfall[] }
+export interface PostedTransaction { transaction: FinanceTransaction; cashback?: FinanceTransaction; balance_cents: number; warnings: string[]; allocation_shortfalls?: FinanceAllocationShortfall[] }

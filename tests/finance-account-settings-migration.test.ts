@@ -21,7 +21,7 @@ test("legacy accounts gain included and ungrouped defaults without losing balanc
     const migrated = new Database(join(vault, "brain.db"), { readonly: true });
     try {
       assert.deepEqual(migrated.prepare("SELECT * FROM finance_accounts").get(), {
-        id: "legacy", name: "Old savings", kind: "money", currency: "PHP", opening_balance_cents: 12345,
+        id: "legacy", name: "Old savings", kind: "money", currency: "PHP", opening_balance_cents: 12345, maintaining_balance_cents: 0,
         archived: 1, version: 7, created_at: 100, updated_at: 200, account_group: "", include_in_summary: 1,
       });
     } finally { migrated.close(); }

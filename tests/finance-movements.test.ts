@@ -121,6 +121,27 @@ test("invalid movements reject account kinds, dates, currencies, fees and unsafe
   assert.equal(getAccount(owner, source.id).balance_cents, 10000);
 });
 
+test("maintaining edits reconcile against the edited total and still reject intervening activity", () => {
+  const cash = createAccount(owner, { request_id: "maintained-cash", name: "Maintained cash", kind: "money", currency: "PHP", opening_balance: "80", maintaining_balance: "20" }).account;
+  const edited = updateAccount(owner, cash.id, { request_id: "maintaining-edit", version: cash.version, maintaining_balance: "30" }).account;
+  assert.equal(edited.opening_balance_cents, 8000);
+  assert.equal(edited.balance_cents, 11000);
+  const reconciled = reconcileAccount(owner, {
+    request_id: "maintaining-reconcile", account_id: cash.id, actual_balance: "105", expected_balance_cents: 11000, transaction_date: "2026-10-03",
+  });
+  assert.equal(reconciled.balances[0].balance_cents, 10500);
+  assert.equal(getAccount(owner, cash.id).opening_balance_cents, 8000);
+  assert.equal(getAccount(owner, cash.id).maintaining_balance_cents, 3000);
+
+  const concurrent = createAccount(owner, { request_id: "concurrent-cash", name: "Concurrent cash", kind: "money", currency: "PHP", opening_balance: "80", maintaining_balance: "20" }).account;
+  updateAccount(owner, concurrent.id, { request_id: "concurrent-maintaining-edit", version: concurrent.version, maintaining_balance: "30" });
+  postTransaction(owner, { request_id: "intervening-expense", type: "expense", account_id: concurrent.id, amount: "5", transaction_date: "2026-10-03" });
+  assert.throws(() => reconcileAccount(owner, {
+    request_id: "stale-maintaining-reconcile", account_id: concurrent.id, actual_balance: "105", expected_balance_cents: 11000, transaction_date: "2026-10-03",
+  }), { status: 409, code: "balance_conflict" });
+  assert.equal(getAccount(owner, concurrent.id).balance_cents, 10500);
+});
+
 test("summary exclusion follows both transfer sides and adjustments while retaining balances and history", () => {
   const cash = account("Cash"), bank = account("Savings", "0"), asset = account("Asset", "50", "asset");
   postTransfer(owner, transfer(cash.id, bank.id));

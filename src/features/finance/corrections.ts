@@ -5,6 +5,7 @@ import { readAccountBalance } from "./accounts";
 import { financeBalanceWarnings } from "./reservations";
 import { activityTable as table, readTransaction, validateTransactionClassifications } from "./activity";
 import type { FinanceTransaction } from "./activity-types";
+import { cashbackCents } from "./cashback-types";
 import { FinanceError, getAccountSchema, type FinanceActor } from "./types";
 import { exactCents, decimalCents } from "./money";
 import { financeMutation, parseFinance } from "./mutations";
@@ -23,6 +24,9 @@ function activeAccount(id: string, kind: "money" | "asset") {
 function linkedFee(record: FinanceTransaction): FinanceTransaction | null {
   return record.fee_transaction_id ? readTransaction(record.fee_transaction_id, true) : null;
 }
+function linkedCashback(record: FinanceTransaction): FinanceTransaction | null {
+  return record.cashback_transaction_id ? readTransaction(record.cashback_transaction_id, true) : null;
+}
 function accountIds(records: (FinanceTransaction | null)[]) {
   return [...new Set(records.flatMap(record => record ? [record.account_id, ...(record.destination_account_id ? [record.destination_account_id] : [])] : []))];
 }
@@ -30,7 +34,8 @@ function outcome(id: string, ids: string[]): CorrectedActivity {
   const transaction = readTransaction(id, false);
   const balances = ids.map(account_id => ({ account_id, balance_cents: readAccountBalance(account_id).balance_cents }));
   const expense = transaction.expense_id ? readTransaction(transaction.expense_id, false) : null;
-  return { transaction, fee: transaction.fee_transaction_id ? readTransaction(transaction.fee_transaction_id, false) : null, balances, ...financeBalanceWarnings(balances),
+  return { transaction, fee: transaction.fee_transaction_id ? readTransaction(transaction.fee_transaction_id, false) : null,
+    ...(transaction.cashback_transaction_id ? { cashback: readTransaction(transaction.cashback_transaction_id, false) } : {}), balances, ...financeBalanceWarnings(balances),
     ...(expense ? { expense: { id: expense.id, version: expense.version, amount_cents: expense.amount_cents, refunded_cents: expense.refunded_cents } } : {}) };
 }
 function bump(record: FinanceTransaction) {
@@ -78,7 +83,8 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
   parseFinance(getAccountSchema, { id });
   const { request_id, ...payload } = parseFinance(activityActionSchema, input);
   return financeMutation(actor, request_id, `activity.${operation}`, { id, ...payload }, () => {
-    const record = readTransaction(id, true), fee = linkedFee(record);
+    const record = readTransaction(id, true), fee = linkedFee(record), cashback = linkedCashback(record);
+    if (operation === "revert" && record.cashback_expense_id) throw new FinanceError("Revert the original expense to cancel its cashback together", 409, "linked_activity");
     const obligation = record.obligation_id ? readObligation(record.obligation_id) : null;
     if (obligation) checkObligationVersion(obligation, payload.obligation_version);
     else if (payload.obligation_version !== undefined) throw new FinanceError("This activity has no obligation", 400, "invalid_input");
@@ -91,7 +97,7 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
       throw new FinanceError("Reverting this principal activity would make outstanding principal negative", 409, "principal_in_use");
     }
     if (operation === "revert" && record.linked_record_id) throw new FinanceError("Revert the linked activity to cancel its fee together", 409, "linked_activity");
-    for (const entry of [record, fee]) {
+    for (const entry of [record, fee, cashback]) {
       if (!entry) continue;
       if (operation === "revert" && entry.refunded_cents > 0) throw new FinanceError("Revert active refunds before their expense", 409, "active_refunds");
       getDb().prepare(`UPDATE ${table(entry)} SET ${operation === "hide" ? "hidden" : "reverted"} = 1 WHERE id = ?`).run(entry.id);
@@ -99,11 +105,11 @@ function changeStatus(actor: FinanceActor, id: string, input: unknown, operation
     }
     if (expense) bump(expense);
     const plan = operation === "revert" ? reopenPlanForTransaction(id) : null;
-    const ids = accountIds([record, fee]);
+    const ids = accountIds([record, fee, cashback]);
     if (obligation) bumpObligation(obligation.id);
     const result: CorrectedActivity = { ...outcome(id, ids), ...(plan ? { plan: plan.after } : {}),
       ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: operation === "revert" ? record.obligation_payment ? record.amount_cents : -record.amount_cents : 0 } : {}) };
-    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(plan ? [plan.after.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: record, fee, expense, ...(plan ? { plan: plan.before } : {}), ...(obligation ? { obligation } : {}) }, after: { transaction: readTransaction(id, true), fee: linkedFee(readTransaction(id, true)), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(plan ? { plan: plan.after } : {}), ...(obligation ? { obligation: result.obligation } : {}) } };
+    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(cashback ? [cashback.id] : []), ...(expense ? [expense.id] : []), ...(plan ? [plan.after.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: record, fee, cashback, expense, ...(plan ? { plan: plan.before } : {}), ...(obligation ? { obligation } : {}) }, after: { transaction: readTransaction(id, true), fee: linkedFee(readTransaction(id, true)), cashback: linkedCashback(readTransaction(id, true)), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(plan ? { plan: plan.after } : {}), ...(obligation ? { obligation: result.obligation } : {}) } };
   });
 }
 
@@ -112,7 +118,8 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
   parseFinance(getAccountSchema, { id });
   const { request_id, ...patch } = parseFinance(correctActivitySchema, input);
   return financeMutation(actor, request_id, "activity.correct", { id, ...patch }, () => {
-    const before = readTransaction(id, true), fee = linkedFee(before);
+    const before = readTransaction(id, true), fee = linkedFee(before), cashback = linkedCashback(before);
+    if (before.cashback_expense_id) throw new FinanceError("Correct the original expense to change its cashback together", 409, "linked_activity");
     editable(before, patch.version);
     const obligation = before.obligation_id ? readObligation(before.obligation_id) : null;
     if (obligation) checkObligationVersion(obligation, patch.obligation_version);
@@ -143,7 +150,15 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     if (patch.category_id !== undefined || patch.subcategory_id !== undefined || patch.tag_ids !== undefined) {
       validateTransactionClassifications({ type: before.type === "income" ? "income" : "expense", category_id: movement || before.type === "refund" ? null : category, subcategory_id: movement || before.type === "refund" ? null : subcategory, tag_ids: tags });
     }
+    const cashbackAmount = cashback && before.cashback_mode && before.cashback_value !== null && before.cashback_value !== undefined
+      ? cashbackCents(amount, { mode: before.cashback_mode, value: before.cashback_value }) : null;
     const db = getDb();
+    if (cashback && cashbackAmount !== null) {
+      editable(cashback, cashback.version);
+      db.prepare("UPDATE finance_transactions SET account_id = ?, transaction_date = ?, amount_cents = ? WHERE id = ?")
+        .run(account, date, cashbackAmount, cashback.id);
+      bump(cashback);
+    }
     if (before.type === "transfer") {
       const destination = patch.destination_account_id ?? before.destination_account_id!;
       if (account === destination) throw new FinanceError("Choose different accounts", 400, "invalid_account");
@@ -174,8 +189,8 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     if (expense) bump(expense);
     if (obligation) bumpObligation(obligation.id);
     const after = readTransaction(id, true);
-    const ids = accountIds([before, fee, after, linkedFee(after)]);
+    const ids = accountIds([before, fee, cashback, after, linkedFee(after), linkedCashback(after)]);
     const result: CorrectedActivity = { ...outcome(id, ids), ...(obligation ? { obligation: readObligation(obligation.id), principal_change_cents: exactCents(before.obligation_payment ? BigInt(before.amount_cents) - BigInt(amount) : BigInt(amount) - BigInt(before.amount_cents)) } : {}) };
-    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(expense ? [expense.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: before, fee, expense, ...(obligation ? { obligation } : {}) }, after: { transaction: after, fee: linkedFee(after), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(obligation ? { obligation: result.obligation } : {}) } };
+    return { result, affectedIds: [id, ...ids, ...(fee ? [fee.id] : []), ...(cashback ? [cashback.id] : []), ...(expense ? [expense.id] : []), ...(obligation ? [obligation.id] : [])], before: { transaction: before, fee, cashback, expense, ...(obligation ? { obligation } : {}) }, after: { transaction: after, fee: linkedFee(after), cashback: linkedCashback(after), expense: expense ? readTransaction(expense.id, true) : null, balances: result.balances, ...(obligation ? { obligation: result.obligation } : {}) } };
   });
 }

@@ -15,7 +15,9 @@ import { setBudget, getFinanceReport } from "../src/features/finance/budgets";
 import { createClassification } from "../src/features/finance/classifications";
 import { createGoal, setGoalAllocation } from "../src/features/finance/goals";
 import { createObligation } from "../src/features/finance/obligations";
-import { createPlan } from "../src/features/finance/planning";
+import { cancelPlan, createPlan, postPlan } from "../src/features/finance/planning";
+import { catchUpPlans, createSchedule } from "../src/features/finance/recurrence";
+import { getAccount } from "../src/features/finance/accounts";
 import { getFinanceAttention, getFinanceOverview } from "../src/features/finance/overview";
 import type { FinanceActor } from "../src/features/finance/types";
 
@@ -33,6 +35,7 @@ beforeEach(() => getDb().exec(`
   DELETE FROM finance_goal_allocations;
   DELETE FROM finance_goals;
   DELETE FROM finance_plans;
+  DELETE FROM finance_schedules;
   DELETE FROM finance_budget_limits;
   DELETE FROM finance_budget_plans;
   DELETE FROM finance_transactions;
@@ -199,6 +202,54 @@ test("overview keeps reserved money and obligations separate while attention agg
   const report = getFinanceReport(owner, { date_from: "2026-10-01", date_to: "2026-10-31" });
   assert.equal(report.spending_cents, 3500);
   assert.equal(report.categories.find((category) => category.category_id === food.id)?.spending_cents, 3500);
+});
+
+test("spendable subtracts current-month pending account expenses, including generated recurrence", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-12T12:00:00+08:00") });
+  const account = createAccount(owner, {
+    request_id: request(), name: "Spendable cash", kind: "money", currency: "PHP",
+    opening_balance: "8000", maintaining_balance: "2000",
+  }).account;
+  const pending = createPlan(owner, {
+    request_id: request(), type: "expense", account_id: account.id, amount: "10", due_date: "2026-10-20",
+  }).plan;
+  createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "4", due_date: "2026-10-01" });
+  createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "2", due_date: "2026-10-12" });
+  createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "3", due_date: "2026-10-31" });
+  createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "100", due_date: "2026-09-30" });
+  createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "200", due_date: "2026-11-01" });
+  const income = createPlan(owner, {
+    request_id: request(), type: "income", account_id: account.id, amount: "999", due_date: "2026-10-20",
+  }).plan;
+  const cancelled = createPlan(owner, {
+    request_id: request(), type: "expense", account_id: account.id, amount: "30", due_date: "2026-10-20",
+  }).plan;
+  cancelPlan(owner, cancelled.id, { request_id: request(), version: cancelled.version });
+  const satisfied = createPlan(owner, {
+    request_id: request(), type: "expense", account_id: account.id, amount: "20", due_date: "2026-10-20",
+  }).plan;
+  postPlan(owner, satisfied.id, {
+    request_id: request(), version: satisfied.version, account_id: account.id, amount: "20", transaction_date: "2026-10-12",
+  });
+  const schedule = createSchedule(owner, {
+    request_id: request(), type: "expense", account_id: account.id, amount: "8", interval_count: 1,
+    interval_unit: "month", start_date: "2026-10-20",
+  }).schedule;
+  const nextMonthSchedule = createSchedule(owner, {
+    request_id: request(), type: "expense", account_id: account.id, amount: "6", interval_count: 1,
+    interval_unit: "month", start_date: "2026-11-20",
+  }).schedule;
+  catchUpPlans(owner, { request_id: request(), through_date: "2026-10-12" });
+
+  const current = getAccount(owner, account.id);
+  assert.equal(current.balance_cents, 998000);
+  assert.equal(current.planned_expense_cents, 2700);
+  assert.equal(current.spendable_cents, 795300);
+  assert.equal(getFinanceOverview(owner).spendable_cents, 795300);
+  assert.equal(getFinanceOverview(owner).money.balance_cents, 998000);
+  assert.equal(income.type, "income");
+  assert.equal(schedule.account_id, account.id);
+  assert.equal(nextMonthSchedule.account_id, account.id);
 });
 
 test("attention pagination returns complete bounded pages", () => {

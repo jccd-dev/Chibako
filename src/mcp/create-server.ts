@@ -521,7 +521,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postObligationMovementSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postObligationMovement(actor, args) })));
     server.registerTool("post_finance_obligation_payment", {
-      title: "Pay debt principal or collect receivable", description: "Record a dated partial principal payment/collection under finance:write. Supply the obligation version. Optionally link one existing compatible income/expense activity by id and current cash_activity_version; account, amount and date must match. Existing history gets no second cash effect. Hidden, reverted, refunded, transfer-linked and fee activities are rejected. Optional fee {type, amount, category_id?, subcategory_id?} posts explicit separate income/expense atomically and follows payment correction/Delete/Revert. Linking existing cash cannot post a fee.",
+      title: "Pay debt principal or collect receivable", description: "Record a dated partial principal payment/collection under finance:write. Supply the obligation version. Optionally link one existing compatible income/expense activity by id and current cash_activity_version; account, amount and date must match. Existing history gets no second cash effect. Hidden, reverted, refunded, transfer-linked, fee and cashback-linked activities are rejected. Optional fee {type, amount, category_id?, subcategory_id?} posts explicit separate income/expense atomically and follows payment correction/Delete/Revert. Linking existing cash cannot post a fee.",
       inputSchema: postObligationPaymentSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postObligationPayment(actor, args) })));
     server.registerTool("catch_up_finance_plans", {
@@ -549,19 +549,19 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...postPlan(actor, id, args) })));
     server.registerTool("match_finance_plan", {
-      title: "Match manually recorded activity", description: "Explicitly select same-type unreverted income/expense not linked to a plan or transfer fee. Actual amount/account/date may differ. No new cash effect. Requires request_id, current plan version and transaction_version. Obligation reminders instead select an existing principal payment of that same obligation, requiring obligation_version. Matching changes no principal progress or cash again. One transaction satisfies one plan; Revert reopens and Delete preserves satisfaction.",
+      title: "Match manually recorded activity", description: "Explicitly select same-type unreverted income/expense not linked to a plan or transfer fee; cashback income cannot be matched. Actual amount/account/date may differ. No new cash effect. Requires request_id, current plan version and transaction_version. Obligation reminders instead select an existing principal payment of that same obligation, requiring obligation_version. Matching changes no principal progress or cash again. One transaction satisfies one plan; Revert reopens and Delete preserves satisfaction.",
       inputSchema: matchPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...matchPlan(actor, id, args) })));
     server.registerTool("correct_finance_activity", {
-      title: "Correct finance activity", description: "Replace mistaken amount, account, date or details atomically. Amount is a PHP decimal; adjustments accept a signed difference, not a new target balance. Transfer source is account_id, destination is destination_account_id; a linked fee moves with it. Optional fee correction requires its version. Refunds retain their expense/category link. Requires current version and request_id; returns affected balances.",
+      title: "Correct finance activity", description: "Replace mistaken amount, account, date or details atomically. Amount is a PHP decimal; adjustments accept a signed difference, not a new target balance. Transfer source is account_id, destination is destination_account_id; a linked fee moves with it. Optional fee correction requires its version. Expense cashback follows account/date changes; percentage cashback recalculates, fixed cashback stays unchanged and cannot exceed the corrected expense. Correct the expense rather than its cashback income. Refunds retain their expense/category link. Requires current version and request_id; returns affected balances.",
       inputSchema: correctActivitySchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...correctActivity(actor, id, args) })));
     server.registerTool("hide_finance_activity", {
-      title: "Delete finance activity (hide only)", description: "Hide a record from default Activity without cancelling balances or reports. Transfer fee hides with its transfer. Requires current version and request_id. Inspect with hidden filters. Linked plan satisfaction is retained.",
+      title: "Delete finance activity (hide only)", description: "Hide a record from default Activity without cancelling balances or reports. Transfer fee hides with its transfer; cashback income hides with its expense. Requires current version and request_id. Inspect with hidden filters. Linked plan satisfaction is retained.",
       inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...hideActivity(actor, id, args) })));
     server.registerTool("revert_finance_activity", {
-      title: "Revert mistaken finance activity", description: "Cancel financial/reporting effects once, including a transfer's linked fee. Revert active refunds before their expense (including fees). Refund reversion cancels its own credit and spending reduction. Linked plans reopen when their transaction is reverted. Requires current version and request_id; identical retries return the original result.",
+      title: "Revert mistaken finance activity", description: "Cancel financial/reporting effects once, including a transfer's linked fee and an expense's cashback income. Revert cashback through its original expense. Revert active refunds before their expense (including fees). Refund reversion cancels its own credit and spending reduction. Linked plans reopen when their transaction is reverted. Requires current version and request_id; identical retries return the original result.",
       inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...revertActivity(actor, id, args) })));
     server.registerTool("record_finance_refund", {
@@ -581,7 +581,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postAdjustmentSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...valueAsset(actor, args) })));
     server.registerTool("post_finance_transaction", {
-      title: "Record income or expense", description: "Post actual PHP activity to an active money account. Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Returns original balance on retries and warns on negative balances without blocking.",
+      title: "Record income or expense", description: "Post actual PHP activity to an active money account. Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string} atomically records Cashback income to the same account/date. Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking.",
       inputSchema: postTransactionSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
   }
@@ -640,11 +640,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: updateClassificationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateClassification(actor, id, args)));
     server.registerTool("create_finance_account", {
-      title: "Create finance account", description: "Create a PHP money (Debit in the UI) or asset account with an exact decimal-string opening_balance, optional account_group and include_in_summary (default true). Requires request_id; identical retries return the original account.",
+      title: "Create finance account", description: "Create a PHP money (Debit in the UI) or asset account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Optional account_group and include_in_summary (default true). Requires request_id; identical retries return the original account.",
       inputSchema: createAccountSchema, annotations,
     }, args => financeResult("finance:manage", actor => createAccount(actor, args)));
     server.registerTool("update_finance_account", {
-      title: "Manage finance account", description: "Rename, group, archive, or set include_in_summary on an account. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
+      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, or edit maintaining_balance on a money account. Changing maintaining_balance changes net balance by the same difference. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
       inputSchema: updateAccountSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateAccount(actor, id, args)));
   }

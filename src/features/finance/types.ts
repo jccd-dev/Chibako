@@ -14,6 +14,8 @@ const name = z.string().trim().min(1).max(120);
 export const accountKindSchema = z.enum(["money", "asset"]);
 export const accountGroupSchema = z.string().trim().max(80);
 
+const maintainingBalance = z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a non-negative PHP decimal string with at most two decimal places");
+
 export const createAccountSchema = z.object({
   request_id: requestId,
   name,
@@ -21,6 +23,7 @@ export const createAccountSchema = z.object({
   account_group: accountGroupSchema.default(""),
   include_in_summary: z.boolean().default(true),
   currency: z.literal("PHP"),
+  maintaining_balance: maintainingBalance.default("0"),
   opening_balance: z.string().max(32).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a PHP decimal string with at most two decimal places"),
 }).strict();
 
@@ -28,10 +31,11 @@ export const updateAccountSchema = z.object({
   request_id: requestId,
   version: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   name: name.optional(),
+  maintaining_balance: maintainingBalance.optional(),
   archived: z.boolean().optional(),
   account_group: accountGroupSchema.optional(),
   include_in_summary: z.boolean().optional(),
-}).strict().refine(input => input.name !== undefined || input.archived !== undefined || input.account_group !== undefined || input.include_in_summary !== undefined, "Provide account settings to update");
+}).strict().refine(input => input.name !== undefined || input.archived !== undefined || input.account_group !== undefined || input.include_in_summary !== undefined || input.maintaining_balance !== undefined, "Provide account settings to update");
 
 export const getAccountSchema = z.object({ id: accountId }).strict();
 export const listAccountsSchema = z.object({
@@ -52,6 +56,9 @@ export interface FinanceAccount {
   include_in_summary: boolean;
   currency: "PHP";
   opening_balance_cents: number;
+  maintaining_balance_cents: number;
+  planned_expense_cents: number;
+  spendable_cents: number;
   balance_cents: number;
   archived: boolean;
   version: number;

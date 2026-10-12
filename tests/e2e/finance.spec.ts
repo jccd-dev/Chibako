@@ -150,7 +150,7 @@ for (const device of ["desktop", "mobile"]) test(device + " income/expense entry
   await page.getByLabel("Subcategory", { exact: true }).selectOption({ label: category + " rail" });
   await page.getByText("Additional details", { exact: true }).click();
   await page.getByLabel("Transaction text", { exact: true }).fill(text);
-  await page.getByLabel(tag, { exact: true }).check();
+  await page.getByRole("checkbox", { name: tag, exact: true }).check();
   await page.getByRole("button", { name: "Save and add another", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByLabel("Amount (PHP)", { exact: true })).toHaveValue("");
@@ -169,8 +169,10 @@ for (const device of ["desktop", "mobile"]) test(device + " income/expense entry
     await expect(page.getByRole("dialog", { name: "History filters", exact: true })).toHaveCount(0);
   }
   await page.getByRole("button", { name: "Inspect expense PHP 7.25 on 2026-10-03", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText(text);
-  await expect(page.getByRole("dialog")).toContainText(tag);
+  const details = page.getByRole("dialog", { name: "Transaction details", exact: true });
+  await expect(details).toHaveAttribute("data-slot", "dialog-content");
+  await expect(details).toContainText(text);
+  await expect(details).toContainText(tag);
   await page.getByRole("button", { name: "Close details", exact: true }).click();
 
   await page.getByRole("button", { name: "Add transaction", exact: true }).click();
@@ -205,7 +207,32 @@ for (const device of ["desktop", "mobile"]) test(device + " income/expense entry
   await page.getByRole("tab", { name: "Overview", exact: true }).click();
   await chooseFinanceMonth(page, "Overview report month", "2026-10");
   await expect(page.getByTestId("finance-income-total")).toBeVisible();
+  await page.getByRole("button").filter({ hasText: "2026-10-03" }).first().click();
+  await expect(details).toHaveAttribute("data-slot", "dialog-content");
+  await expect(details).toContainText(text);
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Accounts", exact: true }).click();
+  await page.getByRole("button", { name: "View " + cash, exact: true }).click();
+  await page.getByRole("button", { name: "Inspect expense PHP 7.25 on 2026-10-03", exact: true }).click();
+  await expect(details).toContainText(text);
+  await page.getByRole("button", { name: "Close details", exact: true }).click();
+  await expect(details).toHaveCount(0);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Accounts", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Overview", exact: true }).click();
   for (const theme of ["light", "dark"]) {
+    await page.evaluate(value => document.documentElement.classList.toggle("dark", value === "dark"), theme);
+    await page.getByRole("button").filter({ hasText: "2026-10-03" }).first().click();
+    await expect(details).toContainText(text);
+    const bounds = await details.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    await page.keyboard.press("Escape");
+    await expect(details).toHaveCount(0);
     await page.evaluate(value => document.documentElement.classList.toggle("dark", value === "dark"), theme);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.getByRole("button", { name: "Add transaction", exact: true }).focus();

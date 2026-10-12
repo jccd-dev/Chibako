@@ -127,6 +127,7 @@ const MIGRATIONS: string[] = [
     currency TEXT NOT NULL CHECK (currency = 'PHP'),
     opening_balance_cents INTEGER NOT NULL CHECK (typeof(opening_balance_cents) = 'integer' AND opening_balance_cents BETWEEN -9007199254740991 AND 9007199254740991),
     archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991),
     account_group TEXT NOT NULL DEFAULT '',
     include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1)),
     version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
@@ -381,12 +382,18 @@ export function getDb(): Database.Database {
     const accountNames = new Set(accountColumns.map(column => column.name));
     if (!accountNames.has("account_group")) db.exec("ALTER TABLE finance_accounts ADD COLUMN account_group TEXT NOT NULL DEFAULT ''");
     if (!accountNames.has("include_in_summary")) db.exec("ALTER TABLE finance_accounts ADD COLUMN include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1))");
+    if (!accountNames.has("maintaining_balance_cents")) db.exec("ALTER TABLE finance_accounts ADD COLUMN maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991)");
     for (const table of ["finance_transactions", "finance_movements"]) {
       const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
       const existing = new Set(columns.map(column => column.name));
       if (!existing.has("hidden")) db.exec(`ALTER TABLE ${table} ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))`);
       if (!existing.has("reverted")) db.exec(`ALTER TABLE ${table} ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0, 1))`);
     }
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_cashbacks (
+      expense_id TEXT PRIMARY KEY REFERENCES finance_transactions(id) ON DELETE CASCADE,
+      income_id TEXT NOT NULL UNIQUE REFERENCES finance_transactions(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL CHECK (mode IN ('percent', 'amount')), value TEXT NOT NULL
+    );`);
     db.exec(`CREATE TABLE IF NOT EXISTS finance_refunds (
       id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES finance_transactions(id),
       account_id TEXT NOT NULL REFERENCES finance_accounts(id),

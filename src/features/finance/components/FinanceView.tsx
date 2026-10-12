@@ -8,6 +8,7 @@ import { useFinanceActivity } from "@/features/finance/use-finance-activity";
 import {
   FinanceActivityList,
   FinanceTransactionEntry,
+  FinanceTransactionDetails,
 } from "./FinanceActivity";
 import { FinanceReports, FinanceBudgets } from "./FinanceReports";
 import { useFinanceBudget } from "@/features/finance/use-finance-budget";
@@ -59,6 +60,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     window.dispatchEvent(new Event("finance-changed"));
   }, [activity.notice, finance.notice, planning.notice]);
   const [transactionOpen, setTransactionOpen] = useState(false);
+  const [transactionId, setTransactionId] = useState<string | null>(null);
   const [inspectionOpen, setInspectionOpen] = useState(false);
   useEffect(() => {
     if (finance.notice) void activity.refreshOptions();
@@ -185,6 +187,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
                   planning={planning}
                   onNavigateTab={changeTab}
                   onOpenAccount={open}
+                  onInspectTransaction={setTransactionId}
                   onCategoryFilter={(id) => {
                     activity.applyFilters({
                       q: "",
@@ -229,7 +232,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         </TabsContent>
 
         <TabsContent value="activity">
-          <FinanceActivityList activity={activity} />
+          <FinanceActivityList activity={activity} onInspect={setTransactionId} />
         </TabsContent>
         <TabsContent value="planning">
           <FinanceBudgets budget={budget} activity={activity} />
@@ -276,6 +279,12 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         </TabsContent>
       </Tabs>
 
+      <FinanceTransactionDetails
+        key={transactionId ?? "closed"}
+        activity={activity}
+        inspectionId={transactionId}
+        onClose={() => setTransactionId(null)}
+      />
       <FinanceTransactionEntry
         activity={activity}
         open={transactionOpen}
@@ -289,6 +298,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           activity={activity}
           onClose={() => setPanel(null)}
           onHistory={openAccountHistory}
+          onInspectTransaction={setTransactionId}
         />
       )}
     </div>

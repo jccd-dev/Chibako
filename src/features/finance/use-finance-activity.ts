@@ -115,7 +115,7 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   }
   async function post(input: object) {
     return save<PostedTransaction>("activity", input, "POST", async result => {
-      setNotice(`${result.warnings.includes("negative_balance") ? "Transaction saved. Negative balance: review this account." : "Transaction saved."}${allocationWarningText(result)}`);
+      setNotice(`${result.warnings.includes("negative_balance") ? "Transaction saved. Negative balance: review this account." : "Transaction saved."}${result.cashback ? ` Cashback income recorded: ${formatPHP(result.cashback.amount_cents)}.` : ""}${allocationWarningText(result)}`);
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
@@ -155,12 +155,12 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
       await Promise.all([refreshOptions(), refreshHistory()]);
     });
   }
-  async function inspect(id: string) {
+  const inspect = useCallback(async (id: string) => {
     return fetch(`/api/finance/activity/${id}?include_details=true`).then(json<{ transaction: FinanceTransaction }>).then(result => result.transaction);
-  }
+  }, []);
   function applyFilters(value: ActivityFilters) { setOffset(0); setFilters(value); }
   function clearFilters() { applyFilters(emptyFilters); }
-  function resetSave() { pending.current = null; setSaveError(""); }
+  const resetSave = useCallback(() => { pending.current = null; setSaveError(""); }, []);
   return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, postObligation, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, ensureClassification, loadMoreOptions, resetSave };
 }
 export type FinanceActivityController = ReturnType<typeof useFinanceActivity>;
