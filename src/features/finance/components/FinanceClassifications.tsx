@@ -1,60 +1,220 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import type { ReactNode } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { FinanceClassification } from "@/features/finance/activity-types";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
+import { useFinanceClassifications } from "@/features/finance/use-finance-classifications";
 import { financeSheet } from "@/features/finance/presentation";
 import { FinanceOptionStatus } from "./FinanceActivity";
 
+function ClassificationBadge({
+  item,
+  count,
+  disabled,
+  onClick,
+}: {
+  item: FinanceClassification;
+  count?: number;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Badge
+      variant={item.archived ? "outline" : "secondary"}
+      className={`h-auto! min-h-11 min-w-11 max-w-full transition-none disabled:pointer-events-none disabled:opacity-50 ${item.archived ? "border-dashed hover:bg-muted" : "hover:bg-secondary/80"}`}
+      render={
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          aria-label={`Manage ${item.name}${item.archived ? " (archived)" : ""}`}
+        />
+      }
+    >
+      <span className="min-w-0 whitespace-normal text-left text-sm [overflow-wrap:anywhere]">
+        {item.name}
+        {count !== undefined && count > 0 && <span className="text-muted-foreground"> ({count})</span>}
+        {item.archived && <span className="text-muted-foreground"> Archived</span>}
+      </span>
+    </Badge>
+  );
+}
+
+function BadgeGroup({ label, emptyText, children }: { label: string; emptyText: string; children?: ReactNode }) {
+  return (
+    <div role="group" aria-label={label}>
+      <h3 className="text-sm font-medium">{label}</h3>
+      {children ?? <p className="mt-3 text-sm text-muted-foreground">{emptyText}</p>}
+    </div>
+  );
+}
+
 export function FinanceClassifications({ activity }: { activity: FinanceActivityController }) {
-  const [panel, setPanel] = useState<FinanceClassification | "create" | null>(null);
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState("expense");
-  const [parentId, setParentId] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
-  const editing = typeof panel === "object" ? panel : null;
-  function open(item?: FinanceClassification) {
-    activity.resetSave(); setPanel(item ?? "create"); setName(item?.name ?? ""); setKind(item?.kind === "tag" ? "tag" : item?.type ?? "expense"); setParentId(item?.parent_id ?? "");
-  }
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const result = await activity.saveClassification(editing?.id ?? null, editing ? { name, version: editing.version } : {
-      kind: kind === "tag" ? "tag" : "category", ...(kind === "tag" ? {} : { type: kind }), name, parent_id: kind === "tag" ? null : parentId || null,
-    });
-    if (result) setPanel(null);
-  }
-  async function archive() {
-    if (editing && await activity.saveClassification(editing.id, { version: editing.version, archived: !editing.archived })) setPanel(null);
-  }
-  const visible = activity.classifications.filter(item => showArchived || !item.archived);
-  return <section aria-label="Categories and tags">
-    <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Categories and tags</h2><p className="mt-1 text-sm text-muted-foreground">Income and expense categories stay separate. Subcategories have one parent.</p></div><Button onClick={() => open()}>Add category or tag</Button></div>
-    <label className="my-5 flex min-h-7 items-center gap-2 text-xs"><Checkbox checked={showArchived} onCheckedChange={checked => setShowArchived(checked)} />Show archived classifications</label>
-    <FinanceOptionStatus activity={activity} />
-    {visible.length ? <ul className="divide-y divide-border">{visible.map(item => <li key={item.id} className="flex min-w-0 items-center justify-between gap-4 py-3"><div className="min-w-0"><p className="break-words text-sm font-medium">{item.name}</p><p className="mt-1 text-sm text-muted-foreground">{item.kind === "tag" ? "Tag" : `${item.type === "income" ? "Income" : "Expense"} ${item.parent_id ? "subcategory" : "category"}`}{item.parent_id ? ` in ${activity.classifications.find(parent => parent.id === item.parent_id)?.name ?? "saved category"}` : ""}{item.archived ? " (archived)" : ""}</p></div><Button variant="ghost" aria-label={`Manage classification ${item.name}`} onClick={() => open(item)}>Manage</Button></li>)}</ul> : <p className="py-6 text-sm text-muted-foreground">No categories or tags yet. Transactions can use Uncategorized.</p>}
-    <p className="mt-5 text-sm text-muted-foreground">Tarsi import is not available in this preview.</p>
-    <Sheet open={panel !== null} onOpenChange={value => { if (!value && !activity.busy) setPanel(null); }}>
-      <SheetContent className={financeSheet} showCloseButton={false}>
-        <SheetHeader className="border-b border-border p-4"><SheetTitle>{editing ? "Manage classification" : "Add category or tag"}</SheetTitle><SheetDescription>{editing ? "Rename or archive without removing posted history." : "Create a category, optional subcategory or tag."}</SheetDescription></SheetHeader>
-        <form onSubmit={submit} className="flex flex-1 flex-col gap-4 p-4">
-          <FieldGroup>
-            <Field><FieldLabel htmlFor="classification-name">Classification name</FieldLabel><Input id="classification-name" required maxLength={120} value={name} disabled={activity.busy} onChange={event => setName(event.target.value)} /></Field>
-            <Field><FieldLabel htmlFor="classification-kind">Classification kind</FieldLabel><NativeSelect id="classification-kind" className="w-full" value={kind} disabled={!!editing || activity.busy} onChange={event => { setKind(event.target.value); setParentId(""); }}><NativeSelectOption value="expense">Expense category</NativeSelectOption><NativeSelectOption value="income">Income category</NativeSelectOption><NativeSelectOption value="tag">Tag</NativeSelectOption></NativeSelect><FieldDescription>Type and parent are fixed once created.</FieldDescription></Field>
-            {kind !== "tag" && <Field><FieldLabel htmlFor="classification-parent">Parent category</FieldLabel><NativeSelect id="classification-parent" className="w-full" value={parentId} disabled={!!editing || activity.busy} onChange={event => setParentId(event.target.value)}><NativeSelectOption value="">No parent (top-level category)</NativeSelectOption>{activity.classifications.filter(item => item.kind === "category" && item.type === kind && !item.parent_id && (!item.archived || item.id === parentId)).map(item => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect><FieldDescription>Choose a parent to create a subcategory.</FieldDescription></Field>}
-          </FieldGroup>
-          <FinanceOptionStatus activity={activity} />
-          {activity.saveError && <Alert><AlertDescription>{activity.saveError} Your entries are kept. Reopen this classification if it has changed.</AlertDescription></Alert>}
-          <div className="mt-auto flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" disabled={activity.busy} onClick={() => setPanel(null)}>Cancel</Button><Button type="submit" disabled={activity.busy || !name.trim()}>{activity.busy ? "Saving…" : "Save classification"}</Button></div>
-          {editing && <div className="border-t border-border pt-5"><p className="mb-3 text-sm text-muted-foreground">Archived classifications remain on existing transactions but cannot classify new entries.</p><Button type="button" variant="outline" disabled={activity.busy} onClick={() => void archive()}>{editing.archived ? "Restore classification" : "Archive classification"}</Button></div>}
-        </form>
-      </SheetContent>
-    </Sheet>
-  </section>;
+  const model = useFinanceClassifications(activity);
+  const { view } = model;
+  const manageChildren = view.kind === "manage-category" ? model.childrenOf(view.item) : [];
+  const childBack = view.kind === "manage-subcategory" && !!model.childParent;
+  const sheetTitle = view.kind === "create-category" ? "Add category"
+    : view.kind === "create-tag" ? "Add tag"
+    : view.kind === "create-subcategory" ? "Add subcategory"
+    : view.kind === "closed" ? ""
+    : `${view.item.name}${view.item.archived ? " (archived)" : ""}`;
+  const sheetDescription = view.kind === "create-category" ? "Create an expense or income category."
+    : view.kind === "create-tag" ? "Use tags to add context across income and expenses."
+    : view.kind === "create-subcategory" ? `Adds an ${view.parent.type === "income" ? "income" : "expense"} subcategory in ${view.parent.name}.`
+    : view.kind === "manage-category" ? "Rename, manage subcategories, or archive without removing posted history."
+    : view.kind === "manage-subcategory" ? model.childParent ? `Subcategory of ${model.childParent.name}. Rename or archive without removing posted history.` : "The parent category has not loaded yet. Rename or archive without removing posted history."
+    : "Rename or archive without removing posted history.";
+  const nameLabel = view.kind === "create-category" ? "Category name"
+    : view.kind === "create-tag" ? "Tag name"
+    : view.kind === "create-subcategory" ? "Subcategory name"
+    : "Name";
+  const submitLabel = view.kind === "create-category" ? "Create category"
+    : view.kind === "create-tag" ? "Create tag"
+    : view.kind === "create-subcategory" ? "Create subcategory"
+    : "Save changes";
+  return (
+    <section aria-label="Categories and tags">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">Categories</h2>
+          <p className="mt-1 max-w-prose text-sm text-muted-foreground">Expense and income categories group separately. Subcategories live inside their parent category.</p>
+        </div>
+        <Button onClick={model.openCreateCategory}>Add category</Button>
+      </div>
+      <label className="my-5 flex min-h-7 items-center gap-2 text-xs">
+        <Checkbox checked={model.showArchived} onCheckedChange={checked => model.setShowArchived(checked)} />
+        Show archived classifications
+      </label>
+      <FinanceOptionStatus activity={activity} />
+      <div className="mt-5 space-y-6">
+        <BadgeGroup label="Expenses" emptyText={model.partial ? "Load more categories and tags to see all categories." : "No expense categories yet."}>
+          {model.visible.expense.length ? (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {model.visible.expense.map(({ category, children }) => (
+                <li key={category.id} className="min-w-0 max-w-full">
+                  <ClassificationBadge item={category} count={children.length} onClick={() => model.openCategory(category)} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </BadgeGroup>
+        <BadgeGroup label="Income" emptyText={model.partial ? "Load more categories and tags to see all categories." : "No income categories yet."}>
+          {model.visible.income.length ? (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {model.visible.income.map(({ category, children }) => (
+                <li key={category.id} className="min-w-0 max-w-full">
+                  <ClassificationBadge item={category} count={children.length} onClick={() => model.openCategory(category)} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </BadgeGroup>
+        {model.visible.pendingChildren.length ? (
+          <div role="group" aria-label="Subcategories awaiting their parent">
+            <h3 className="text-sm font-medium">Subcategories awaiting their parent</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Their parent category has not loaded yet. Load more categories and tags to place them.</p>
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {model.visible.pendingChildren.map(item => (
+                <li key={item.id} className="min-w-0 max-w-full">
+                  <ClassificationBadge item={item} onClick={() => model.openSubcategory(item)} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-8 border-t border-border pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">Tags</h2>
+            <p className="mt-1 max-w-prose text-sm text-muted-foreground">Use tags to add context across income and expenses.</p>
+          </div>
+          <Button variant="outline" onClick={model.openCreateTag}>Add tag</Button>
+        </div>
+        {model.visible.tags.length ? (
+          <ul className="mt-5 flex flex-wrap gap-2">
+            {model.visible.tags.map(item => (
+              <li key={item.id} className="min-w-0 max-w-full">
+                <ClassificationBadge item={item} onClick={() => model.openTag(item)} />
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-5 text-sm text-muted-foreground">{model.partial ? "Load more categories and tags to see all tags." : "No tags yet."}</p>}
+      </div>
+      <p className="mt-5 text-sm text-muted-foreground">Tarsi import is not available in this preview.</p>
+      <Sheet open={model.sheetOpen} onOpenChange={value => { if (!value) model.close(); }}>
+        <SheetContent className={`${financeSheet} overscroll-contain`} showCloseButton={false}>
+          <SheetHeader className="border-b border-border p-4">
+            <SheetTitle>{sheetTitle}</SheetTitle>
+            <SheetDescription>{sheetDescription}</SheetDescription>
+          </SheetHeader>
+          <form onSubmit={event => { event.preventDefault(); void model.submit(); }} className="flex flex-1 flex-col gap-4 p-4">
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="classification-name">{nameLabel}</FieldLabel>
+                <Input id="classification-name" required maxLength={120} value={model.draftName} disabled={activity.busy} onChange={event => model.setDraftName(event.target.value)} />
+              </Field>
+              {view.kind === "create-category" && (
+                <Field>
+                  <FieldLabel htmlFor="classification-type">Category type</FieldLabel>
+                  <NativeSelect id="classification-type" className="w-full" value={model.draftType} disabled={activity.busy} onChange={event => model.setDraftType(event.target.value === "income" ? "income" : "expense")}>
+                    <NativeSelectOption value="expense">Expense category</NativeSelectOption>
+                    <NativeSelectOption value="income">Income category</NativeSelectOption>
+                  </NativeSelect>
+                  <FieldDescription>Type is fixed once created.</FieldDescription>
+                </Field>
+              )}
+              {view.kind === "create-subcategory" && <FieldDescription>Adds an {view.parent.type === "income" ? "income" : "expense"} subcategory in {view.parent.name}. Type and parent are fixed.</FieldDescription>}
+            </FieldGroup>
+            {activity.saveError && <Alert><AlertDescription>{activity.saveError} Your entries are kept. Reopen this classification if it has changed.</AlertDescription></Alert>}
+            <div className="mt-auto flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" disabled={childBack ? activity.busy || model.dirty : activity.busy} onClick={childBack ? model.backToParent : model.close}>{childBack && model.childParent ? "Back to category" : "Cancel"}</Button>
+              <Button type="submit" disabled={activity.busy || !model.draftName.trim()}>{activity.busy ? "Saving…" : submitLabel}</Button>
+            </div>
+            {view.kind === "manage-category" && (
+              <div className="border-t border-border pt-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <h3 className="text-sm font-medium">Subcategories</h3>
+                  {!view.item.archived && <Button type="button" variant="outline" disabled={activity.busy || model.dirty} onClick={() => model.openCreateSubcategory(view.item)}>Add subcategory</Button>}
+                </div>
+                {view.item.archived && <p className="mt-2 text-sm text-muted-foreground">Restore this category to add subcategories. Existing subcategories stay available.</p>}
+                {model.dirty && <p className="mt-2 text-sm text-muted-foreground">Save or discard your changes to manage subcategories.</p>}
+                {manageChildren.length ? (
+                  <ul className="mt-3 flex flex-wrap gap-2">
+                    {manageChildren.map(item => (
+                      <li key={item.id} className="min-w-0 max-w-full">
+                        <ClassificationBadge item={item} disabled={activity.busy || model.dirty} onClick={() => model.openSubcategory(item)} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="mt-3 text-sm text-muted-foreground">{model.partial ? "Load more categories and tags to see all subcategories." : "No subcategories yet."}</p>}
+                {model.partial && <div className="mt-3"><FinanceOptionStatus activity={activity} /></div>}
+              </div>
+            )}
+            {view.kind === "manage-subcategory" && !model.childParent && (
+              <div className="border-t border-border pt-5">
+                <p className="text-sm text-muted-foreground">The parent category has not loaded yet.</p>
+                <FinanceOptionStatus activity={activity} />
+              </div>
+            )}
+            {(view.kind === "manage-category" || view.kind === "manage-tag" || view.kind === "manage-subcategory") && (
+              <div className="border-t border-border pt-5">
+                <p className="mb-3 text-sm text-muted-foreground">Archived classifications remain on existing transactions but cannot classify new entries.</p>
+                <Button type="button" variant="outline" disabled={activity.busy || model.dirty} onClick={() => void model.toggleArchived()}>{view.item.archived ? "Restore classification" : "Archive classification"}</Button>
+              </div>
+            )}
+          </form>
+        </SheetContent>
+      </Sheet>
+    </section>
+  );
 }
