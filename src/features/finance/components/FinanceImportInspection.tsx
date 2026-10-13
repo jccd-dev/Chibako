@@ -210,7 +210,7 @@ export function FinanceImportInspection({
                   </Button>
                   <p className="text-xs text-muted-foreground">
                     Prepares a reconciled proposal from this backup, even while
-                    blockers remain. The file stays in this browser tab's memory
+                    blockers remain. The file stays in this browser tab&apos;s memory
                     until you close the panel or choose a different file.
                   </p>
                   {inspection.previewBusy && (

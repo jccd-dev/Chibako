@@ -43,10 +43,16 @@ export function useFinancePlanEntry(plan: FinancePlan | null, activity: FinanceA
   const accounts = activity.accounts.filter(row => row.kind === "money" && (!row.archived || (mode !== "post" && row.id === account) || row.id === cashPick?.account_id));
 
   const planType = plan?.type;
+  const cashRequest = `${plan?.id ?? "new"}:${planType ?? ""}:${linked}:${mode}:${cashSource}:${cashOffset}:${cashReload}`;
+  const [previousCashRequest, setPreviousCashRequest] = useState(cashRequest);
+  if (previousCashRequest !== cashRequest) {
+    setPreviousCashRequest(cashRequest);
+    const active = !!planType && linked && mode === "post" && cashSource === "existing";
+    setCashLoading(active); setCashError(""); setCashPage(null);
+  }
   useEffect(() => {
     if (!planType || !linked || mode !== "post" || cashSource !== "existing") return;
     const abort = new AbortController();
-    setCashLoading(true); setCashError(""); setCashPage(null);
     const params = new URLSearchParams({ type: planType, payment_matchable: "true", hidden: "false", include_details: "true", limit: "25", offset: String(cashOffset) });
     void fetch(`/api/finance/activity?${params}`, { signal: abort.signal }).then(financeJson<ActivityPage>)
       .then(result => { if (!abort.signal.aborted) setCashPage(result); })

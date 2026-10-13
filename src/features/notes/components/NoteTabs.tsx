@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { IconPlus, IconX } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
+import { restoreNoteTabs, type NoteTab } from "@/features/notes/note-tabs-state";
 
 const STORAGE_KEY = "chibako_note_tabs";
 
-type NoteTab = { id: string; title: string };
 type NoteTabEvent = { id: string; title: string };
 
 function noteIdFromPath(pathname: string | null): string | null {
@@ -59,10 +60,13 @@ export function NoteTabs() {
     return response.json();
   }), []);
 
-  useEffect(() => {
-    setTabs(readTabs());
+  const hydrated = useHydrated();
+  if (hydrated && !loaded) {
+    setTabs(restoreNoteTabs(readTabs(), tabs));
     setLoaded(true);
+  }
 
+  useEffect(() => {
     // Prune tabs for notes that no longer exist (deleted to trash or purged).
     const onNotesChanged = () => {
       void treeCache.read()
@@ -102,22 +106,15 @@ export function NoteTabs() {
     saveTabs(tabs);
   }, [loaded, tabs]);
 
-  useEffect(() => {
-    if (!loaded || !activeId) return;
-    setTabs((current) => {
-      const withoutDraft =
-        activeId === "new"
-          ? current
-          : current.filter((tab) => tab.id !== "new");
-      if (withoutDraft.some((tab) => tab.id === activeId)) {
-        return withoutDraft.length === current.length ? current : withoutDraft;
-      }
-      return [
-        ...withoutDraft,
-        { id: activeId, title: activeId === "new" ? "Untitled" : "Loading…" },
-      ];
-    });
-  }, [activeId, loaded]);
+  const [previousActiveId, setPreviousActiveId] = useState<string | null>(null);
+  if (loaded && activeId && previousActiveId !== activeId) {
+    setPreviousActiveId(activeId);
+    const withoutDraft = activeId === "new" ? tabs : tabs.filter(tab => tab.id !== "new");
+    const next = withoutDraft.some(tab => tab.id === activeId)
+      ? withoutDraft
+      : [...withoutDraft, { id: activeId, title: activeId === "new" ? "Untitled" : "Loading…" }];
+    if (next !== tabs) setTabs(next);
+  }
 
   function closeTab(id: string) {
     if (tabs.length === 1) return;

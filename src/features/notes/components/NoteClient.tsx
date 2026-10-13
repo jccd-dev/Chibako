@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Note, NoteKind, NoteSummary } from "@/lib/notes";
@@ -22,12 +22,12 @@ import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconTip } from "@/components/IconTip";
 import { IconBookmark, IconCheck, IconChevron, IconEye, IconHome, IconPencil, IconPin, IconPlus, IconTrash, IconX } from "@/components/icons";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { IconDotsVertical } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { useHydrated } from "@/lib/use-hydrated";
 import { useNoteEditorSession } from "@/features/notes/editor/useNoteEditorSession";
 import { createNoteDetailClient, type MentionInfo } from "@/features/notes/note-detail-client";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
@@ -125,13 +125,6 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   const [bmBusy, setBmBusy] = useState(false);
   // Single-scroll panes: the typed-properties block collapses under this toggle.
   const [showProps, setShowProps] = useState(true);
-  useEffect(() => {
-    try {
-      if (localStorage.getItem("chibako_props") === "hide") setShowProps(false);
-    } catch {
-      // private mode — keep default
-    }
-  }, []);
   function setPropsAndRemember(next: boolean) {
     setShowProps(next);
     try {
@@ -143,18 +136,16 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   // View preference is mirrored to a cookie so the server renders the same
   // mode the client will resolve to (no first-paint mode swap on navigation).
   const [view, setView] = useState<ViewMode>(initialView ?? "split");
-  const [modKey, setModKey] = useState("");
-  useEffect(() => {
+  const hydrated = useHydrated();
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  if (hydrated && !preferencesLoaded) {
+    setPreferencesLoaded(true);
+    try { setShowProps(localStorage.getItem("chibako_props") !== "hide"); } catch {}
     const wide = window.innerWidth >= 1024;
     const stored = readLegacyView();
-    const resolved: ViewMode =
-      stored === "write" || stored === "edit" || stored === "preview" ? stored
-        : stored === "split" ? (wide ? "split" : "edit")
-        : wide ? "write" : "edit";
-    setView(resolved);
-    persistView(resolved);
-    setModKey(/mac/i.test(navigator.platform ?? "") ? "⌘" : "Ctrl+");
-  }, []);
+    setView(stored === "split" ? (wide ? "split" : "edit") : stored ?? (wide ? "write" : "edit"));
+  }
+  useEffect(() => { if (preferencesLoaded) persistView(view); }, [preferencesLoaded, view]);
   const [links, setLinks] = useState<LinkInfo | null>(null);
   const [mentions, setMentions] = useState<MentionInfo[]>([]);
   const [showLinks, setShowLinks] = useState(false);
@@ -175,6 +166,82 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   const [newPropKey, setNewPropKey] = useState("");
   const [newPropType, setNewPropType] = useState<PropertyType>("string");
   const [newPropOptions, setNewPropOptions] = useState("");
+
+  const [treeCache] = useState(() => noteTreeCache(async () => {
+    const response = await fetch("/api/notes");
+    return response.ok ? await response.json() : null;
+  }));
+
+  const refreshAllNotes = useCallback(() => treeCache.read().then(data => {
+    setAllNotes(data.notes as NoteSummary[]);
+  }), [treeCache]);
+
+  // The tree no longer rides along on every navigation; it is fetched once per
+  // tab and refreshed whenever something in the vault actually changes.
+  const [receivedNotes, setReceivedNotes] = useState(initialAll);
+  if (receivedNotes !== initialAll) {
+    setReceivedNotes(initialAll);
+    if (initialAll) setAllNotes(initialAll);
+  }
+  useEffect(() => { if (!initialAll) void refreshAllNotes(); }, [initialAll, refreshAllNotes]);
+
+  // The detail cache survives note switches within this editor.
+  const [detailClient] = useState(() => createNoteDetailClient(async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Could not load note details");
+    return response.json();
+  }));
+
+  /** Show the detail panel for `noteId` as soon as it has data (cached or not). */
+  const currentNoteIdRef = useRef<string | null>(null);
+
+  const refreshLinks = useCallback(async (noteId?: string) => {
+    const id = noteId ?? currentNoteIdRef.current;
+    if (!id) return;
+    const data = await detailClient.load(id);
+    if (currentNoteIdRef.current !== id) return; // the user moved on mid-flight
+    setLinks(data.links);
+    setMentions(data.mentions);
+  }, [detailClient]);
+
+  const savedNotesRef = useRef(new Map<string, Note>());
+  useEffect(() => {
+    if (initial && !savedNotesRef.current.has(initial.id)) savedNotesRef.current.set(initial.id, initial);
+  }, [initial]);
+  const postSaveRefreshTimer = useRef<number | null>(null);
+  const pendingRefresh = useRef({ tree: false, details: false });
+  const flushPostSaveRefresh = useCallback(() => {
+    const pending = pendingRefresh.current;
+    pendingRefresh.current = { tree: false, details: false };
+    if (pending.tree) {
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+      void refreshAllNotes();
+    }
+    if (pending.details) void refreshLinks();
+  }, [refreshAllNotes, refreshLinks]);
+  const schedulePostSaveRefresh = useCallback((savedNote: Note, created: boolean) => {
+    const previous = created ? null : savedNotesRef.current.get(savedNote.id) ?? null;
+    const changes = noteSaveRefreshChanges(previous, savedNote);
+    savedNotesRef.current.set(savedNote.id, savedNote);
+    if (changes.invalidateDetails) detailClient.invalidate();
+    pendingRefresh.current.tree ||= changes.tree;
+    pendingRefresh.current.details ||= changes.details;
+    if (!pendingRefresh.current.tree && !pendingRefresh.current.details) return;
+    if (postSaveRefreshTimer.current !== null) window.clearTimeout(postSaveRefreshTimer.current);
+    postSaveRefreshTimer.current = window.setTimeout(() => {
+      postSaveRefreshTimer.current = null;
+      flushPostSaveRefresh();
+    }, POST_SAVE_REFRESH_MS);
+  }, [detailClient, flushPostSaveRefresh]);
+  useEffect(() => () => {
+    if (postSaveRefreshTimer.current !== null) {
+      window.clearTimeout(postSaveRefreshTimer.current);
+      postSaveRefreshTimer.current = null;
+      // Metadata changes still need to reach the sidebar when this page leaves.
+      if (pendingRefresh.current.tree) window.dispatchEvent(new Event("chibako:notes-changed"));
+      pendingRefresh.current = { tree: false, details: false };
+    }
+  }, []);
 
   const session = useNoteEditorSession(initial, {
     save: async (current, patch, full) => {
@@ -210,6 +277,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     onOrganizationError: () => toast.error("Could not refresh the organized note."),
   }, !initial && isNoteDate(draftDate) ? { content: applyFrontmatter("", { date: draftDate }) } : undefined);
   const { note, title, folder, content, kind, pinned, persist, patch } = session;
+  useLayoutEffect(() => { currentNoteIdRef.current = note?.id ?? null; }, [note?.id]);
 
   useEffect(() => {
     const id = note?.id ?? (!initial ? "new" : null);
@@ -425,88 +493,11 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   // controlled input over the session document, and the rich editor is driven
   // by its markdown prop. Clearing the suggestion list is the only reset a
   // switch needs.
-  useEffect(() => {
+  const [suggestNoteId, setSuggestNoteId] = useState(initial?.id);
+  if (suggestNoteId !== initial?.id) {
+    setSuggestNoteId(initial?.id);
     setSuggest(null);
-  }, [initial?.id]);
-
-  const treeCache = useMemo(() => noteTreeCache(async () => {
-    const response = await fetch("/api/notes");
-    return response.ok ? await response.json() : null;
-  }), []);
-
-  const refreshAllNotes = useCallback(async () => {
-    const data = await treeCache.read();
-    setAllNotes(data.notes as NoteSummary[]);
-  }, [treeCache]);
-
-  // The tree no longer rides along on every navigation; it is fetched once per
-  // tab and refreshed whenever something in the vault actually changes.
-  useEffect(() => {
-    if (initialAll) {
-      setAllNotes(initialAll);
-      return;
-    }
-    void refreshAllNotes();
-  }, [initialAll, refreshAllNotes]);
-
-  // The detail cache survives note switches within this editor.
-  const detailClient = useMemo(() => createNoteDetailClient(async (url) => {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error("Could not load note details");
-    return response.json();
-  }), []);
-
-  /** Show the detail panel for `noteId` as soon as it has data (cached or not). */
-  const currentNoteIdRef = useRef<string | null>(null);
-  currentNoteIdRef.current = note?.id ?? null;
-
-  const refreshLinks = useCallback(async (noteId?: string) => {
-    const id = noteId ?? currentNoteIdRef.current;
-    if (!id) return;
-    const data = await detailClient.load(id);
-    if (currentNoteIdRef.current !== id) return; // the user moved on mid-flight
-    setLinks(data.links);
-    setMentions(data.mentions);
-  }, [detailClient]);
-
-  const savedNotesRef = useRef(new Map<string, Note>());
-  useEffect(() => {
-    if (initial && !savedNotesRef.current.has(initial.id)) savedNotesRef.current.set(initial.id, initial);
-  }, [initial]);
-  const postSaveRefreshTimer = useRef<number | null>(null);
-  const pendingRefresh = useRef({ tree: false, details: false });
-  const flushPostSaveRefresh = useCallback(() => {
-    const pending = pendingRefresh.current;
-    pendingRefresh.current = { tree: false, details: false };
-    if (pending.tree) {
-      window.dispatchEvent(new Event("chibako:notes-changed"));
-      void refreshAllNotes();
-    }
-    if (pending.details) void refreshLinks();
-  }, [refreshAllNotes, refreshLinks]);
-  const schedulePostSaveRefresh = useCallback((savedNote: Note, created: boolean) => {
-    const previous = created ? null : savedNotesRef.current.get(savedNote.id) ?? null;
-    const changes = noteSaveRefreshChanges(previous, savedNote);
-    savedNotesRef.current.set(savedNote.id, savedNote);
-    if (changes.invalidateDetails) detailClient.invalidate();
-    pendingRefresh.current.tree ||= changes.tree;
-    pendingRefresh.current.details ||= changes.details;
-    if (!pendingRefresh.current.tree && !pendingRefresh.current.details) return;
-    if (postSaveRefreshTimer.current !== null) window.clearTimeout(postSaveRefreshTimer.current);
-    postSaveRefreshTimer.current = window.setTimeout(() => {
-      postSaveRefreshTimer.current = null;
-      flushPostSaveRefresh();
-    }, POST_SAVE_REFRESH_MS);
-  }, [detailClient, flushPostSaveRefresh]);
-  useEffect(() => () => {
-    if (postSaveRefreshTimer.current !== null) {
-      window.clearTimeout(postSaveRefreshTimer.current);
-      postSaveRefreshTimer.current = null;
-      // Metadata changes still need to reach the sidebar when this page leaves.
-      if (pendingRefresh.current.tree) window.dispatchEvent(new Event("chibako:notes-changed"));
-      pendingRefresh.current = { tree: false, details: false };
-    }
-  }, []);
+  }
 
   async function linkMentionFrom(sourceId: string) {
     if (!note) return;
@@ -525,13 +516,19 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     }
   }
 
-  useEffect(() => {
-    const id = note?.id;
-    if (!id) {
+  const [detailNoteId, setDetailNoteId] = useState(note?.id);
+  if (detailNoteId !== note?.id) {
+    setDetailNoteId(note?.id);
+    if (!note) {
       setLinks(null);
       setMentions([]);
-      return;
+      setBookmark(null);
     }
+  }
+
+  useEffect(() => {
+    const id = note?.id;
+    if (!id) return;
     // A cached note resolves without a request; a first visit keeps showing the
     // previous note's panel until the new data lands, rather than blanking it.
     void refreshLinks(id);
@@ -540,10 +537,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   // ---- bookmarks ----
   useEffect(() => {
     const id = note?.id;
-    if (!id) {
-      setBookmark(null);
-      return;
-    }
+    if (!id) return;
     let cancelled = false;
     fetch("/api/bookmarks")
       .then((r) => r.json())
@@ -762,20 +756,6 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     const selected = content.slice(start, end) || placeholder;
     replaceSelection(start, end, before + selected + after, start + before.length, start + before.length + selected.length);
   }
-
-  const toolbar = [
-    { label: "B", title: "Bold", kbd: "B", run: () => insertAtCursor("**", "**", "bold") },
-    { label: "I", title: "Italic", kbd: "I", run: () => insertAtCursor("*", "*", "italic") },
-    { label: "S", title: "Strikethrough", kbd: "⇧X", run: () => insertAtCursor("~~", "~~", "struck") },
-    { label: "H", title: "Heading", kbd: null, run: () => insertAtCursor("## ", "", "Heading") },
-    { label: "[]", title: "Checklist", kbd: "⇧T", run: () => insertAtCursor("- [ ] ", "", "task") },
-    { label: "·", title: "Bullet list", kbd: "⇧B", run: () => insertAtCursor("- ", "", "item") },
-    { label: ">", title: "Quote", kbd: null, run: () => insertAtCursor("> ", "", "quote") },
-    { label: "`", title: "Inline code", kbd: "J", run: () => insertAtCursor("`", "`", "code") },
-    { label: "```", title: "Code block", kbd: "⇧J", run: () => insertAtCursor("```\n", "\n```", "code") },
-    { label: "link", title: "Link", kbd: "⇧L", run: () => insertAtCursor("[", "](https://)", "text") },
-    { label: "⟪⟫", title: "Wikilink", kbd: "⇧K", run: () => insertAtCursor("[[", "]]", "Note title") },
-  ];
 
   function handleTab(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Keep Shift+Tab available to leave the editor with the keyboard.
@@ -1194,7 +1174,6 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
                 }}
                 onKeyDown={handleEditorKey}
                 aria-label="Note content"
-                aria-expanded={Boolean(suggest)}
                 aria-autocomplete="list"
                 spellCheck={false}
                 />

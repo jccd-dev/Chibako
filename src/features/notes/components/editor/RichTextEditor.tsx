@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Editor, EditorContent, Extension, useEditor, useEditorState } from "@tiptap/react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { Editor, EditorContent, Extension, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import TaskItem from "@tiptap/extension-task-item";
@@ -45,11 +45,9 @@ export function RichTextEditor({
 }: RichTextEditorProps) {
   // Freeze the safety check while typing, but reset it for each document.
   // The editor now survives navigation, so mount is no longer a note boundary.
-  const safetyRef = useRef<{ noteId: string; html: string[] } | null>(null);
-  if (!safetyRef.current || safetyRef.current.noteId !== noteId) {
-    safetyRef.current = { noteId, html: findUnsupportedHtml(markdown) };
-  }
-  const unsupportedHtml = safetyRef.current.html;
+  const [safety, setSafety] = useState(() => ({ noteId, html: findUnsupportedHtml(markdown) }));
+  if (safety.noteId !== noteId) setSafety({ noteId, html: findUnsupportedHtml(markdown) });
+  const unsupportedHtml = safety.html;
   const editable = unsupportedHtml.length === 0;
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuIdx, setMenuIdx] = useState(0);
@@ -57,22 +55,15 @@ export function RichTextEditor({
   // Refs mirror state so key handlers (bound once at editor creation) always
   // read the latest menu without re-creating the editor.
   const allNotesRef = useRef(allNotes);
-  allNotesRef.current = allNotes;
   const selfTitleRef = useRef(selfTitle);
-  selfTitleRef.current = selfTitle;
   const bodyChangeRef = useRef(onBodyChange);
-  bodyChangeRef.current = onBodyChange;
   const menuRef = useRef<MenuState | null>(null);
-  menuRef.current = menu;
   const menuIdxRef = useRef(0);
-  menuIdxRef.current = menuIdx;
   const chooseRef = useRef<(title: string) => void>(() => {});
   const wikiPromptRef = useRef<() => void>(() => {});
   const linkPromptRef = useRef<() => void>(() => {});
   const setMenuIdxRef = useRef(setMenuIdx);
-  setMenuIdxRef.current = setMenuIdx;
   const setMenuRef = useRef<(m: MenuState | null) => void>(setMenu);
-  setMenuRef.current = setMenu;
 
   const editor = useEditor(
     {
@@ -158,10 +149,12 @@ export function RichTextEditor({
     editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
   }, [editor, markdown, editable]);
 
-  useEffect(() => {
+  const [menuNoteId, setMenuNoteId] = useState(noteId);
+  if (menuNoteId !== noteId) {
+    setMenuNoteId(noteId);
     setMenu(null);
     setMenuIdx(0);
-  }, [noteId]);
+  }
 
   function matchesFor(prefix: string): NoteSummary[] {
     const p = prefix.toLowerCase();
@@ -200,10 +193,11 @@ export function RichTextEditor({
     setMenuIdxRef.current(0);
   }
 
+  const onSelectionChange = useEffectEvent((ed: Editor) => syncMenu(ed));
   useEffect(() => {
     const ed = editor;
     if (!ed) return;
-    const refresh = () => syncMenu(ed);
+    const refresh = () => onSelectionChange(ed);
     refresh();
     ed.on("selectionUpdate", refresh);
     ed.on("transaction", refresh);
@@ -211,7 +205,6 @@ export function RichTextEditor({
       ed.off("selectionUpdate", refresh);
       ed.off("transaction", refresh);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, noteId]);
 
   function choose(title: string) {
@@ -227,9 +220,6 @@ export function RichTextEditor({
       .setTextSelection(m.from + 1)
       .run();
   }
-  chooseRef.current = choose;
-  wikiPromptRef.current = insertWiki;
-  linkPromptRef.current = insertLink;
 
   function insertLink() {
     if (!editor) return;
@@ -252,6 +242,17 @@ export function RichTextEditor({
     const pos = editor.state.selection.$from.pos;
     editor.chain().focus().insertContentAt(pos, { type: "wikilink", attrs: { target: title.trim(), alias: null } }).setTextSelection(pos + 1).run();
   }
+
+  useLayoutEffect(() => {
+    allNotesRef.current = allNotes;
+    selfTitleRef.current = selfTitle;
+    bodyChangeRef.current = onBodyChange;
+    menuRef.current = menu;
+    menuIdxRef.current = menuIdx;
+    chooseRef.current = choose;
+    wikiPromptRef.current = insertWiki;
+    linkPromptRef.current = insertLink;
+  });
 
   function handleRootKeyDown(e: React.KeyboardEvent) {
     if (!(e.metaKey || e.ctrlKey)) return;

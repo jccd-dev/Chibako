@@ -117,7 +117,9 @@ test("money, dates, allocation, nested identity and reference blockers cannot be
   for (const [expected, mutate] of variants) {
     const backup = source();
     mutate(backup.data);
-    const { profiles: _profiles, activeProfileId: _active, ...collections } = backup.data;
+    const collections = { ...backup.data };
+    Reflect.deleteProperty(collections, "profiles");
+    Reflect.deleteProperty(collections, "activeProfileId");
     const report = previewTarsiBackup(owner, { app: "Tarsi", data: collections });
     assert.equal(report.can_approve, false, expected);
     assert.ok(report.issues.some(issue => issue.code === expected), `${expected}: ${JSON.stringify(report.issues)}`);

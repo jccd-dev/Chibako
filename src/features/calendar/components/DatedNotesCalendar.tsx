@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { NoteSummary } from "@/lib/notes";
 import { dateToNoteDate, datedNotes, noteDateToDate } from "@/features/calendar/note-dates";
 import { Calendar, CalendarDayButton } from "@/components/ui/calendar";
@@ -21,7 +21,11 @@ export function DatedNotesCalendar({ notes, selected, onSelect, compact = false 
     return next;
   }, [notes]);
 
-  useEffect(() => setMonth(selectedDate), [selected]);
+  const [previousSelected, setPreviousSelected] = useState(selected);
+  if (previousSelected !== selected) {
+    setPreviousSelected(selected);
+    setMonth(selectedDate);
+  }
 
   return (
     <Calendar

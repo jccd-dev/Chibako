@@ -151,7 +151,7 @@ export function FinanceActivityList({
       </p>
       {activity.filters.obligation_id && (
         <p className="mt-3 text-sm">
-          Showing this obligation's linked activity, including hidden and
+          Showing this obligation&apos;s linked activity, including hidden and
           reverted records. Clear filters to return to all activity.
         </p>
       )}
@@ -271,37 +271,36 @@ export function FinanceTransactionDetails({
   inspectionId: string | null;
   onClose: () => void;
 }) {
-  const [selected, setSelected] = useState<FinanceTransaction | null>(null);
-  const [inspectionError, setInspectionError] = useState("");
+  const [selectedState, setSelected] = useState<{ key: string; value: FinanceTransaction } | null>(null);
+  const [inspectionErrorState, setInspectionError] = useState<{ key: string; message: string } | null>(null);
   const [detailId, setDetailId] = useState(inspectionId);
   const [reload, setReload] = useState(0);
   const inspectSequence = useRef(0);
   const { inspect: loadDetail, resetSave } = activity;
+  const requestKey = `${inspectionId ?? ""}:${detailId ?? ""}:${reload}`;
+  const selected = selectedState?.key === requestKey ? selectedState.value : null;
+  const inspectionError = inspectionErrorState?.key === requestKey ? inspectionErrorState.message : "";
   useEffect(() => {
+    const requests = inspectSequence;
     const sequence = ++inspectSequence.current;
-    setSelected(null);
-    setInspectionError("");
     if (!inspectionId || !detailId) return;
     resetSave();
     void loadDetail(detailId)
       .then((detail) => {
-        if (sequence === inspectSequence.current) setSelected(detail);
+        if (sequence === inspectSequence.current) setSelected({ key: requestKey, value: detail });
       })
       .catch((error) => {
         if (sequence === inspectSequence.current)
-          setInspectionError(
-            error instanceof Error
+          setInspectionError({ key: requestKey, message: error instanceof Error
               ? error.message
-              : "Could not inspect transaction.",
-          );
+              : "Could not inspect transaction." });
       });
     return () => {
-      inspectSequence.current++;
+      requests.current++;
     };
-  }, [inspectionId, detailId, reload, loadDetail, resetSave]);
+  }, [inspectionId, detailId, reload, loadDetail, resetSave, requestKey]);
   function inspect(id: string) {
     inspectSequence.current++;
-    setSelected(null);
     setDetailId(id);
     setReload((value) => value + 1);
   }

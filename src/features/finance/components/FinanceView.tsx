@@ -42,19 +42,19 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   const activity = useFinanceActivity(finance.refresh);
   const reports = useFinanceReports(activity.notice);
   const budget = useFinanceBudget(reports.refresh);
+  const refreshFinance = finance.refresh;
+  const refreshHistory = activity.refreshHistory;
+  const refreshTotals = activity.refreshTotals;
+  const refreshOptions = activity.refreshOptions;
+  const refreshReports = reports.refresh;
   const refreshAfterPlan = useCallback(async () => {
     await Promise.all([
-      finance.refresh(),
-      activity.refreshHistory(),
-      activity.refreshTotals(),
-      reports.refresh(),
+      refreshFinance(),
+      refreshHistory(),
+      refreshTotals(),
+      refreshReports(),
     ]);
-  }, [
-    finance.refresh,
-    activity.refreshHistory,
-    activity.refreshTotals,
-    reports.refresh,
-  ]);
+  }, [refreshFinance, refreshHistory, refreshTotals, refreshReports]);
   const planning = useFinancePlanning(activity.notice, refreshAfterPlan);
   useEffect(() => {
     window.dispatchEvent(new Event("finance-changed"));
@@ -63,15 +63,17 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [inspectionOpen, setInspectionOpen] = useState(false);
   useEffect(() => {
-    if (finance.notice) void activity.refreshOptions();
-  }, [finance.notice, activity.refreshOptions]);
+    if (finance.notice) void refreshOptions();
+  }, [finance.notice, refreshOptions]);
   const [tab, setTab] = useState<FinanceTab>(
     isTab(initialTab) ? initialTab : "overview",
   );
+  const [previousInitialTab, setPreviousInitialTab] = useState(initialTab);
   const [panel, setPanel] = useState<"create" | FinanceAccount | null>(null);
-  useEffect(() => {
+  if (previousInitialTab !== initialTab) {
+    setPreviousInitialTab(initialTab);
     setTab(isTab(initialTab) ? initialTab : "overview");
-  }, [initialTab]);
+  }
 
   function changeTab(value: FinanceTab) {
     setTab(value);

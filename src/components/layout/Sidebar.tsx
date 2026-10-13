@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { IconCalendarMonth, IconDotsVertical, IconFolderPlus, IconUpload, IconWallet } from "@tabler/icons-react";
@@ -79,15 +80,16 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     if (!response.ok) throw new Error("Could not load notes");
     return response.json();
   }), []);
-  const load = useCallback(async () => {
-    try {
-      const [data, trashed, marks] = await Promise.all([treeCache.read(), fetch("/api/trash"), fetch("/api/bookmarks")]);
-      if (!trashed.ok) throw new Error();
-      setNotes(data.notes as NoteSummary[]);
-      setFolders(data.folders);
-      setTrash((await trashed.json()).notes);
-      if (marks.ok) setBookmarks((await marks.json()).bookmarks);
-    } catch { toast.error("Could not load notes. Try again."); }
+  const load = useCallback(() => {
+    return Promise.all([treeCache.read(), fetch("/api/trash"), fetch("/api/bookmarks")])
+      .then(async ([data, trashed, marks]) => {
+        if (!trashed.ok) throw new Error();
+        setNotes(data.notes as NoteSummary[]);
+        setFolders(data.folders);
+        setTrash((await trashed.json()).notes);
+        if (marks.ok) setBookmarks((await marks.json()).bookmarks);
+      })
+      .catch(() => { toast.error("Could not load notes. Try again."); });
   }, [treeCache]);
 
   // Refresh on focus or an explicit write. Navigation never changes the note
@@ -104,29 +106,31 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     };
   }, [load, treeCache]);
 
-  useEffect(() => { onMobileOpenChange(false); }, [pathname, onMobileOpenChange]);
-
   // Drop ids that no longer exist (deleted or purged elsewhere) so bulk actions
   // never fire at rows that are gone.
-  useEffect(() => {
-    setSelected(prev => {
-      if (!prev.size) return prev;
-      const live = new Set([...notes.map(n => n.id), ...trash.map(n => n.id)]);
-      const next = new Set([...prev].filter(id => live.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [notes, trash]);
+  const [selectionSources, setSelectionSources] = useState({ notes, trash });
+  if (selectionSources.notes !== notes || selectionSources.trash !== trash) {
+    setSelectionSources({ notes, trash });
+    const live = new Set([...notes.map(n => n.id), ...trash.map(n => n.id)]);
+    if ([...selected].some(id => !live.has(id))) setSelected(new Set([...selected].filter(id => live.has(id))));
+  }
+
+  const [previousSearchQuery, setPreviousSearchQuery] = useState(searchQuery);
+  if (previousSearchQuery !== searchQuery) {
+    setPreviousSearchQuery(searchQuery);
+    setSearchBusy(Boolean(searchQuery.trim()));
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setSearchActive(0);
+    }
+  }
 
   // Live search effect
   useEffect(() => {
     searchAbort.current?.abort();
     if (!searchQuery.trim()) {
-      setSearchBusy(false);
-      setSearchResults([]);
-      setSearchActive(0);
       return;
     }
-    setSearchBusy(true);
     clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(async () => {
       searchAbort.current?.abort();
@@ -345,7 +349,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   }
 
   // ---- bookmarks ----
-  const bookmarkByNote = useMemo(() => new Map(bookmarks.map(b => [b.note_id, b])), [bookmarks]);
+  const bookmarkByNote = new Map(bookmarks.map(b => [b.note_id, b]));
   const titleByNoteId = useMemo(() => new Map(notes.map(n => [n.id, n.title])), [notes]);
   const orderedBookmarks = useMemo(() =>
     [...bookmarks].sort((a, b) => a.group_name.localeCompare(b.group_name) || a.sort - b.sort), [bookmarks]);
@@ -538,7 +542,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           </div>
         ) : searchResults.length === 0 && !searchBusy ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-            No notes found for "{searchQuery}".
+            No notes found for &quot;{searchQuery}&quot;.
           </div>
         ) : (
           searchResults.map((r, i) => (
@@ -664,7 +668,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <div className="flex items-center gap-1 px-3 py-2.5">
         <Link href="/app" className="flex min-w-0 flex-1 items-center gap-2 font-heading text-sm font-semibold">
-          <img src="/logo_main.png" alt="" className="h-5 w-5 shrink-0" />
+          <Image src="/logo_main.png" alt="" width={20} height={20} className="h-5 w-5 shrink-0" />
           <span className="truncate">Chibako</span>
         </Link>
         <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note", selectedFolder ?? "")}><IconPlus /></Button>

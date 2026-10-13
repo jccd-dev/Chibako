@@ -86,7 +86,8 @@ Use `test-scope-triage` for code changes before deciding whether to add/change t
 
 - Before a code PR or merge, run the full `npm test` suite and typecheck, plus change-specific checks above. Inspect test environment/configuration before executing data-writing checks.
 - Confirm browser targets are local/disposable and respect their data/build directories. The existing finance Playwright config is available when applicable. Report persistent fixtures and exact blockers; do not substitute production.
-- `npm run lint` currently invokes removed `next lint`, and no working lint configuration is present. Report this tooling gap until a separately authorized tooling change establishes a passing lint gate; never report lint as passed or silently disable checks.
+- `npm run lint` runs ESLint over application source, tests, and root configuration with the Next.js Core Web Vitals and TypeScript rules. Errors and warnings fail the check; never report lint as passed or disable rules to conceal failures.
+- `next-env.d.ts` is generated and ignored. `npm run typecheck` runs `next typegen` before TypeScript so a fresh checkout does not depend on generated files from another build channel.
 - Review the final diff for scope, architecture, security, data integrity, and consistency with relevant ADRs. Fix material findings caused by the change. Report changes, checks/results, and remaining risks or pending verification.
 
 ## Code Review Rules

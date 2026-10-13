@@ -58,9 +58,10 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     finally { if (run === sequence.current) setLoading(false); }
   }, [offset, archived, overdue]);
   useEffect(() => {
+    const requests = sequence;
     const changed = () => { void refresh(); };
     changed(); window.addEventListener("finance-changed", changed);
-    return () => { sequence.current++; window.removeEventListener("finance-changed", changed); };
+    return () => { requests.current++; window.removeEventListener("finance-changed", changed); };
   }, [refresh]);
   function populate(record: FinanceObligation) { setEditing(record); setKind(record.kind); setName(record.name); setDueDate(record.due_date ?? ""); }
   function resetDraft() {

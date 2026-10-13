@@ -39,40 +39,48 @@ export function FinancePlans({
   focusObligationId?: string | null;
   onFocusHandled?: () => void;
 }) {
-  const [panel, setPanel] = useState<string | null>(null);
-  const [detail, setDetail] = useState<FinancePlan | null>(null);
-  const [detailError, setDetailError] = useState("");
+  const [panel, setPanel] = useState<string | null>(focusPlanId ?? null);
+  const [detail, setDetail] = useState<{ key: string; value: FinancePlan } | null>(null);
+  const [detailErrorState, setDetailError] = useState<{ key: string; message: string } | null>(null);
   const [reload, setReload] = useState(0);
   const [futureOccurrence, setFutureOccurrence] = useState<FinancePlan | null>(null);
-  const [selected, setSelected] = useState<FinancePlan[]>([]);
-  const [reminders, setReminders] = useState<FinanceObligation[]>([]);
-  const [remindersLoading, setRemindersLoading] = useState(true);
-  const [remindersError, setRemindersError] = useState("");
+  const [selectedState, setSelected] = useState<{ page: FinancePlanningController["page"]; values: FinancePlan[] } | null>(null);
+  const [remindersState, setReminders] = useState<{ key: string; values: FinanceObligation[]; total: number } | null>(null);
+  const [remindersErrorState, setRemindersError] = useState<{ key: string; message: string } | null>(null);
   const [remindersReload, setRemindersReload] = useState(0);
   const [remindersOffset, setRemindersOffset] = useState(0);
-  const [remindersTotal, setRemindersTotal] = useState(0);
-  useEffect(() => { setSelected([]); }, [planning.page]);
+  const [previousFocusPlanId, setPreviousFocusPlanId] = useState(focusPlanId);
+  const detailKey = `${panel ?? ""}:${reload}`;
+  const remindersKey = `${remindersReload}:${remindersOffset}`;
+  const detailValue = detail?.key === detailKey ? detail.value : null;
+  const detailError = detailErrorState?.key === detailKey ? detailErrorState.message : "";
+  const reminders = remindersState?.values ?? [];
+  const remindersTotal = remindersState?.total ?? 0;
+  const remindersLoading = remindersState?.key !== remindersKey && remindersErrorState?.key !== remindersKey;
+  const remindersError = remindersErrorState?.key === remindersKey ? remindersErrorState.message : "";
+  const selected = selectedState?.page === planning.page ? selectedState.values : [];
+  if (previousFocusPlanId !== focusPlanId) {
+    setPreviousFocusPlanId(focusPlanId);
+    if (focusPlanId) setPanel(focusPlanId);
+  }
   useEffect(() => {
     if (!focusPlanId) return;
-    setPanel(focusPlanId);
     onFocusHandled?.();
   }, [focusPlanId, onFocusHandled]);
   useEffect(() => {
-    setDetail(null); setDetailError("");
     if (!panel || panel === "create") return;
     const abort = new AbortController();
-    void fetch(`/api/finance/plans/${panel}?include_details=true`, { signal: abort.signal }).then(financeJson<{ plan: FinancePlan }>).then(result => { if (!abort.signal.aborted) setDetail(result.plan); })
-      .catch(e => { if (!abort.signal.aborted) setDetailError(e instanceof Error ? e.message : "Could not inspect plan."); });
+    void fetch(`/api/finance/plans/${panel}?include_details=true`, { signal: abort.signal }).then(financeJson<{ plan: FinancePlan }>).then(result => { if (!abort.signal.aborted) setDetail({ key: detailKey, value: result.plan }); })
+      .catch(e => { if (!abort.signal.aborted) setDetailError({ key: detailKey, message: e instanceof Error ? e.message : "Could not inspect plan." }); });
     return () => abort.abort();
-  }, [panel, reload]);
+  }, [panel, reload, detailKey]);
   useEffect(() => {
     const abort = new AbortController();
-    setRemindersLoading(true); setRemindersError("");
     void fetch(`/api/finance/obligations?archived=false&limit=100&offset=${remindersOffset}`, { signal: abort.signal }).then(financeJson<FinanceObligationList>).then(result => {
-      if (!abort.signal.aborted) { setReminders(rows => remindersOffset ? [...rows, ...result.obligations] : result.obligations); setRemindersTotal(result.total); setRemindersLoading(false); }
-    }).catch(e => { if (!abort.signal.aborted) { setRemindersError(e instanceof Error ? e.message : "Could not load reminder options."); setRemindersLoading(false); } });
+      if (!abort.signal.aborted) setReminders(current => ({ key: remindersKey, values: remindersOffset ? [...(current?.values ?? []), ...result.obligations] : result.obligations, total: result.total }));
+    }).catch(e => { if (!abort.signal.aborted) setRemindersError({ key: remindersKey, message: e instanceof Error ? e.message : "Could not load reminder options." }); });
     return () => abort.abort();
-  }, [remindersReload, remindersOffset]);
+  }, [remindersReload, remindersOffset, remindersKey]);
   useEffect(() => {
     const changed = () => { setRemindersOffset(0); setRemindersReload(value => value + 1); };
     window.addEventListener("finance-changed", changed);
@@ -85,20 +93,20 @@ export function FinancePlans({
   const reminderLabel = (id: string) => `Reminder: ${reminderName(id) ?? "obligation linked"}`;
   return <><FinanceRecurrence activity={activity} planning={planning} occurrence={futureOccurrence} onCloseOccurrence={() => setFutureOccurrence(null)} reminders={remindersOptions} /><section id="finance-plans" aria-label="Planned activity and recurring occurrences" className="mt-8 border-t border-border pt-6">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Planned activity and occurrences</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Expected income and expenses stay pending until you confirm actual activity. Planning never changes balances or consumes budgets.</p></div><Button onClick={() => open("create")}>Add plan</Button></div>
-    <div className="mt-4 flex flex-wrap gap-3"><Button variant="outline" disabled={planning.busy} onClick={() => void planning.save(null, "catch-up", {})}>{planning.busy ? "Preparing review…" : planning.hasMoreCatchUp ? "Load more missed occurrences" : "Refresh due occurrences"}</Button>{selected.length > 0 && <Button variant="outline" disabled={planning.busy} onClick={() => void planning.save(null, "skip", { plans: selected.map(plan => ({ id: plan.id, version: plan.version })) }).then(result => { if (result) setSelected([]); })}>Confirm skip {selected.length} selected occurrences</Button>}</div>
+    <div className="mt-4 flex flex-wrap gap-3"><Button variant="outline" disabled={planning.busy} onClick={() => void planning.save(null, "catch-up", {})}>{planning.busy ? "Preparing review…" : planning.hasMoreCatchUp ? "Load more missed occurrences" : "Refresh due occurrences"}</Button>{selected.length > 0 && <Button variant="outline" disabled={planning.busy} onClick={() => void planning.save(null, "skip", { plans: selected.map(plan => ({ id: plan.id, version: plan.version })) }).then(result => { if (result) setSelected(null); })}>Confirm skip {selected.length} selected occurrences</Button>}</div>
     {planning.hasMoreCatchUp && <p className="mt-2 text-sm text-muted-foreground">More missed occurrences remain. Load the next catch-up batch; each batch stays pending.</p>}
     {planning.saveError && !panel && <Alert className="mt-4"><AlertDescription>{planning.saveError} Retry the same action safely.</AlertDescription></Alert>}
     {remindersError && <Alert className="mt-4"><AlertDescription>{remindersError}<Button variant="outline" onClick={remindersOptions.reload}>Retry reminder options</Button></AlertDescription></Alert>}
     <Field className="my-5 sm:max-w-xs"><FieldLabel htmlFor="plan-status">Plan status</FieldLabel><NativeSelect id="plan-status" className="w-full" value={planning.status} onChange={event => planning.changeStatus(event.target.value)}><NativeSelectOption value="pending">Pending review</NativeSelectOption><NativeSelectOption value="satisfied">Satisfied</NativeSelectOption><NativeSelectOption value="cancelled">Cancelled</NativeSelectOption><NativeSelectOption value="all">All plans</NativeSelectOption></NativeSelect></Field>
     {planning.notice && <p role="status" className="mb-4 text-sm">{planning.notice}</p>}
-    {planning.error ? <Alert><AlertDescription>{planning.error}<Button variant="outline" onClick={() => void planning.refresh()}>Retry plans</Button></AlertDescription></Alert> : planning.loading ? <p role="status" className="py-6 text-sm text-muted-foreground">Loading plans…</p> : planning.page?.plans.length ? <ul className="divide-y divide-border">{planning.page.plans.map(plan => <li key={plan.id}>{plan.schedule_id && plan.status === "pending" && <label className="flex min-h-7 items-center gap-2 text-xs"><Checkbox disabled={planning.busy} checked={selected.some(row => row.id === plan.id)} onCheckedChange={checked => setSelected(rows => checked ? [...rows, plan] : rows.filter(row => row.id !== plan.id))} />Select occurrence due {plan.due_date} for skipping</label>}<button className="flex min-h-11 w-full flex-wrap items-center justify-between gap-3 rounded-md px-1 py-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" onClick={() => open(plan.id)} aria-label={`Review ${plan.type} plan ${money(plan.amount_cents)} due ${plan.due_date}`}>
+    {planning.error ? <Alert><AlertDescription>{planning.error}<Button variant="outline" onClick={() => void planning.refresh()}>Retry plans</Button></AlertDescription></Alert> : planning.loading ? <p role="status" className="py-6 text-sm text-muted-foreground">Loading plans…</p> : planning.page?.plans.length ? <ul className="divide-y divide-border">{planning.page.plans.map(plan => <li key={plan.id}>{plan.schedule_id && plan.status === "pending" && <label className="flex min-h-7 items-center gap-2 text-xs"><Checkbox disabled={planning.busy} checked={selected.some(row => row.id === plan.id)} onCheckedChange={checked => setSelected(current => { const rows = current?.page === planning.page ? current.values : []; return { page: planning.page, values: checked ? [...rows, plan] : rows.filter(row => row.id !== plan.id) }; })} />Select occurrence due {plan.due_date} for skipping</label>}<button className="flex min-h-11 w-full flex-wrap items-center justify-between gap-3 rounded-md px-1 py-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" onClick={() => open(plan.id)} aria-label={`Review ${plan.type} plan ${money(plan.amount_cents)} due ${plan.due_date}`}>
       <span className="min-w-0 flex-1 basis-40"><span className="block break-words text-sm font-medium">{plan.text || plan.category_name || "Uncategorized"}</span><span className="mt-1 block break-words text-sm text-muted-foreground">{plan.schedule_id ? "Recurring · " : ""}{plan.obligation_id ? `${reminderLabel(plan.obligation_id)} · ` : ""}Due {plan.due_date} · {plan.account_name} · {plan.status === "pending" ? plan.due_date < today ? "Overdue" : plan.due_date === today ? "Due today" : "Upcoming" : plan.status === "satisfied" ? "Satisfied" : "Cancelled"}</span></span>
       <span className="text-right text-sm"><span className="block">{plan.obligation_id ? "Principal " : "Planned "}{plan.type}</span><strong className="tabular-nums">{money(plan.amount_cents)}</strong></span>
     </button></li>)}</ul> : <Empty><EmptyHeader><EmptyTitle>No {planning.status === "all" ? "" : planning.status} plans</EmptyTitle><EmptyDescription>Add expected income or an expense. It stays separate from actual activity until reviewed.</EmptyDescription></EmptyHeader></Empty>}
     {planning.page && planning.page.total > 25 && <nav aria-label="Plan pages" className="mt-5 flex flex-wrap items-center gap-3"><Button variant="outline" disabled={!planning.offset || planning.loading} onClick={() => planning.setOffset(Math.max(0, planning.offset - 25))}>Previous plans</Button><span className="text-sm">{planning.offset + 1}-{Math.min(planning.offset + 25, planning.page.total)} of {planning.page.total}</span><Button variant="outline" disabled={planning.offset + 25 >= planning.page.total || planning.loading} onClick={() => planning.setOffset(planning.offset + 25)}>Next plans</Button></nav>}
     <Sheet open={panel !== null} onOpenChange={value => { if (!value && !planning.busy) setPanel(null); }}><SheetContent className={financeSheet} showCloseButton={false}>
       <SheetHeader className="border-b border-border p-4"><SheetTitle>{panel === "create" ? "Add one-time plan" : "Review planned activity"}</SheetTitle><SheetDescription>Due dates describe expectations. Transaction dates describe money that actually moved.</SheetDescription></SheetHeader>
-      {detailError ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{detailError}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry plan inspection</Button><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div> : panel === "create" || detail ? <PlanPanel key={`${panel}:${detail?.version ?? "new"}:${reload}`} plan={detail} activity={activity} planning={planning} reminders={remindersOptions} onClose={() => setPanel(null)} onFuture={plan => { setPanel(null); setFutureOccurrence(plan); }} onRefresh={() => { planning.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><p role="status">Loading plan…</p><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div>}
+      {detailError ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{detailError}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry plan inspection</Button><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div> : panel === "create" || detailValue ? <PlanPanel key={`${panel}:${detailValue?.version ?? "new"}:${reload}`} plan={detailValue} activity={activity} planning={planning} reminders={remindersOptions} onClose={() => setPanel(null)} onFuture={plan => { setPanel(null); setFutureOccurrence(plan); }} onRefresh={() => { planning.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><p role="status">Loading plan…</p><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div>}
     </SheetContent></Sheet>
   </section><FinanceObligations
     activity={activity}
@@ -109,20 +117,21 @@ export function FinancePlans({
 
 function PlanPanel({ plan, activity, planning, reminders, onClose, onFuture, onRefresh }: { plan: FinancePlan | null; activity: FinanceActivityController; planning: FinancePlanningController; reminders: ReminderOptions; onClose: () => void; onFuture: (plan: FinancePlan) => void; onRefresh: () => void }) {
   const linked = !!plan?.obligation_id;
-  const [reviewObligation, setReviewObligation] = useState<FinanceObligation | null>(null);
-  const [reviewLoading, setReviewLoading] = useState(false);
-  const [reviewError, setReviewError] = useState("");
+  const [reviewState, setReviewState] = useState<{ key: string; value: FinanceObligation } | null>(null);
+  const [reviewErrorState, setReviewError] = useState<{ key: string; message: string } | null>(null);
   const [reviewReload, setReviewReload] = useState(0);
+  const reviewKey = `${plan?.obligation_id ?? ""}:${reviewReload}`;
+  const reviewObligation = reviewState?.key === reviewKey ? reviewState.value : null;
+  const reviewError = reviewErrorState?.key === reviewKey ? reviewErrorState.message : "";
+  const reviewLoading = !!plan?.obligation_id && !reviewObligation && !reviewError;
   useEffect(() => {
     if (!plan?.obligation_id) return;
     const abort = new AbortController();
-    setReviewObligation(null); setReviewLoading(true); setReviewError("");
     void fetch(`/api/finance/obligations/${plan.obligation_id}`, { signal: abort.signal }).then(financeJson<{ obligation: FinanceObligation }>).then(result => {
-      if (!abort.signal.aborted) setReviewObligation(result.obligation);
-    }).catch(e => { if (!abort.signal.aborted) setReviewError(e instanceof Error ? e.message : "Could not inspect obligation."); })
-      .finally(() => { if (!abort.signal.aborted) setReviewLoading(false); });
+      if (!abort.signal.aborted) setReviewState({ key: reviewKey, value: result.obligation });
+    }).catch(e => { if (!abort.signal.aborted) setReviewError({ key: reviewKey, message: e instanceof Error ? e.message : "Could not inspect obligation." }); });
     return () => abort.abort();
-  }, [plan?.obligation_id, reviewReload]);
+  }, [plan?.obligation_id, reviewReload, reviewKey]);
   const { mode, type, amount, setAmount, account, setAccount, dueDate, setDueDate, date, setDate, category, subcategory, setSubcategory, text, setText, association, setAssociation, feeType, changeFeeType, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory, feeSubcategoryId, setFeeSubcategoryId, feeCategories, feeSubcategories, cashSource, chooseCashSource, cashPick, selectCash, clearCash, cashPage, cashOffset, setCashOffset, cashLoading, cashError, retryCash, errors, editable, categories, subcategories, accounts, submit: save, changeMode, changeType, changeCategory, invalid } = useFinancePlanEntry(plan, activity, planning, reviewObligation, onClose);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

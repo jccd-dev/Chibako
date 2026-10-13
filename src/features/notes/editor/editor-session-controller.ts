@@ -34,6 +34,7 @@ export interface EditorSessionEffects {
 }
 
 export interface EditorSessionController {
+  updateEffects(next: EditorSessionEffects): void;
   getSnapshot(): EditorSessionSnapshot;
   subscribe(listener: () => void): () => void;
   patch(patch: UpdateNoteInput): void;
@@ -174,6 +175,9 @@ export function createEditorSessionController(
   }
 
   return {
+    updateEffects(next): void {
+      effects = next;
+    },
     getSnapshot(): EditorSessionSnapshot {
       return snapshot;
     },

@@ -48,9 +48,13 @@ export function useFinanceNoteLinks(record: FinanceTransaction, activity: Financ
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const sequence = useRef(0);
-  const load = useCallback(async () => {
-    const current = ++sequence.current;
-    setLoading(true); setError("");
+  const requestKey = `${record.id}:${record.version}`;
+  const [previousRequestKey, setPreviousRequestKey] = useState(requestKey);
+  if (previousRequestKey !== requestKey) {
+    setPreviousRequestKey(requestKey);
+    setNotes([]); setOriginalIds([]); setLoading(true); setError("");
+  }
+  const loadFor = useCallback(async (current: number) => {
     try {
       const result = await fetch(`/api/finance/activity/${record.id}/notes`).then(read<ActivityNoteLinks>);
       if (current !== sequence.current) return;
@@ -59,7 +63,17 @@ export function useFinanceNoteLinks(record: FinanceTransaction, activity: Financ
     } catch (error) { if (current === sequence.current) setError(error instanceof Error ? error.message : "Could not load Note links."); }
     finally { if (current === sequence.current) setLoading(false); }
   }, [record.id, record.version]);
-  useEffect(() => { void load(); return () => { sequence.current++; }; }, [load]);
+  const load = useCallback(() => {
+    const current = ++sequence.current;
+    setLoading(true); setError("");
+    return loadFor(current);
+  }, [loadFor]);
+  useEffect(() => {
+    const requests = sequence;
+    const current = ++sequence.current;
+    void loadFor(current);
+    return () => { requests.current++; };
+  }, [loadFor]);
   const changed = JSON.stringify(notes.map(note => note.id).sort()) !== JSON.stringify(originalIds);
   async function save() { return activity.setNoteLinks(record.id, { version: record.version, note_ids: notes.map(note => note.id) }); }
   return { notes, setNotes, loading, error, load, changed, save };

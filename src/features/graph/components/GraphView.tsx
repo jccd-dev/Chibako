@@ -11,6 +11,7 @@ import {
   forceX,
   forceY,
   type Simulation,
+  type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
 import { select } from "d3-selection";
@@ -26,10 +27,10 @@ interface GraphNode extends SimulationNodeDatum {
   folder: string;
 }
 
-interface GraphLink {
-  source: string | SimulationNodeDatum;
-  target: string | SimulationNodeDatum;
-}
+type GraphLink = Omit<SimulationLinkDatum<GraphNode>, "source" | "target"> & {
+  source: string | GraphNode;
+  target: string | GraphNode;
+};
 
 interface GraphData {
   nodes: NoteSummary[];
@@ -50,12 +51,14 @@ export function GraphView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const gRef = useRef<SVGGElement>(null);
-  const simulationRef = useRef<Simulation<GraphNode, undefined> | null>(null);
+  const simulationRef = useRef<Simulation<GraphNode, GraphLink> | null>(null);
   const [data, setData] = useState<GraphData | null>(null);
   const [hovered, setHovered] = useState<GraphNode | null>(null);
   const [t, setT] = useState({ x: 0, y: 0, k: 1 });
   const tRef = useRef(t);
-  tRef.current = t;
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const [orphansOnly, setOrphansOnly] = useState(false);
   const [folder, setFolder] = useState("");
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -83,8 +86,8 @@ export function GraphView() {
       s.add(b);
     };
     for (const l of links) {
-      const s = typeof l.source === "object" ? (l.source as GraphNode).id : l.source;
-      const t = typeof l.target === "object" ? (l.target as GraphNode).id : l.target;
+      const s = typeof l.source === "object" ? l.source.id : l.source;
+      const t = typeof l.target === "object" ? l.target.id : l.target;
       add(s, t);
       add(t, s);
     }
@@ -125,7 +128,7 @@ export function GraphView() {
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
     const sim = forceSimulation(nodes)
-      .force("link", forceLink(links as any).id((d: any) => d.id).distance(layout.linkDistance).strength(0.5))
+      .force("link", forceLink<GraphNode, GraphLink>(links).id((node) => node.id).distance(layout.linkDistance).strength(0.5))
       .force("charge", forceManyBody().strength(layout.chargeStrength))
       .force("center", forceCenter(width / 2, height / 2))
       .force("collide", forceCollide(26))
@@ -137,26 +140,26 @@ export function GraphView() {
       ));
     simulationRef.current = sim;
 
-    const root = select(svg).select("g.graph-root");
+    const root = select(svg).select<SVGGElement>("g.graph-root");
     const linkSel = root
       .append("g")
-      .selectAll("line")
-      .data(links as any)
+      .selectAll<SVGLineElement, GraphLink>("line")
+      .data(links)
       .join("line")
       .attr("class", "link");
 
     const nodeSel = root
       .append("g")
-      .selectAll("circle")
-      .data(nodes as any)
+      .selectAll<SVGCircleElement, GraphNode>("circle")
+      .data(nodes)
       .join("circle")
       .attr("class", "node")
-      .attr("r", (d: any) => (d.kind === "index" ? 11 : d.kind === "wiki" ? 8 : 6))
-      .attr("fill", (d: any) => KIND_COLOR[d.kind] ?? "var(--primary)")
+      .attr("r", (d) => (d.kind === "index" ? 11 : d.kind === "wiki" ? 8 : 6))
+      .attr("fill", (d) => KIND_COLOR[d.kind] ?? "var(--primary)")
       .attr("stroke", "var(--popover)")
       .attr("stroke-width", 2)
       .attr("cursor", "grab")
-      .on("mousedown", (event: any, d: any) => {
+      .on("mousedown", (event, d) => {
         event.stopPropagation();
         event.preventDefault();
         dragNode = d;
@@ -166,13 +169,13 @@ export function GraphView() {
         document.body.style.cursor = "grabbing";
         sim.alphaTarget(0.3).restart();
       })
-      .on("mouseover", (_e: any, d: any) => { if (!dragNode) setHovered(d); })
+      .on("mouseover", (_event, d) => { if (!dragNode) setHovered(d); })
       .on("mouseout", () => { if (!dragNode) setHovered(null); });
 
     const labelSel = root
       .append("g")
-      .selectAll("text")
-      .data(nodes as any)
+      .selectAll<SVGTextElement, GraphNode>("text")
+      .data(nodes)
       .join("text")
       .attr("class", "label")
       .attr("text-anchor", "middle")
@@ -180,7 +183,7 @@ export function GraphView() {
       .attr("font-size", 10)
       .attr("fill", "var(--muted-foreground)")
       .attr("pointer-events", "none")
-      .text((d: any) => d.title);
+      .text((d) => d.title);
 
     // Drag a node: pin it under the cursor (fx/fy) while the simulation keeps
     // running, so linked nodes trail with a springy follow. On release the pin
@@ -218,12 +221,12 @@ export function GraphView() {
 
     sim.on("tick", () => {
       linkSel
-        .attr("x1", (d: any) => d.source.x)
-        .attr("y1", (d: any) => d.source.y)
-        .attr("x2", (d: any) => d.target.x)
-        .attr("y2", (d: any) => d.target.y);
-      nodeSel.attr("cx", (d: any) => d.x).attr("cy", (d: any) => d.y);
-      labelSel.attr("x", (d: any) => d.x).attr("y", (d: any) => d.y);
+        .attr("x1", (link) => (typeof link.source === "string" ? nodesById.get(link.source)?.x : link.source.x) ?? 0)
+        .attr("y1", (link) => (typeof link.source === "string" ? nodesById.get(link.source)?.y : link.source.y) ?? 0)
+        .attr("x2", (link) => (typeof link.target === "string" ? nodesById.get(link.target)?.x : link.target.x) ?? 0)
+        .attr("y2", (link) => (typeof link.target === "string" ? nodesById.get(link.target)?.y : link.target.y) ?? 0);
+      nodeSel.attr("cx", (node) => node.x ?? 0).attr("cy", (node) => node.y ?? 0);
+      labelSel.attr("x", (node) => node.x ?? 0).attr("y", (node) => node.y ?? 0);
     });
 
     return () => {
@@ -235,7 +238,7 @@ export function GraphView() {
       window.removeEventListener("mouseleave", onDragEnd);
       root.selectAll("*").remove();
     };
-  }, [nodes, links, degree, router, size]);
+  }, [nodes, links, degree, nodesById, router, size]);
 
   function resetView() {
     setT({ x: 0, y: 0, k: 1 });
@@ -260,7 +263,7 @@ export function GraphView() {
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
-    const root = select(svg).select("g.graph-root");
+    const root = select(svg).select<SVGGElement>("g.graph-root");
 
     const baseOpacity = (d: GraphNode) => {
       let o = 1;
@@ -285,13 +288,13 @@ export function GraphView() {
 
     root.selectAll<SVGLineElement, GraphLink>("line.link")
       .attr("stroke", (d) => {
-        const s = typeof d.source === "object" ? (d.source as GraphNode).id : d.source;
-        const t = typeof d.target === "object" ? (d.target as GraphNode).id : d.target;
+        const s = typeof d.source === "object" ? d.source.id : d.source;
+        const t = typeof d.target === "object" ? d.target.id : d.target;
         return hovered && (s === hovered.id || t === hovered.id) ? "var(--primary)" : "var(--border)";
       })
       .attr("stroke-opacity", (d) => {
-        const s = typeof d.source === "object" ? (d.source as GraphNode).id : d.source;
-        const t = typeof d.target === "object" ? (d.target as GraphNode).id : d.target;
+        const s = typeof d.source === "object" ? d.source.id : d.source;
+        const t = typeof d.target === "object" ? d.target.id : d.target;
         const so = nodesById.get(s);
         const to = nodesById.get(t);
         const base = Math.min(so ? baseOpacity(so) : ORPHAN_OPACITY, to ? baseOpacity(to) : ORPHAN_OPACITY);
@@ -300,8 +303,8 @@ export function GraphView() {
       })
       .attr("stroke-width", (d) => {
         if (!hovered) return 1;
-        const s = typeof d.source === "object" ? (d.source as GraphNode).id : d.source;
-        const t = typeof d.target === "object" ? (d.target as GraphNode).id : d.target;
+        const s = typeof d.source === "object" ? d.source.id : d.source;
+        const t = typeof d.target === "object" ? d.target.id : d.target;
         return s === hovered.id || t === hovered.id ? 1.6 : 1;
       });
   }, [hovered, orphansOnly, folder, nodes, links, neighbors, degree, nodesById]);

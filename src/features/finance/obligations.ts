@@ -36,7 +36,8 @@ export function readObligation(id: string, asOf = today()): FinanceObligation {
   for (const writeoff of writeoffRows) { writtenOff += writeoff.amount_cents; principal -= writeoff.amount_cents; }
   const outstanding = exactCents(principal), paidCents = exactCents(paid), writtenOffCents = exactCents(writtenOff);
   const status: FinanceObligation["status"] = outstanding > 0 || (paidCents === 0 && writtenOffCents === 0) ? "open" : paidCents > 0 && writtenOffCents > 0 ? "settled" : writtenOffCents > 0 ? "written_off" : "paid";
-  const { starting_progress_cents: _startingProgress, ...publicRow } = row;
+  const publicRow = { ...row };
+  Reflect.deleteProperty(publicRow, "starting_progress_cents");
   return { ...publicRow, currency: "PHP", archived: row.archived === 1, outstanding_cents: outstanding,
     paid_cents: paidCents, written_off_cents: writtenOffCents, status,
     overdue: outstanding > 0 && row.due_date !== null && row.due_date < asOf };

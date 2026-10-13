@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { FinanceAccount } from "./types";
 import { accountGroupSchema, createAccountSchema } from "./types";
 import type { FinanceAccountsController } from "./use-finance-accounts";
@@ -27,17 +27,17 @@ export function useFinanceAccountEditor(
   const [saving, setSaving] = useState(false);
   const saveLock = useRef(false);
   const adjustment = useFinanceAdjustment(activity, account?.id ?? null, kind === "money" ? maintaining : undefined);
-  useEffect(() => {
-    if (adjustment.account) {
-      setAccount(adjustment.account);
-      if (!editing) {
-        setName(adjustment.account.name);
-        setGroup(adjustment.account.account_group);
-        setIncluded(adjustment.account.include_in_summary);
-        setMaintaining(decimalPHP(adjustment.account.maintaining_balance_cents));
-      }
+  const [syncedAdjustment, setSyncedAdjustment] = useState({ account: adjustment.account, editing });
+  if (adjustment.account && (adjustment.account !== syncedAdjustment.account || editing !== syncedAdjustment.editing)) {
+    setSyncedAdjustment({ account: adjustment.account, editing });
+    setAccount(adjustment.account);
+    if (!editing) {
+      setName(adjustment.account.name);
+      setGroup(adjustment.account.account_group);
+      setIncluded(adjustment.account.include_in_summary);
+      setMaintaining(decimalPHP(adjustment.account.maintaining_balance_cents));
     }
-  }, [adjustment.account, editing]);
+  }
   const busy = saving || finance.busy || activity.busy;
 
   function edit() {

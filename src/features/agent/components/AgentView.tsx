@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { IconCheck, IconCopy } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 
@@ -31,12 +32,12 @@ const TOOL_GROUPS = [
   {
     label: "Find context",
     tools: [
-      { name: "get_knowledge_schema", desc: "Read the vault's instructions for organizing and linking notes.", when: "starting a session (once)." },
+      { name: "get_knowledge_schema", desc: "Read the vault&apos;s instructions for organizing and linking notes.", when: "starting a session (once)." },
       { name: "list_observations", desc: "List recent saved decisions and patterns.", when: "checking what earlier sessions learned." },
       { name: "list_notes", desc: "List note IDs, titles, folders, kinds, and non-empty properties; no note bodies.", when: "browsing or filtering the vault by folder, kind, or property." },
       { name: "search_notes", desc: "Search note titles and content; returns matches with snippets and supports property filters.", when: "a phrase or exact term should locate a note." },
       { name: "recall", desc: "Return BM25-ranked snippets within a token budget; also fuses vector similarity when embeddings are enabled.", when: "gathering relevant context across notes." },
-      { name: "get_property_defs", desc: "Read the vault's typed property names, types, and allowed options.", when: "filtering or writing canonical property values." },
+      { name: "get_property_defs", desc: "Read the vault&apos;s typed property names, types, and allowed options.", when: "filtering or writing canonical property values." },
     ],
   },
   {
@@ -45,7 +46,7 @@ const TOOL_GROUPS = [
       { name: "ingest_note", desc: "Return one note's full Markdown, links, backlinks, and the knowledge schema.", when: "you need full context for an identified note." },
       { name: "read_note", desc: "Read a note's full Markdown and metadata by ID or exact title.", when: "you need the note body alone; use ingest_note for links too." },
       { name: "get_links", desc: "List a note's outbound wikilinks and backlinks as titles and IDs.", when: "you need note relationships without reading its body." },
-      { name: "get_graph", desc: "Return vault note nodes and resolved wikilink edges, with optional folder filtering.", when: "inspecting the vault's overall link structure." },
+      { name: "get_graph", desc: "Return vault note nodes and resolved wikilink edges, with optional folder filtering.", when: "inspecting the vault&apos;s overall link structure." },
       { name: "get_stats", desc: "Summarize note counts by kind and folder, plus resolved and unresolved links.", when: "checking vault size and link health." },
       { name: "embedding_status", desc: "Show embedding provider and index health without starting indexing.", when: "diagnosing semantic recall setup or stale vectors." },
     ],
@@ -72,11 +73,8 @@ const TOOL_GROUPS = [
 ];
 
 export function AgentView() {
-  const [origin, setOrigin] = useState("https://your-domain.com");
-
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
+  const hydrated = useHydrated();
+  const origin = hydrated ? window.location.origin : "https://your-domain.com";
 
   const codexConfig = `[mcp_servers.chibako]
 url = "${origin}/mcp"
@@ -136,7 +134,7 @@ bearer_token_env_var = "CHIBAKO_API_KEY"`;
           <CodeBlock code={hermesConfig} label="Hermes config.yaml" />
         </div>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-          The endpoint uses this app's origin at <code className="font-mono text-foreground">/mcp</code>. Keep the bearer token in environment or secret storage; never commit it or paste a literal value into remote config. Hermes can read <code className="font-mono">~/.hermes/.env</code>.
+          The endpoint uses this app&apos;s origin at <code className="font-mono text-foreground">/mcp</code>. Keep the bearer token in environment or secret storage; never commit it or paste a literal value into remote config. Hermes can read <code className="font-mono">~/.hermes/.env</code>.
         </p>
       </section>
 

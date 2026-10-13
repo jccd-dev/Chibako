@@ -12,9 +12,13 @@ import type { ActivityFilters, FinanceActivityController } from "@/features/fina
 
 export function FinanceHistoryFilters({ activity }: { activity: FinanceActivityController }) {
   const [draft, setDraft] = useState<ActivityFilters>(activity.filters);
+  const [syncedFilters, setSyncedFilters] = useState(activity.filters);
   const [desktop, setDesktop] = useState(false);
   const [open, setOpen] = useState(false);
-  useEffect(() => { setDraft(activity.filters); }, [activity.filters]);
+  if (syncedFilters !== activity.filters) {
+    setSyncedFilters(activity.filters);
+    setDraft(activity.filters);
+  }
   useEffect(() => {
     const media = matchMedia("(min-width: 1024px)");
     const update = () => { setDesktop(media.matches); setOpen(false); };

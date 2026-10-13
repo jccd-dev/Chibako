@@ -17,16 +17,25 @@ export function useFinanceRecurrence(activityNotice: string, planning: FinancePl
   const [busy, setBusy] = useState(false);
   const sequence = useRef(0), saving = useRef(false);
   const pending = useRef<{ fingerprint: string; requestId: string } | null>(null);
-  const refresh = useCallback(async () => {
-    const current = ++sequence.current;
+  const requestKey = `${paused}:${offset}:${activityNotice}`;
+  const [previousRequestKey, setPreviousRequestKey] = useState(requestKey);
+  if (previousRequestKey !== requestKey) {
+    setPreviousRequestKey(requestKey);
     setLoading(true); setError("");
-    try {
-      const result = await fetch(`/api/finance/schedules?${new URLSearchParams({ paused, limit: "25", offset: String(offset), include_details: "true" })}`).then(financeJson<SchedulePage>);
-      if (current === sequence.current) setPage(result);
-    } catch (e) { if (current === sequence.current) setError(e instanceof Error ? e.message : "Could not load schedules."); }
-    finally { if (current === sequence.current) setLoading(false); }
+  }
+  const load = useCallback(() => {
+    const current = ++sequence.current;
+    return fetch(`/api/finance/schedules?${new URLSearchParams({ paused, limit: "25", offset: String(offset), include_details: "true" })}`).then(financeJson<SchedulePage>)
+      .then(result => { if (current === sequence.current) setPage(result); })
+      .catch(e => { if (current === sequence.current) setError(e instanceof Error ? e.message : "Could not load schedules."); })
+      .finally(() => { if (current === sequence.current) setLoading(false); });
   }, [offset, paused]);
-  useEffect(() => { void refresh(); return () => { sequence.current++; }; }, [refresh, activityNotice]);
+  const refresh = useCallback(() => { setLoading(true); setError(""); return load(); }, [load]);
+  useEffect(() => {
+    const requests = sequence;
+    void load();
+    return () => { requests.current++; };
+  }, [load, activityNotice]);
   async function save(id: string | null, operation: "create" | "edit" | "pause" | "resume", input: object) {
     if (saving.current) return null;
     const path = id ? `/api/finance/schedules/${id}${operation === "pause" || operation === "resume" ? `/${operation}` : ""}` : "/api/finance/schedules";
@@ -49,7 +58,7 @@ export function useFinanceRecurrence(activityNotice: string, planning: FinancePl
     finally { saving.current = false; setBusy(false); }
     return result;
   }
-  function resetSave() { pending.current = null; setSaveError(""); }
+  const resetSave = useCallback(() => { pending.current = null; setSaveError(""); }, []);
   return { page, offset, setOffset, paused, changePaused: (value: string) => { setPaused(value); setOffset(0); }, loading, error, saveError, notice, busy, refresh, save, resetSave };
 }
 export type FinanceRecurrenceController = ReturnType<typeof useFinanceRecurrence>;

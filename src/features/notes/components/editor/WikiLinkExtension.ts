@@ -1,6 +1,6 @@
 "use client";
 
-import { mergeAttributes, Node, type JSONContent, type MarkdownParseHelpers, type MarkdownRendererHelpers, type MarkdownToken, type RenderContext } from "@tiptap/core";
+import { mergeAttributes, Node, type JSONContent, type MarkdownToken } from "@tiptap/core";
 
 export const WIKILINK_TOKEN_NAME = "wikilink";
 const WIKILINK_NODE_NAME = "wikilink";
@@ -65,14 +65,14 @@ export const WikiLink = Node.create({
     },
   },
 
-  parseMarkdown(token: MarkdownToken, helpers: MarkdownParseHelpers) {
+  parseMarkdown(token: MarkdownToken) {
     return {
       type: WIKILINK_NODE_NAME,
       attrs: { target: token.target ?? "", alias: token.alias ?? null },
     };
   },
 
-  renderMarkdown(node: JSONContent, helpers: MarkdownRendererHelpers, ctx: RenderContext) {
+  renderMarkdown(node: JSONContent) {
     const attrs = (node.attrs ?? {}) as { target?: string; alias?: string | null };
     const target = attrs.target ?? "";
     return attrs.alias ? `[[${target}|${attrs.alias}]]` : `[[${target}]]`;

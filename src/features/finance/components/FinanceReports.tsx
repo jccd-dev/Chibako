@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { format, lastDayOfMonth, parse } from "date-fns";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
@@ -121,13 +121,18 @@ export function FinanceBudgets({
   onFocusHandled?: () => void;
 }) {
   const { open, setOpen, category, setCategory, month, setMonth, mode, setMode, amount, setAmount, snapshot, loadError, busy, saveError } = budget;
+  const openFocusedBudget = useEffectEvent(async (categoryId: string, monthValue: string) => {
+    try {
+      await activity.ensureClassification(categoryId);
+    } finally {
+      budget.openForReview(categoryId, monthValue);
+      onFocusHandled?.();
+    }
+  });
   useEffect(() => {
     if (!focusCategoryId || !focusMonth) return;
-    void activity.ensureClassification(focusCategoryId).finally(() => {
-      budget.openForReview(focusCategoryId, focusMonth);
-      onFocusHandled?.();
-    });
-  }, [focusCategoryId, focusMonth, onFocusHandled, budget.openForReview]);
+    void openFocusedBudget(focusCategoryId, focusMonth);
+  }, [focusCategoryId, focusMonth, onFocusHandled]);
   const categories = activity.classifications.filter(row => row.kind === "category" && row.type === "expense" && !row.parent_id);
   return <section id="finance-budgets" aria-label="Monthly budgets">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Monthly budgets</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Expense-category limits include all subcategories and accounts. Calendar months start on day 1, without rollover.</p></div><Button onClick={() => setOpen(true)}>Set budget</Button></div>

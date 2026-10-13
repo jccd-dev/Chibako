@@ -53,18 +53,19 @@ export function FinanceGoals({
   onFocusHandled?: () => void;
 } = {}) {
   const goals = useFinanceGoals();
+  const { page, openEdit, openForAccount } = goals;
   useEffect(() => {
-    if (!focusAccountId || !goals.page) return;
-    const goal = goals.page.goals.find((row) =>
+    if (!focusAccountId || !page) return;
+    const goal = page.goals.find((row) =>
       row.allocations.some((allocation) => allocation.account_id === focusAccountId),
     );
     if (goal) {
-      void goals.openEdit(goal);
+      void openEdit(goal);
       onFocusHandled?.();
       return;
     }
-    void goals.openForAccount(focusAccountId).finally(() => onFocusHandled?.());
-  }, [focusAccountId, goals.page, onFocusHandled]);
+    void openForAccount(focusAccountId).finally(() => onFocusHandled?.());
+  }, [focusAccountId, page, onFocusHandled, openEdit, openForAccount]);
   return (
     <Card id="finance-goals" size="sm">
       <CardHeader>

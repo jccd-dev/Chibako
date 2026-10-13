@@ -11,16 +11,28 @@ export function useFinanceReports(revision: string) {
   const [report, setReport] = useState<FinanceReport | null>(null);
   const [error, setError] = useState("");
   const sequence = useRef(0);
-  const refresh = useCallback(async () => {
-    const current = ++sequence.current;
+  const requestKey = `${dates.date_from}:${dates.date_to}:${offset}:${revision}`;
+  const [previousRequestKey, setPreviousRequestKey] = useState(requestKey);
+  if (previousRequestKey !== requestKey) {
+    setPreviousRequestKey(requestKey);
     setReport(null); setError("");
-    try {
-      const query = new URLSearchParams({ ...dates, offset: String(offset), limit: "50" });
-      const result = await fetch(`/api/finance/reports?${query}`).then(json<FinanceReport>);
-      if (current === sequence.current) setReport(result);
-    } catch (error) { if (current === sequence.current) setError(error instanceof Error ? error.message : "Could not load reports."); }
+  }
+  const load = useCallback(() => {
+    const current = ++sequence.current;
+    const query = new URLSearchParams({ ...dates, offset: String(offset), limit: "50" });
+    return fetch(`/api/finance/reports?${query}`).then(json<FinanceReport>)
+      .then(result => { if (current === sequence.current) setReport(result); })
+      .catch(error => { if (current === sequence.current) setError(error instanceof Error ? error.message : "Could not load reports."); });
   }, [dates, offset]);
-  useEffect(() => { void refresh(); return () => { sequence.current++; }; }, [refresh, revision]);
+  const refresh = useCallback(() => {
+    setReport(null); setError("");
+    return load();
+  }, [load]);
+  useEffect(() => {
+    const requests = sequence;
+    void load();
+    return () => { requests.current++; };
+  }, [load, revision]);
   function applyDates(value: typeof dates) { setOffset(0); setDates(value); }
   return { dates, applyDates, offset, setOffset, report, error, refresh };
 }

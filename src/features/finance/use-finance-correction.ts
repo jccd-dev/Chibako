@@ -26,18 +26,24 @@ export function useFinanceCorrection(record: FinanceTransaction, activity: Finan
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [confirmation, setConfirmation] = useState<{ action: Action; input: object } | null>(null);
   const [feeLoad, setFeeLoad] = useState(0);
+  const [previousFeeRequest, setPreviousFeeRequest] = useState(`${record.fee_transaction_id ?? ""}:${feeLoad}`);
+  const feeRequest = `${record.fee_transaction_id ?? ""}:${feeLoad}`;
+  if (previousFeeRequest !== feeRequest) {
+    setPreviousFeeRequest(feeRequest);
+    setFeeError("");
+  }
+  const inspect = activity.inspect;
   useEffect(() => {
     let live = true;
     if (record.fee_transaction_id) {
-      setFeeError("");
-      void activity.inspect(record.fee_transaction_id).then(result => {
+      void inspect(record.fee_transaction_id).then(result => {
         if (!live) return;
         setFee(result); setFeeAmount(financeDecimal(result.amount_cents));
         setFeeCategoryId(result.category_id ?? ""); setFeeSubcategoryId(result.subcategory_id ?? "");
       }).catch(error => { if (live) setFeeError(error instanceof Error ? error.message : "Could not load linked fee."); });
     }
     return () => { live = false; };
-  }, [record.fee_transaction_id, feeLoad]); // Inspection is an explicit read; unrelated option refreshes must not reset drafts.
+  }, [record.fee_transaction_id, feeLoad, inspect]); // Inspection is an explicit read; unrelated option refreshes must not reset drafts.
 
   function startRefund() {
     activity.resetSave(); setErrors({}); setMode("refund");

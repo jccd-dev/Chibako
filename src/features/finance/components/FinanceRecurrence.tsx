@@ -21,18 +21,26 @@ import type { ReminderOptions } from "./FinancePlans";
 
 export function FinanceRecurrence({ activity, planning, occurrence, onCloseOccurrence, reminders }: { activity: FinanceActivityController; planning: FinancePlanningController; occurrence: FinancePlan | null; onCloseOccurrence: () => void; reminders: ReminderOptions }) {
   const recurrence = useFinanceRecurrence(planning.notice, planning);
-  const [panel, setPanel] = useState<string | null>(null);
-  const [detail, setDetail] = useState<FinanceSchedule | null>(null);
-  const [error, setError] = useState("");
+  const [panel, setPanel] = useState<string | null>(occurrence?.schedule_id ?? null);
+  const [detailState, setDetail] = useState<{ key: string; value: FinanceSchedule } | null>(null);
+  const [errorState, setError] = useState<{ key: string; message: string } | null>(null);
   const [reload, setReload] = useState(0);
-  useEffect(() => { if (occurrence?.schedule_id) { recurrence.resetSave(); setPanel(occurrence.schedule_id); } }, [occurrence]);
+  const [previousOccurrenceId, setPreviousOccurrenceId] = useState(occurrence?.schedule_id);
+  const detailKey = `${panel ?? ""}:${reload}`;
+  const detail = detailState?.key === detailKey ? detailState.value : null;
+  const error = errorState?.key === detailKey ? errorState.message : "";
+  const { resetSave } = recurrence;
+  if (previousOccurrenceId !== occurrence?.schedule_id) {
+    setPreviousOccurrenceId(occurrence?.schedule_id);
+    if (occurrence?.schedule_id) setPanel(occurrence.schedule_id);
+  }
+  useEffect(() => { if (occurrence?.schedule_id) resetSave(); }, [occurrence?.schedule_id, resetSave]);
   useEffect(() => {
-    setDetail(null); setError("");
     if (!panel || panel === "create") return;
     const abort = new AbortController();
-    void fetch(`/api/finance/schedules/${panel}?include_details=true`, { signal: abort.signal }).then(financeJson<{ schedule: FinanceSchedule }>).then(result => { if (!abort.signal.aborted) setDetail(result.schedule); }).catch(e => { if (!abort.signal.aborted) setError(e instanceof Error ? e.message : "Could not inspect schedule."); });
+    void fetch(`/api/finance/schedules/${panel}?include_details=true`, { signal: abort.signal }).then(financeJson<{ schedule: FinanceSchedule }>).then(result => { if (!abort.signal.aborted) setDetail({ key: detailKey, value: result.schedule }); }).catch(e => { if (!abort.signal.aborted) setError({ key: detailKey, message: e instanceof Error ? e.message : "Could not inspect schedule." }); });
     return () => abort.abort();
-  }, [panel, reload]);
+  }, [panel, reload, detailKey]);
   function close() { setPanel(null); onCloseOccurrence(); }
   function open(id: string) { onCloseOccurrence(); recurrence.resetSave(); setPanel(id); }
   function reminderName(id: string) { return reminders.obligations.find(row => row.id === id)?.name; }

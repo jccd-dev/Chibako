@@ -210,9 +210,9 @@ test("spendable subtracts current-month pending account expenses, including gene
     request_id: request(), name: "Spendable cash", kind: "money", currency: "PHP",
     opening_balance: "8000", maintaining_balance: "2000",
   }).account;
-  const pending = createPlan(owner, {
+  createPlan(owner, {
     request_id: request(), type: "expense", account_id: account.id, amount: "10", due_date: "2026-10-20",
-  }).plan;
+  });
   createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "4", due_date: "2026-10-01" });
   createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "2", due_date: "2026-10-12" });
   createPlan(owner, { request_id: request(), type: "expense", account_id: account.id, amount: "3", due_date: "2026-10-31" });

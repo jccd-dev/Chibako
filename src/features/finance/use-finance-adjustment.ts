@@ -16,9 +16,18 @@ export function useFinanceAdjustment(activity: FinanceActivityController, accoun
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = useCallback(() => setRefreshKey(value => value + 1), []);
-  useEffect(() => { setActual(""); setDate(localCalendarDate()); setText(""); setErrors({}); }, [accountId]);
-  useEffect(() => {
+  const [previousAccountId, setPreviousAccountId] = useState(accountId);
+  if (previousAccountId !== accountId) {
+    setPreviousAccountId(accountId);
+    setActual(""); setDate(localCalendarDate()); setText(""); setErrors({});
+  }
+  const requestKey = `${accountId ?? ""}:${refreshKey}`;
+  const [previousRequestKey, setPreviousRequestKey] = useState(requestKey);
+  if (previousRequestKey !== requestKey) {
+    setPreviousRequestKey(requestKey);
     setAccount(null); setLoadError("");
+  }
+  useEffect(() => {
     if (!accountId) return;
     const abort = new AbortController();
     void fetch(`/api/finance/accounts/${accountId}`, { signal: abort.signal }).then(async response => {

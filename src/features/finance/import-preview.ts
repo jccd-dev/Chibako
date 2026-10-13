@@ -232,7 +232,6 @@ export function previewTarsiBackup(actor: FinanceActor, input: unknown, options:
     reservations.set(account.source_id, (reservations.get(account.source_id) ?? 0n) + BigInt(progress));
   }
   for (const [accountId, reserved] of reservations) {
-    const account = accounts.get(accountId)!;
     const capacity = accountCapacity.get(accountId);
     if (capacity !== undefined && reserved > capacity) {
       for (const goal of report.records.filter(row => row.collection === "goals" && row.source.linkedAccountId === accountId && row.status === "accepted")) {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useHydrated } from "@/lib/use-hydrated";
 import { dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/features/calendar/components/DatedNotesCalendar";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,11 @@ export function CalendarView({ initialNotes, requestedDate }: {
 }) {
   const router = useRouter();
   const [notes, setNotes] = useState(initialNotes);
-  const [selected, setSelected] = useState<string | null>(() => isNoteDate(requestedDate) ? requestedDate : null);
+  const [chosenDate, setSelected] = useState<string | null>(() => isNoteDate(requestedDate) ? requestedDate : null);
+  const hydrated = useHydrated();
+  const [initialToday, setInitialToday] = useState<string | null>(null);
+  if (hydrated && initialToday === null) setInitialToday(dateToNoteDate(new Date()));
+  const selected = chosenDate ?? initialToday;
   const selectedNotes = useMemo(
     () => sortDatedNotes(notes.filter((note) => note.date === selected)),
     [notes, selected]
@@ -28,11 +33,8 @@ export function CalendarView({ initialNotes, requestedDate }: {
   }, []);
 
   useEffect(() => {
-    if (selected) return;
-    const today = dateToNoteDate(new Date());
-    setSelected(today);
-    router.replace(`/app/calendar?date=${today}`, { scroll: false });
-  }, [router, selected]);
+    if (!chosenDate && selected) router.replace(`/app/calendar?date=${selected}`, { scroll: false });
+  }, [router, chosenDate, selected]);
 
   useEffect(() => {
     const onChange = () => void refresh();

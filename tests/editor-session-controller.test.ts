@@ -29,6 +29,33 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+test("updating session callbacks preserves edits and uses the latest handlers", async () => {
+  const pending = deferred<Note>();
+  const calls: string[] = [];
+  const original = note("existing");
+  const controller = createEditorSessionController(original, {
+    save: () => { calls.push("old save"); return pending.promise; },
+    onSaved: () => { calls.push("old saved"); },
+    onError: () => { calls.push("old error"); },
+  });
+  controller.patch({ content: "edited" });
+  const saving = controller.persist();
+  const before = controller.getSnapshot();
+  controller.updateEffects({
+    save: async () => { calls.push("new save"); return note("existing", { content: "next" }); },
+    onSaved: () => { calls.push("new saved"); },
+    onError: () => { calls.push("new error"); },
+  });
+  assert.equal(controller.getSnapshot(), before);
+  pending.resolve(note("existing", { content: "edited" }));
+  await saving;
+  controller.patch({ content: "next" });
+  await controller.persist();
+  assert.deepEqual(calls, ["old save", "new saved", "new save", "new saved"]);
+  assert.equal(controller.getSnapshot().content, "next");
+  assert.equal(controller.getSnapshot().dirty, false);
+});
+
 test("editor session serializes saves and keeps edits made during a request", async () => {
   const calls: Array<{ current: Note | null; patch: UpdateNoteInput; full: Record<string, unknown> }> = [];
   const pending = [deferred<Note>(), deferred<Note>()];
@@ -161,7 +188,7 @@ test("document replacement suppresses stale save effects after a failed flush", 
   const save = deferred<Note>();
   let errors = 0;
   let saved = 0;
-  let blocked: Array<string | null> = [];
+  const blocked: Array<string | null> = [];
   const controller = createEditorSessionController(note("old"), {
     save: async () => save.promise,
     onSaved: () => { saved += 1; },

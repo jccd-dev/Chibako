@@ -400,7 +400,7 @@ export function SettingsView() {
                   <div className="min-w-0">
                     <CardTitle className="text-primary">Key created — copy it now</CardTitle>
                     <CardDescription className="mt-0.5">
-                      {revealed.name} · <span className="font-semibold text-destructive">It won't be shown again.</span>
+                      {revealed.name} · <span className="font-semibold text-destructive">It won&apos;t be shown again.</span>
                     </CardDescription>
                     <code className="mt-2 block select-all break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs">{revealed.key}</code>
                   </div>

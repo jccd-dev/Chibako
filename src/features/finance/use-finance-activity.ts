@@ -35,41 +35,62 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   const historySequence = useRef(0);
   const totalsSequence = useRef(0);
   const optionLoading = useRef(false);
-
-  const refreshHistory = useCallback(async () => {
-    const sequence = ++historySequence.current;
+  const historyKey = `${JSON.stringify(filters)}:${offset}`;
+  const [previousHistoryKey, setPreviousHistoryKey] = useState(historyKey);
+  if (previousHistoryKey !== historyKey) {
+    setPreviousHistoryKey(historyKey);
     setLoading(true); setLoadError("");
+  }
+  const [previousMonth, setPreviousMonth] = useState(month);
+  if (previousMonth !== month) {
+    setPreviousMonth(month);
+    setTotals(null); setTotalsError("");
+  }
+
+  const loadHistory = useCallback(() => {
+    const sequence = ++historySequence.current;
     const query = new URLSearchParams({ limit: "25", offset: String(offset) });
     for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
-    try {
-      const result = await fetch(`/api/finance/activity?${query}`).then(json<ActivityPage>);
-      if (sequence === historySequence.current) setPage(result);
-    } catch (error) {
-      if (sequence === historySequence.current) setLoadError(error instanceof Error ? error.message : "Could not load activity.");
-    } finally { if (sequence === historySequence.current) setLoading(false); }
+    return fetch(`/api/finance/activity?${query}`).then(json<ActivityPage>)
+      .then(result => { if (sequence === historySequence.current) setPage(result); })
+      .catch(error => { if (sequence === historySequence.current) setLoadError(error instanceof Error ? error.message : "Could not load activity."); })
+      .finally(() => { if (sequence === historySequence.current) setLoading(false); });
   }, [filters, offset]);
-  const refreshTotals = useCallback(async () => {
+  const refreshHistory = useCallback(() => {
+    setLoading(true); setLoadError("");
+    return loadHistory();
+  }, [loadHistory]);
+  const loadTotals = useCallback(() => {
     const sequence = ++totalsSequence.current;
-    setTotals(null); setTotalsError("");
-    try {
-      const result = await fetch(`/api/finance/activity/totals?month=${month}`).then(json<ActivityTotals>);
-      if (sequence === totalsSequence.current) setTotals(result);
-    } catch (error) { if (sequence === totalsSequence.current) setTotalsError(error instanceof Error ? error.message : "Could not load totals."); }
+    return fetch(`/api/finance/activity/totals?month=${month}`).then(json<ActivityTotals>)
+      .then(result => { if (sequence === totalsSequence.current) setTotals(result); })
+      .catch(error => { if (sequence === totalsSequence.current) setTotalsError(error instanceof Error ? error.message : "Could not load totals."); });
   }, [month]);
-  const refreshOptions = useCallback(async () => {
-    setOptionsError("");
-    try {
-      const [accountPage, classificationPage] = await Promise.all([
+  const refreshTotals = useCallback(() => {
+    setTotals(null); setTotalsError("");
+    return loadTotals();
+  }, [loadTotals]);
+  const loadOptions = useCallback(() => {
+    return Promise.all([
         fetch("/api/finance/accounts?archived=all&limit=100").then(json<FinanceAccountList>),
         fetch("/api/finance/classifications?archived=all&limit=100").then(json<ClassificationPage>),
-      ]);
+      ]).then(([accountPage, classificationPage]) => {
       setAccounts(accountPage.accounts); setAccountTotal(accountPage.total);
       setClassifications(classificationPage.classifications); setClassificationTotal(classificationPage.total);
-    } catch (error) { setOptionsError(error instanceof Error ? error.message : "Could not load categories and accounts."); }
+      }).catch(error => { setOptionsError(error instanceof Error ? error.message : "Could not load categories and accounts."); });
   }, []);
-  useEffect(() => { void refreshHistory(); return () => { historySequence.current++; }; }, [refreshHistory]);
-  useEffect(() => { void refreshTotals(); return () => { totalsSequence.current++; }; }, [refreshTotals]);
-  useEffect(() => { void refreshOptions(); }, [refreshOptions]);
+  const refreshOptions = useCallback(() => { setOptionsError(""); return loadOptions(); }, [loadOptions]);
+  useEffect(() => {
+    const requests = historySequence;
+    void loadHistory();
+    return () => { requests.current++; };
+  }, [loadHistory]);
+  useEffect(() => {
+    const requests = totalsSequence;
+    void loadTotals();
+    return () => { requests.current++; };
+  }, [loadTotals]);
+  useEffect(() => { void loadOptions(); }, [loadOptions]);
 
   async function ensureClassification(id: string) {
     if (classifications.some(row => row.id === id)) return true;

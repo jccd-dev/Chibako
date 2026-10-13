@@ -19,11 +19,16 @@ export function useFinanceBudget(onSaved: () => Promise<void>) {
   const [notice, setNotice] = useState("");
   const saving = useRef(false);
   const pending = useRef<{ fingerprint: string; requestId: string } | null>(null);
+  const requestKey = `${open}:${category}:${month}:${reload}`;
+  const [previousRequestKey, setPreviousRequestKey] = useState(requestKey);
+  if (previousRequestKey !== requestKey) {
+    setPreviousRequestKey(requestKey);
+    setSnapshot(null); setLoadError(""); setSaveError(""); setAmount("");
+  }
   const openForReview = useCallback((categoryId: string, monthValue: string) => {
     setSnapshot(null); setAmount(""); setCategory(categoryId); setMonth(monthValue); setOpen(true);
   }, []);
   useEffect(() => {
-    setSnapshot(null); setLoadError(""); setSaveError(""); setAmount(""); pending.current = null;
     if (!open || !category || !month) return;
     const abort = new AbortController();
     void fetch(`/api/finance/budgets?${new URLSearchParams({ category_id: category, month })}`, { signal: abort.signal }).then(financeJson<{ budget: BudgetSnapshot }>).then(({ budget }) => {

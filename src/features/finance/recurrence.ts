@@ -53,7 +53,8 @@ function futureIndex(schedule: ScheduleRow, after: string): number {
   return low;
 }
 function fromRow(row: ScheduleRow, details: boolean): FinanceSchedule {
-  const { text, tag_ids, created_at, updated_at, next_index, generation: _generation, paused, ...compact } = row;
+  const { text, tag_ids, created_at, updated_at, next_index, paused, ...compact } = row;
+  Reflect.deleteProperty(compact, "generation");
   const pending = getDb().prepare("SELECT MIN(occurrence_date) AS date FROM finance_plans WHERE schedule_id=? AND status='pending' AND occurrence_date>?")
     .get(row.id, today()) as { date: string | null };
   return { ...compact, currency: "PHP", paused: !!paused, next_due_date: pending.date ?? occurrenceDate(row, next_index),

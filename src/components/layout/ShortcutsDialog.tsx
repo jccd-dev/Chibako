@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface ShortcutRow {
@@ -91,10 +91,8 @@ const TIPS = [
 ];
 
 export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const [modKey, setModKey] = useState("Ctrl+");
-  useEffect(() => {
-    setModKey(/mac/i.test(navigator.platform ?? "") ? "⌘" : "Ctrl+");
-  }, []);
+  const hydrated = useHydrated();
+  const modKey = hydrated && /mac/i.test(navigator.platform ?? "") ? "⌘" : "Ctrl+";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

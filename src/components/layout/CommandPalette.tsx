@@ -81,11 +81,14 @@ export function CommandPalette() {
     }
   }, [open ]);
 
+  if ((!open || !q.trim()) && (notes.length || idx !== 0)) {
+    setNotes([]);
+    setIdx(0);
+  }
+
   // search notes as you type
   useEffect(() => {
     if (!open || !q.trim()) {
-      setNotes([]);
-      setIdx(0);
       return;
     }
     clearTimeout(timer.current);

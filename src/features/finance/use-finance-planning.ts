@@ -18,21 +18,21 @@ export function useFinancePlanning(activityNotice: string, onSaved: () => Promis
   const preparedInitialDue = useRef(false);
   const sequence = useRef(0), saving = useRef(false);
   const pending = useRef<{ fingerprint: string; requestId: string } | null>(null);
-  const refresh = useCallback(async () => {
-    const current = ++sequence.current;
+  const requestKey = `${status}:${offset}:${activityNotice}`;
+  const [previousRequestKey, setPreviousRequestKey] = useState(requestKey);
+  if (previousRequestKey !== requestKey) {
+    setPreviousRequestKey(requestKey);
     setLoading(true); setError("");
-    try {
-      const result = await fetch(`/api/finance/plans?${new URLSearchParams({ status, limit: "25", offset: String(offset), include_details: "true" })}`).then(financeJson<PlanPage>);
-      if (sequence.current === current) setPage(result);
-    } catch (e) { if (sequence.current === current) setError(e instanceof Error ? e.message : "Could not load plans."); }
-    finally { if (sequence.current === current) setLoading(false); }
+  }
+  const load = useCallback(() => {
+    const current = ++sequence.current;
+    return fetch(`/api/finance/plans?${new URLSearchParams({ status, limit: "25", offset: String(offset), include_details: "true" })}`).then(financeJson<PlanPage>)
+      .then(result => { if (sequence.current === current) setPage(result); })
+      .catch(e => { if (sequence.current === current) setError(e instanceof Error ? e.message : "Could not load plans."); })
+      .finally(() => { if (sequence.current === current) setLoading(false); });
   }, [status, offset]);
-  useEffect(() => {
-    void refresh();
-    if (!preparedInitialDue.current) { preparedInitialDue.current = true; void save(null, "catch-up", {}); }
-    return () => { sequence.current++; };
-  }, [refresh, activityNotice]);
-  async function save(id: string | null, operation: "create" | "edit" | "cancel" | "post" | "match" | "skip" | "catch-up", input: object) {
+  const refresh = useCallback(() => { setLoading(true); setError(""); return load(); }, [load]);
+  const save = useCallback(async (id: string | null, operation: "create" | "edit" | "cancel" | "post" | "match" | "skip" | "catch-up", input: object) => {
     if (saving.current) return null;
     const path = operation === "skip" || operation === "catch-up" ? `/api/finance/plans/${operation}` : id ? `/api/finance/plans/${id}${operation === "post" || operation === "match" ? `/${operation}` : ""}` : "/api/finance/plans";
     const method = operation === "edit" ? "PATCH" : operation === "cancel" ? "DELETE" : "POST";
@@ -53,7 +53,13 @@ export function useFinancePlanning(activityNotice: string, onSaved: () => Promis
     catch { setError("Plan saved, but related totals could not refresh. Reload before making further changes."); }
     finally { saving.current = false; setBusy(false); }
     return result;
-  }
+  }, [refresh, onSaved]);
+  useEffect(() => {
+    const requests = sequence;
+    void load();
+    if (!preparedInitialDue.current) { preparedInitialDue.current = true; void save(null, "catch-up", {}); }
+    return () => { requests.current++; };
+  }, [load, activityNotice, save]);
   function resetSave() { pending.current = null; setSaveError(""); }
   return { page, status, changeStatus: (value: string) => { setStatus(value); setOffset(0); }, offset, setOffset, loading, error, saveError, notice, busy, hasMoreCatchUp, refresh, save, resetSave };
 }

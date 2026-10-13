@@ -18,7 +18,9 @@ type PlanRow = Omit<FinancePlan, "currency" | "tag_ids"> & {
   cancel_reason: "skipped" | "boundary" | "cadence" | null;
 };
 function fromRow(row: PlanRow, details: boolean): FinancePlan {
-  const { text, tag_ids, created_at, updated_at, schedule_generation: _generation, cancel_reason: _cancelReason, ...compact } = row;
+  const { text, tag_ids, created_at, updated_at, ...compact } = row;
+  Reflect.deleteProperty(compact, "schedule_generation");
+  Reflect.deleteProperty(compact, "cancel_reason");
   return { ...compact, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
 }
 export function readPlan(id: string, details = false): FinancePlan {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { chooseFinanceDate, chooseFinanceMonth } from "./finance-date-controls";
+import { chooseFinanceDate } from "./finance-date-controls";
 
 async function authenticate(page: Page) {
   const clientId = randomUUID();

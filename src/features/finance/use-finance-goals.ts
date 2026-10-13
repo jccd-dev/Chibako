@@ -43,19 +43,20 @@ export function useFinanceGoals() {
   }, [archived, offset]);
 
   useEffect(() => {
+    const requests = sequence;
     const changed = () => { void refresh(); };
     changed(); window.addEventListener("finance-changed", changed);
-    return () => { sequence.current++; window.removeEventListener("finance-changed", changed); };
+    return () => { requests.current++; window.removeEventListener("finance-changed", changed); };
   }, [refresh]);
 
-  function populate(goal: FinanceGoal) {
+  const populate = useCallback((goal: FinanceGoal) => {
     setEditing(goal); setName(goal.name); setTarget(decimalPHP(goal.target_cents)); setDueDate(goal.due_date ?? "");
-  }
+  }, []);
   function openCreate() {
     inspection.current++; pending.current = null; setInspecting(false); setEditing(null);
     setName(""); setTarget(""); setDueDate(""); setAccountId(""); setAmount("0.00"); setSaveError(""); setNotice(""); setPanel("create");
   }
-  async function openEdit(goal: FinanceGoal) {
+  const openEdit = useCallback(async (goal: FinanceGoal) => {
     const run = ++inspection.current;
     pending.current = null; populate(goal); setAccountId(""); setAmount("0.00"); setSaveError(""); setNotice(""); setPanel(goal.id); setInspecting(true);
     try {
@@ -63,8 +64,8 @@ export function useFinanceGoals() {
       if (run === inspection.current) populate(result.goal);
     } catch (error) { if (run === inspection.current) setSaveError(error instanceof Error ? error.message : "Could not inspect goal."); }
     finally { if (run === inspection.current) setInspecting(false); }
-  }
-  async function openForAccount(accountId: string) {
+  }, [populate]);
+  const openForAccount = useCallback(async (accountId: string) => {
     const run = ++inspection.current;
     try {
       let nextOffset = 0;
@@ -83,7 +84,7 @@ export function useFinanceGoals() {
       if (run === inspection.current) setLoadError(error instanceof Error ? error.message : "Could not find the goal allocation.");
       return false;
     }
-  }
+  }, [openEdit]);
   function closePanel() { inspection.current++; setPanel(null); setEditing(null); setSaveError(""); setNotice(""); pending.current = null; }
   function selectAccount(id: string) { setAccountId(id); setAmount(decimalPHP(editing?.allocations.find(row => row.account_id === id)?.amount_cents ?? 0)); }
 

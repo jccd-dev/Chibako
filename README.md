@@ -181,6 +181,10 @@ npm install
 npm run dev        # http://localhost:3000 → run the one-time setup
 ```
 
+Run `npm run lint` for ESLint (errors and warnings fail the check),
+`npm run typecheck` for route generation and TypeScript, and `npm test` for
+the Node test suite. Next.js generates `next-env.d.ts`; it is not tracked in Git.
+
 ## 🚢 Deploy to your VPS (Docker Compose + nginx)
 
 The repo ships a `Dockerfile`, source-build `docker-compose.yml`, prebuilt-image

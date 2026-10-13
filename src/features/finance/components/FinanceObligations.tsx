@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type FormEvent } from "react";
+import { useEffect, useEffectEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -31,15 +31,23 @@ export function FinanceObligations({
   onFocusHandled?: () => void;
 }) {
   const obligations = useFinanceObligations(activity), router = useRouter();
-  useEffect(() => {
-    if (!focusObligationId || !obligations.page) return;
-    const obligation = obligations.page.obligations.find((row) => row.id === focusObligationId);
+  const openFocusedObligation = useEffectEvent(async (focusId: string, page: typeof obligations.page) => {
+    if (!page) return;
+    const obligation = page.obligations.find((row) => row.id === focusId);
     if (obligation) {
       void obligations.openEdit(obligation);
       onFocusHandled?.();
       return;
     }
-    void obligations.openById(focusObligationId).finally(() => onFocusHandled?.());
+    try {
+      await obligations.openById(focusId);
+    } finally {
+      onFocusHandled?.();
+    }
+  });
+  useEffect(() => {
+    if (!focusObligationId || !obligations.page) return;
+    void openFocusedObligation(focusObligationId, obligations.page);
   }, [focusObligationId, obligations.page, onFocusHandled]);
   function inspectActivity() {
     if (!obligations.editing) return;

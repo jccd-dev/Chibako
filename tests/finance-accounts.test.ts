@@ -211,7 +211,9 @@ test("account groups and summary inclusion persist with validation, scope, versi
 
 test("account retries created before settings keep their fingerprints and receive default fields", () => {
   const original = createAccount(owner, input);
-  const { account_group: _group, include_in_summary: _included, ...legacyAccount } = original.account;
+  const legacyAccount = { ...original.account };
+  Reflect.deleteProperty(legacyAccount, "account_group");
+  Reflect.deleteProperty(legacyAccount, "include_in_summary");
   getDb().prepare("UPDATE finance_requests SET result = ? WHERE request_id = ?").run(JSON.stringify({ account: legacyAccount }), input.request_id);
   assert.deepEqual(createAccount(owner, input), original);
 });
