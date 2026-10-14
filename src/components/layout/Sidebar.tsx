@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { IconCalendarMonth, IconDotsVertical, IconFolderPlus, IconUpload, IconWallet } from "@tabler/icons-react";
+import { IconCalendarMonth, IconChartPie, IconCreditCard, IconDotsVertical, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import { notifyOrganizationChanged as notifyChanged, requestOrganizationChange as request } from "@/features/organization/organization-client";
 import type { NoteBatchInput } from "@/features/organization/note-batch";
 import type { Bookmark } from "@/lib/bookmarks";
+import { financeTabs, financeTabLabel, isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
 import { cn } from "@/lib/utils";
 import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -29,6 +30,13 @@ type Action = { mode: "create" | "rename" | "move"; item: Item };
 const parentOf = (path: string) => path.split("/").slice(0, -1).join("/");
 const nameOf = (path: string) => path.split("/").at(-1)!;
 const join = (parent: string, name: string) => parent ? `${parent}/${name}` : name;
+const financeTabIcons: Record<FinanceTab, typeof IconWallet> = {
+  overview: IconLayoutDashboard,
+  activity: IconHistory,
+  planning: IconChartPie,
+  accounts: IconCreditCard,
+  manage: IconTags,
+};
 
 export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onExpand }: {
   collapsed: boolean; mobile: boolean; mobileOpen: boolean;
@@ -36,6 +44,11 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const financeTabParam = searchParams.get("tab");
+  const financeTab: FinanceTab = isFinanceTab(financeTabParam) ? financeTabParam : "overview";
+  const onFinance = pathname === "/app/finance";
+
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
   const [trash, setTrash] = useState<NoteSummary[]>([]);
@@ -664,6 +677,29 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     </div>
   );
 
+  const financeNav = (
+    <nav aria-label="Finance views" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
+      <div className="px-2 py-1 text-[11px] font-semibold tracking-wider text-muted-foreground">Finance</div>
+      {financeTabs.map((value) => {
+        const Icon = financeTabIcons[value];
+        const active = financeTab === value;
+        return (
+          <Link
+            key={value}
+            href={`/app/finance?tab=${value}`}
+            scroll={false}
+            aria-current={active ? "page" : undefined}
+            className={cn("tree-item w-full", active && "active")}
+            onClick={() => { if (mobile) onMobileOpenChange(false); }}
+          >
+            <Icon size={14} aria-hidden="true" className="shrink-0" />
+            <span className="truncate">{financeTabLabel(value)}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+
   const filePanel = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <div className="flex items-center gap-1 px-3 py-2.5">
@@ -671,13 +707,17 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           <Image src="/logo_main.png" alt="" width={20} height={20} className="h-5 w-5 shrink-0" />
           <span className="truncate">Chibako</span>
         </Link>
-        <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note", selectedFolder ?? "")}><IconPlus /></Button>
-        <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder", selectedFolder ?? "")}><IconFolderPlus /></Button>
-        <Button variant="ghost" size="icon" aria-label="Import Markdown files" disabled={busy} onClick={() => uploadRef.current?.click()}><IconUpload /></Button>
-        <input ref={uploadRef} type="file" accept=".md,.markdown,text/markdown" multiple className="hidden"
-          onChange={e => { void upload(e.target.files); e.target.value = ""; }} />
+        {!onFinance && (
+          <>
+            <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note", selectedFolder ?? "")}><IconPlus /></Button>
+            <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder", selectedFolder ?? "")}><IconFolderPlus /></Button>
+            <Button variant="ghost" size="icon" aria-label="Import Markdown files" disabled={busy} onClick={() => uploadRef.current?.click()}><IconUpload /></Button>
+            <input ref={uploadRef} type="file" accept=".md,.markdown,text/markdown" multiple className="hidden"
+              onChange={e => { void upload(e.target.files); e.target.value = ""; }} />
+          </>
+        )}
       </div>
-      {searchMode ? searchView : fileView === "trash" ? trashView : fileTree}
+      {onFinance ? financeNav : searchMode ? searchView : fileView === "trash" ? trashView : fileTree}
     </div>
   );
 

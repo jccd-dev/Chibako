@@ -23,18 +23,7 @@ import { FinanceImportInspection } from "./FinanceImportInspection";
 import { FinanceOverviewDashboard } from "./FinanceOverviewDashboard";
 import type { FinanceAccount } from "@/features/finance/types";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-
-const tabs = [
-  "overview",
-  "activity",
-  "planning",
-  "accounts",
-  "manage",
-] as const;
-type FinanceTab = (typeof tabs)[number];
-const isTab = (value: string | undefined): value is FinanceTab =>
-  tabs.some((tab) => tab === value);
+import { isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
 
 export function FinanceView({ initialTab }: { initialTab?: string }) {
   const router = useRouter();
@@ -66,13 +55,13 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
     if (finance.notice) void refreshOptions();
   }, [finance.notice, refreshOptions]);
   const [tab, setTab] = useState<FinanceTab>(
-    isTab(initialTab) ? initialTab : "overview",
+    isFinanceTab(initialTab) ? initialTab : "overview",
   );
   const [previousInitialTab, setPreviousInitialTab] = useState(initialTab);
   const [panel, setPanel] = useState<"create" | FinanceAccount | null>(null);
   if (previousInitialTab !== initialTab) {
     setPreviousInitialTab(initialTab);
-    setTab(isTab(initialTab) ? initialTab : "overview");
+    setTab(isFinanceTab(initialTab) ? initialTab : "overview");
   }
 
   function changeTab(value: FinanceTab) {
@@ -120,28 +109,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         </div>
       </header>
 
-      <Tabs
-        value={tab}
-        onValueChange={(value) => {
-          if (isTab(value)) changeTab(value);
-        }}
-      >
-        <div className="mb-4 overflow-x-auto border-b border-border/60 pb-2">
-          <TabsList
-            variant="line"
-            className="h-auto w-full min-w-max gap-1 sm:w-fit"
-            aria-label="Finance views"
-          >
-            {tabs.map((value) => (
-              <TabsTrigger key={value} value={value}>
-                {value === "activity"
-                  ? "History"
-                  : value[0].toUpperCase() + value.slice(1)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-
+      <div className="text-xs/relaxed">
         {finance.notice && (
           <p role="status" className="mb-4 text-sm">
             {finance.notice}
@@ -168,118 +136,128 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           </div>
         )}
 
-        <TabsContent value="overview">
-          {finance.loading && !finance.summary ? (
-            <div
-              role="status"
-              aria-label="Loading balances"
-              className="grid gap-6 sm:grid-cols-2"
-            >
-              {[0, 1].map((item) => (
-                <div key={item} className="h-36 rounded-lg bg-muted" />
-              ))}
-            </div>
-          ) : (
-            finance.summary && (
-              <>
-                <FinanceOverviewDashboard
-                  finance={finance}
-                  activity={activity}
-                  reports={reports}
-                  planning={planning}
-                  onNavigateTab={changeTab}
-                  onOpenAccount={open}
-                  onInspectTransaction={setTransactionId}
-                  onCategoryFilter={(id) => {
-                    activity.applyFilters({
-                      q: "",
-                      date_from: reports.dates.date_from,
-                      date_to: reports.dates.date_to,
-                      category_id: id,
-                      account_id: "",
-                      type: "",
-                      hidden: "all",
-                      reverted: "false",
-                    });
-                    changeTab("activity");
-                  }}
-                />
-
-                <details className="mt-4 border-t border-border pt-3">
-                  <summary className="min-h-11 cursor-pointer font-heading text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
-                    Detailed spending reports
-                  </summary>
-                  <div className="pt-4">
-                    <FinanceReports
-                      reports={reports}
-                      onCategory={(id) => {
-                        activity.applyFilters({
-                          q: "",
-                          date_from: reports.dates.date_from,
-                          date_to: reports.dates.date_to,
-                          category_id: id,
-                          account_id: "",
-                          type: "",
-                          hidden: "all",
-                          reverted: "false",
-                        });
-                        changeTab("activity");
-                      }}
-                    />
-                  </div>
-                </details>
-              </>
-            )
-          )}
-        </TabsContent>
-
-        <TabsContent value="activity">
-          <FinanceActivityList activity={activity} onInspect={setTransactionId} />
-        </TabsContent>
-        <TabsContent value="planning">
-          <FinanceBudgets budget={budget} activity={activity} />
-          <FinancePlans planning={planning} activity={activity} />
-          <FinanceGoals />
-        </TabsContent>
-        <TabsContent value="accounts">
-          <FinanceAccounts finance={finance} onOpen={open} />
-        </TabsContent>
-        <TabsContent value="manage">
-          <FinanceClassifications activity={activity} />
-          <section className="mt-8 border-t border-border pt-5">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold">
-                  Tarsi migration preview
-                </h3>
-                <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-                  Choose a Tarsi backup and review its structure without writing
-                  anything. Review reconciled balances, mappings, and
-                  exclusions. Commit requires a recoverable backup and separate
-                  confirmation.
-                </p>
+        {tab === "overview" && (
+          <div>
+            {finance.loading && !finance.summary ? (
+              <div
+                role="status"
+                aria-label="Loading balances"
+                className="grid gap-6 sm:grid-cols-2"
+              >
+                {[0, 1].map((item) => (
+                  <div key={item} className="h-36 rounded-lg bg-muted" />
+                ))}
               </div>
-              <Button variant="outline" onClick={() => setInspectionOpen(true)}>
-                Inspect backup
-              </Button>
-            </div>
-          </section>
-          <FinanceImportInspection
-            open={inspectionOpen}
-            onClose={(committed) => {
-              setInspectionOpen(false);
-              if (committed) {
-                void Promise.all([
-                  refreshAfterPlan(),
-                  activity.refreshOptions(),
-                  planning.refresh(),
-                ]);
-                window.dispatchEvent(new Event("finance-changed"));
-              }
-            }}
-          />
-        </TabsContent>
-      </Tabs>
+            ) : (
+              finance.summary && (
+                <>
+                  <FinanceOverviewDashboard
+                    finance={finance}
+                    activity={activity}
+                    reports={reports}
+                    planning={planning}
+                    onNavigateTab={changeTab}
+                    onOpenAccount={open}
+                    onInspectTransaction={setTransactionId}
+                    onCategoryFilter={(id) => {
+                      activity.applyFilters({
+                        q: "",
+                        date_from: reports.dates.date_from,
+                        date_to: reports.dates.date_to,
+                        category_id: id,
+                        account_id: "",
+                        type: "",
+                        hidden: "all",
+                        reverted: "false",
+                      });
+                      changeTab("activity");
+                    }}
+                  />
+
+                  <details className="mt-4 border-t border-border pt-3">
+                    <summary className="min-h-11 cursor-pointer font-heading text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
+                      Detailed spending reports
+                    </summary>
+                    <div className="pt-4">
+                      <FinanceReports
+                        reports={reports}
+                        onCategory={(id) => {
+                          activity.applyFilters({
+                            q: "",
+                            date_from: reports.dates.date_from,
+                            date_to: reports.dates.date_to,
+                            category_id: id,
+                            account_id: "",
+                            type: "",
+                            hidden: "all",
+                            reverted: "false",
+                          });
+                          changeTab("activity");
+                        }}
+                      />
+                    </div>
+                  </details>
+                </>
+              )
+            )}
+          </div>
+        )}
+
+        {tab === "activity" && (
+          <div>
+            <FinanceActivityList activity={activity} onInspect={setTransactionId} />
+          </div>
+        )}
+        {tab === "planning" && (
+          <div>
+            <FinanceBudgets budget={budget} activity={activity} />
+            <FinancePlans planning={planning} activity={activity} />
+            <FinanceGoals />
+          </div>
+        )}
+        {tab === "accounts" && (
+          <div>
+            <FinanceAccounts finance={finance} onOpen={open} />
+          </div>
+        )}
+        {tab === "manage" && (
+          <div>
+            <FinanceClassifications activity={activity} />
+            <section className="mt-8 border-t border-border pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold">
+                    Tarsi migration preview
+                  </h3>
+                  <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                    Choose a Tarsi backup and review its structure without writing
+                    anything. Review reconciled balances, mappings, and
+                    exclusions. Commit requires a recoverable backup and separate
+                    confirmation.
+                  </p>
+                </div>
+                <Button variant="outline" onClick={() => setInspectionOpen(true)}>
+                  Inspect backup
+                </Button>
+              </div>
+            </section>
+            <FinanceImportInspection
+              open={inspectionOpen}
+              onClose={(committed) => {
+                setInspectionOpen(false);
+                if (committed) {
+                  void Promise.all([
+                    refreshAfterPlan(),
+                    activity.refreshOptions(),
+                    planning.refresh(),
+                  ]);
+                  window.dispatchEvent(new Event("finance-changed"));
+                }
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       <FinanceTransactionDetails
         key={transactionId ?? "closed"}
