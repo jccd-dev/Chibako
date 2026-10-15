@@ -1,26 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { format } from "date-fns";
 import type { FinancePlan } from "@/features/finance/planning-types";
 import type { FinanceSchedule } from "@/features/finance/recurrence-types";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import type { FinancePlanningController } from "@/features/finance/use-finance-planning";
 import { useFinanceRecurrence, type FinanceRecurrenceController } from "@/features/finance/use-finance-recurrence";
 import { financeJson } from "@/features/finance/client-json";
-import { financeSheet, formatPHP as money } from "@/features/finance/presentation";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { financeSheet, formatPHP as money, localCalendarDate } from "@/features/finance/presentation";
 import { Button } from "@/components/ui/button";
-import { FinanceDateInput } from "./FinanceDateInputs";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldDescription, FieldError } from "@/components/ui/field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { FinanceOptionStatus } from "./FinanceActivity";
-import { useFinanceScheduleEntry } from "@/features/finance/use-finance-schedule-entry";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { FinancePlanningForm } from "./FinancePlanningForm";
+import { FinanceSchedulePayments } from "./FinanceSchedulePayments";
 import type { ReminderOptions } from "./FinancePlans";
 
-export function FinanceRecurrence({ activity, planning, occurrence, onCloseOccurrence, reminders }: { activity: FinanceActivityController; planning: FinancePlanningController; occurrence: FinancePlan | null; onCloseOccurrence: () => void; reminders: ReminderOptions }) {
-  const recurrence = useFinanceRecurrence(planning.notice, planning);
+function humanDate(iso: string) {
+  return format(new Date(`${iso}T12:00:00`), "MMMM d, yyyy");
+}
+
+function cadence(schedule: FinanceSchedule) {
+  const { interval_count: count, interval_unit: unit } = schedule;
+  if (count === 1) return { day: "Daily", week: "Weekly", month: "Monthly", year: "Yearly" }[unit];
+  return `Every ${count} ${unit}s`;
+}
+
+export function FinanceRecurrence({ activity, planning, selection, onCloseSelection, occurrence, onCloseOccurrence, renderPayment, reminders }: { activity: FinanceActivityController; planning: FinancePlanningController; selection: string | null; onCloseSelection: () => void; occurrence: FinancePlan | null; onCloseOccurrence: () => void; renderPayment: (plan: FinancePlan, onDone: () => void, onRefresh: () => void) => ReactNode; reminders: ReminderOptions }) {
+  const recurrence = useFinanceRecurrence(planning);
+  const [previousSelection, setPreviousSelection] = useState<string | null>(null);
+  const [formBusy, setFormBusy] = useState(false);
   const [panel, setPanel] = useState<string | null>(occurrence?.schedule_id ?? null);
   const [detailState, setDetail] = useState<{ key: string; value: FinanceSchedule } | null>(null);
   const [errorState, setError] = useState<{ key: string; message: string } | null>(null);
@@ -32,8 +52,13 @@ export function FinanceRecurrence({ activity, planning, occurrence, onCloseOccur
   const { resetSave } = recurrence;
   if (previousOccurrenceId !== occurrence?.schedule_id) {
     setPreviousOccurrenceId(occurrence?.schedule_id);
-    if (occurrence?.schedule_id) setPanel(occurrence.schedule_id);
+    if (occurrence?.schedule_id) { setReload(value => value + 1); setPanel(occurrence.schedule_id); }
   }
+  if (previousSelection !== selection) {
+    setPreviousSelection(selection);
+    if (selection) { setReload(value => value + 1); setPanel(selection); }
+  }
+  useEffect(() => { if (selection) resetSave(); }, [selection, resetSave]);
   useEffect(() => { if (occurrence?.schedule_id) resetSave(); }, [occurrence?.schedule_id, resetSave]);
   useEffect(() => {
     if (!panel || panel === "create") return;
@@ -41,41 +66,64 @@ export function FinanceRecurrence({ activity, planning, occurrence, onCloseOccur
     void fetch(`/api/finance/schedules/${panel}?include_details=true`, { signal: abort.signal }).then(financeJson<{ schedule: FinanceSchedule }>).then(result => { if (!abort.signal.aborted) setDetail({ key: detailKey, value: result.schedule }); }).catch(e => { if (!abort.signal.aborted) setError({ key: detailKey, message: e instanceof Error ? e.message : "Could not inspect schedule." }); });
     return () => abort.abort();
   }, [panel, reload, detailKey]);
-  function close() { setPanel(null); onCloseOccurrence(); }
-  function open(id: string) { onCloseOccurrence(); recurrence.resetSave(); setPanel(id); }
-  function reminderName(id: string) { return reminders.obligations.find(row => row.id === id)?.name; }
-  return <section aria-label="Recurring schedules" className="mt-8 border-t border-border pt-6">
-    <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Recurring schedules</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Every due occurrence waits for review below. Nothing posts automatically.</p></div><Button onClick={() => open("create")}>Add recurring schedule</Button></div>
+  function close() { setPanel(null); onCloseSelection(); onCloseOccurrence(); }
+  return <>
     {recurrence.notice && <p role="status" className="mt-4 text-sm">{recurrence.notice}</p>}
-    <Field className="my-5 sm:max-w-xs"><FieldLabel htmlFor="schedule-status">Schedule status</FieldLabel><NativeSelect id="schedule-status" className="w-full" value={recurrence.paused} onChange={event => recurrence.changePaused(event.target.value)}><NativeSelectOption value="all">All schedules</NativeSelectOption><NativeSelectOption value="false">Active</NativeSelectOption><NativeSelectOption value="true">Paused</NativeSelectOption></NativeSelect></Field>
-    {recurrence.error ? <Alert className="mt-4"><AlertDescription>{recurrence.error}<Button variant="outline" onClick={() => void recurrence.refresh()}>Retry schedules</Button></AlertDescription></Alert> : recurrence.loading ? <p role="status" className="py-6 text-sm text-muted-foreground">Loading schedules…</p> : recurrence.page?.schedules.length ? <ul className="mt-4 divide-y divide-border">{recurrence.page.schedules.map(schedule => <li key={schedule.id}><button className="flex min-h-11 w-full flex-wrap justify-between gap-3 rounded-md py-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" onClick={() => open(schedule.id)}><span className="min-w-0 flex-1 basis-40"><span className="block break-words text-sm font-medium">{schedule.text || schedule.category_name || "Uncategorized"}</span><span className="mt-1 block text-sm text-muted-foreground">Every {schedule.interval_count} {schedule.interval_unit}{schedule.interval_count === 1 ? "" : "s"} · {schedule.paused ? "Paused" : "Active"}{schedule.obligation_id ? ` · Reminder: ${reminderName(schedule.obligation_id) ?? "obligation linked"}` : ""}{schedule.next_due_date ? ` · Next ${schedule.next_due_date}` : ""}</span></span><span className="text-right text-sm">{schedule.type}<strong className="block tabular-nums">{money(schedule.amount_cents)}</strong></span></button></li>)}</ul> : <p className="py-6 text-sm text-muted-foreground">No recurring schedules. Add expected income or expenses that repeat.</p>}
-    {recurrence.page && recurrence.page.total > 25 && <nav aria-label="Schedule pages" className="mt-4 flex flex-wrap items-center gap-3"><Button variant="outline" disabled={!recurrence.offset || recurrence.loading} onClick={() => recurrence.setOffset(Math.max(0, recurrence.offset - 25))}>Previous schedules</Button><span className="text-sm">{recurrence.offset + 1}-{Math.min(recurrence.offset + 25, recurrence.page.total)} of {recurrence.page.total}</span><Button variant="outline" disabled={recurrence.loading || recurrence.offset + 25 >= recurrence.page.total} onClick={() => recurrence.setOffset(recurrence.offset + 25)}>Next schedules</Button></nav>}
-    <Sheet open={panel !== null} onOpenChange={value => { if (!value && !recurrence.busy) close(); }}><SheetContent className={financeSheet} showCloseButton={false}><SheetHeader className="border-b border-border p-4"><SheetTitle>{panel === "create" ? "Add recurring schedule" : occurrence ? "Edit this and future occurrences" : "Review recurring schedule"}</SheetTitle><SheetDescription>Schedules create pending expectations. Posted history and balances stay unchanged.</SheetDescription></SheetHeader>
-      {error ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{error}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry schedule inspection</Button><Button variant="outline" onClick={close}>Close schedule</Button></div> : panel === "create" || detail ? <SchedulePanel key={`${panel}:${detail?.version ?? "new"}:${reload}`} schedule={detail} occurrence={occurrence} activity={activity} recurrence={recurrence} reminders={reminders} onClose={close} onRefresh={() => { recurrence.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><p role="status">Loading schedule…</p><Button variant="outline" onClick={close}>Close schedule</Button></div>}
+    {recurrence.saveError && !panel && <Alert className="mt-4"><AlertDescription>{recurrence.saveError}</AlertDescription></Alert>}
+    <Sheet open={panel !== null} onOpenChange={value => { if (!value && !recurrence.busy && !planning.busy && !formBusy && !activity.busy) close(); }}><SheetContent className={`${financeSheet} overscroll-contain`}>
+      <SheetHeader className="border-b border-border p-4 pr-10"><SheetTitle>{panel === "create" ? "Add income or expense plan" : occurrence ? "Edit this and future occurrences" : detail?.type === "income" ? "Recurring income plan" : "Recurring expense plan"}</SheetTitle><SheetDescription>{panel === "create" || occurrence ? "Choose when and how this plan repeats." : "Summary, payments, and schedule actions."}</SheetDescription></SheetHeader>
+      {error ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{error}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry schedule inspection</Button><Button variant="outline" onClick={close}>Close schedule</Button></div> : panel === "create" || detail ? <SchedulePanel key={`${panel}:${detail?.version ?? "new"}:${reload}`} schedule={detail} occurrence={occurrence} activity={activity} recurrence={recurrence} planning={planning} reminders={reminders} onClose={close} renderPayment={renderPayment} onBusyChange={setFormBusy} onRefresh={() => { recurrence.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><p role="status">Loading schedule…</p><Button variant="outline" onClick={close}>Close schedule</Button></div>}
     </SheetContent></Sheet>
-  </section>;
+  </>;
 }
 
-function SchedulePanel({ schedule, occurrence, activity, recurrence, reminders, onClose, onRefresh }: { schedule: FinanceSchedule | null; occurrence: FinancePlan | null; activity: FinanceActivityController; recurrence: FinanceRecurrenceController; reminders: ReminderOptions; onClose: () => void; onRefresh: () => void }) {
-  const { type, amount, setAmount, account, setAccount, category, subcategory, setSubcategory, text, setText, association, setAssociation, count, setCount, unit, changeUnit, start, setStart, end, setEnd, errors, editable, categories, subcategories, submit, changeType, changeCategory, invalid } = useFinanceScheduleEntry(schedule, occurrence, activity, recurrence, onClose);
-  return <div className="flex flex-1 flex-col gap-4 p-4">
-    {schedule && <><p className="text-sm">{schedule.paused ? "Paused" : "Active"} · Every {schedule.interval_count} {schedule.interval_unit}(s). Start {schedule.start_date}{schedule.end_date ? `, end ${schedule.end_date}` : ", no end date"}.<br />Expected {schedule.type}: {money(schedule.amount_cents)} in {schedule.account_name}.</p><p className="break-words text-sm text-muted-foreground">{schedule.text || schedule.category_name || "Uncategorized"}</p><p className="text-sm">{schedule.obligation_id ? `Reminder association: ${reminders.obligations.find(row => row.id === schedule.obligation_id)?.name ?? "an obligation"}. Pending occurrences review its principal.` : "Not associated. Pending occurrences review as ordinary activity."}</p></>}
-    {editable ? <form onSubmit={submit} noValidate className="flex flex-col gap-5">
-      {occurrence && <p className="text-sm">Changes apply from the occurrence due {occurrence.due_date}. To change only that occurrence, return to its review.</p>}
-      <Field><FieldLabel htmlFor="schedule-type">Schedule type</FieldLabel><NativeSelect id="schedule-type" className="w-full" value={type} disabled={recurrence.busy} onChange={event => changeType(event.target.value)}><NativeSelectOption value="expense">Expense</NativeSelectOption><NativeSelectOption value="income">Income</NativeSelectOption></NativeSelect></Field>
-      {reminders.error ? <Alert><AlertDescription>{reminders.error}<Button variant="outline" onClick={reminders.reload}>Retry reminder options</Button></AlertDescription></Alert> : reminders.loading ? <p role="status">Loading reminder options…</p> : <Field><FieldLabel htmlFor="schedule-association">Reminder association (optional)</FieldLabel><NativeSelect id="schedule-association" className="w-full" value={association} disabled={recurrence.busy} onChange={event => setAssociation(event.target.value)}><NativeSelectOption value="">Not associated</NativeSelectOption>{reminders.obligations.filter(row => row.kind === (type === "expense" ? "debt" : "receivable")).map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect>{reminders.hasMore && <Button type="button" variant="outline" disabled={reminders.loading || recurrence.busy} onClick={reminders.loadMore}>Load more obligations</Button>}<FieldDescription>Associating a debt (expenses) or receivable (income) turns each pending occurrence into a principal review. At posting you confirm the principal, optional separate fee and cash effect.</FieldDescription></Field>}
-      <Field><FieldLabel htmlFor="schedule-amount">Expected amount (PHP)</FieldLabel><Input id="schedule-amount" inputMode="decimal" value={amount} disabled={recurrence.busy} onChange={event => setAmount(event.target.value)} {...invalid("amount")} /><FieldError id="schedule-error-amount">{errors.amount}</FieldError></Field>
-      <Field><FieldLabel htmlFor="schedule-account_id">Expected account</FieldLabel><NativeSelect id="schedule-account_id" className="w-full" value={account} disabled={recurrence.busy} onChange={event => setAccount(event.target.value)} {...invalid("account_id")}><NativeSelectOption value="">Choose a money account</NativeSelectOption>{activity.accounts.filter(row => row.kind === "money" && (!row.archived || row.id === account)).map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}{row.archived ? " (archived)" : ""}</NativeSelectOption>)}</NativeSelect><FieldError id="schedule-error-account_id">{errors.account_id}</FieldError></Field>
-      <div className="grid grid-cols-2 gap-4"><Field><FieldLabel htmlFor="schedule-interval_count">Every</FieldLabel><Input id="schedule-interval_count" type="number" min="1" max="10000" value={count} disabled={recurrence.busy} onChange={event => setCount(event.target.value)} {...invalid("interval_count")} /><FieldError id="schedule-error-interval_count">{errors.interval_count}</FieldError></Field><Field><FieldLabel htmlFor="schedule-interval_unit">Interval</FieldLabel><NativeSelect id="schedule-interval_unit" className="w-full" value={unit} disabled={recurrence.busy} onChange={event => changeUnit(event.target.value)}><NativeSelectOption value="day">Days</NativeSelectOption><NativeSelectOption value="week">Weeks</NativeSelectOption><NativeSelectOption value="month">Months</NativeSelectOption><NativeSelectOption value="year">Years</NativeSelectOption></NativeSelect></Field></div>
-      <Field><FieldLabel htmlFor="schedule-start_date">Start date</FieldLabel><FinanceDateInput id="schedule-start_date" min="1000-01-01" max="9999-12-31" value={start} disabled={recurrence.busy} onChange={setStart} {...invalid("start_date")} /><FieldDescription>Monthly dates past month-end use the final day of that month.</FieldDescription><FieldError id="schedule-error-start_date">{errors.start_date}</FieldError></Field>
-      <Field><FieldLabel htmlFor="schedule-end_date">End date (optional)</FieldLabel><FinanceDateInput id="schedule-end_date" min="1000-01-01" max="9999-12-31" value={end} disabled={recurrence.busy} onChange={setEnd} {...invalid("end_date")} /><FieldError id="schedule-error-end_date">{errors.end_date}</FieldError></Field>
-      <Field><FieldLabel htmlFor="schedule-category">Category</FieldLabel><NativeSelect id="schedule-category" className="w-full" value={category} disabled={recurrence.busy} onChange={event => changeCategory(event.target.value)}><NativeSelectOption value="">Uncategorized</NativeSelectOption>{categories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>
-      {!!subcategories.length && <Field><FieldLabel htmlFor="schedule-subcategory">Subcategory</FieldLabel><NativeSelect id="schedule-subcategory" className="w-full" value={subcategory} disabled={recurrence.busy} onChange={event => setSubcategory(event.target.value)}><NativeSelectOption value="">No subcategory</NativeSelectOption>{subcategories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>}
-      <Field><FieldLabel htmlFor="schedule-text">Schedule text (optional)</FieldLabel><Input id="schedule-text" maxLength={2000} value={text} disabled={recurrence.busy} onChange={event => setText(event.target.value)} /></Field><FinanceOptionStatus activity={activity} />
-      <Button type="submit" className="self-end" disabled={recurrence.busy}>{recurrence.busy ? "Saving…" : schedule ? "Save this and future changes" : "Save recurring schedule"}</Button>
-    </form> : <p className="text-sm text-muted-foreground">To edit a schedule, choose a pending occurrence below, then Edit this and future occurrences. Existing posted history stays preserved.</p>}
-    {schedule && !occurrence && <section className="flex flex-col gap-4"><p className="text-sm">{schedule.paused ? "Review the schedule before resuming. Resume starts at the next future due date; existing pending review stays available." : "Pausing stops new occurrences and keeps existing pending review."}</p><Button disabled={recurrence.busy} onClick={() => void recurrence.save(schedule.id, schedule.paused ? "resume" : "pause", { version: schedule.version }).then(result => { if (result) onClose(); })}>{recurrence.busy ? "Saving…" : schedule.paused ? "Reviewed schedule: resume" : "Confirm pause"}</Button></section>}
-    {recurrence.saveError && <Alert><AlertDescription>{recurrence.saveError} Retry unchanged fields for a safe request retry.{schedule && <Button variant="outline" disabled={recurrence.busy} onClick={onRefresh}>Refresh schedule before editing</Button>}</AlertDescription></Alert>}
-    <Button variant="outline" className="mt-auto self-end" disabled={recurrence.busy} onClick={onClose}>Close schedule</Button>
+function SchedulePanel({ schedule, occurrence, activity, recurrence, planning, reminders, onClose, onRefresh, onBusyChange, renderPayment }: { schedule: FinanceSchedule | null; occurrence: FinancePlan | null; activity: FinanceActivityController; recurrence: FinanceRecurrenceController; planning: FinancePlanningController; reminders: ReminderOptions; onClose: () => void; onRefresh: () => void; onBusyChange: (busy: boolean) => void; renderPayment: (plan: FinancePlan, onDone: () => void, onRefresh: () => void) => ReactNode }) {
+  const [editing, setEditing] = useState(false);
+  if (!schedule || occurrence) return <FinancePlanningForm schedule={schedule} occurrence={occurrence} activity={activity} recurrence={recurrence} planning={planning} reminders={reminders} initialRecurring={true} onClose={onClose} onRefresh={onRefresh} onBusyChange={onBusyChange} />;
+  if (editing) return <FinancePlanningForm schedule={schedule} occurrence={null} editSchedule={true} activity={activity} recurrence={recurrence} planning={planning} reminders={reminders} initialRecurring={true} onClose={() => { onRefresh(); setEditing(false); }} onRefresh={onRefresh} onBusyChange={onBusyChange} />;
+  const nextDue = schedule.next_due_date;
+  const daysUntil = nextDue ? Math.round((new Date(`${nextDue}T12:00:00`).getTime() - new Date(`${localCalendarDate()}T12:00:00`).getTime()) / 86400000) : null;
+  const nextDueNote = nextDue && daysUntil !== null ? schedule.paused ? "Schedule paused" : daysUntil === 0 ? "Due today" : daysUntil > 0 ? `Due in ${daysUntil} day${daysUntil === 1 ? "" : "s"}` : `${Math.abs(daysUntil)} day${daysUntil === -1 ? "" : "s"} overdue` : "This plan has ended";
+  return <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
+    <section aria-label="Plan summary" className="rounded-xl bg-muted/40 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="break-words text-base font-semibold">{schedule.text || schedule.category_name || "Recurring plan"}</h3>
+          <p className="mt-1 break-words text-sm text-muted-foreground">{schedule.category_name || "Uncategorized"} · {schedule.account_name}</p>
+        </div>
+        <div className="shrink-0 text-right"><p className="text-base font-semibold tabular-nums">{money(schedule.amount_cents)}</p><p className="mt-0.5 text-xs text-muted-foreground">{cadence(schedule)}</p></div>
+      </div>
+      <div className="mt-3 rounded-lg bg-background p-3">
+        <p className="text-xs text-muted-foreground">Next due</p>
+        <p className="mt-0.5 text-sm font-semibold">{nextDue ? humanDate(nextDue) : "No further payment"}</p>
+        {nextDue && <p className="text-xs text-muted-foreground">{nextDueNote}</p>}
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-3">
+        <div className="rounded-lg bg-background p-3"><dt className="text-xs text-muted-foreground">Ends</dt><dd className="mt-0.5 text-sm">{schedule.end_date ? humanDate(schedule.end_date) : "No end date"}{schedule.max_occurrences ? ` · ${schedule.max_occurrences} payments` : ""}{schedule.total_limit_cents ? ` · ${money(schedule.total_limit_cents)} limit` : ""}</dd></div>
+        <div className="rounded-lg bg-background p-3"><dt className="text-xs text-muted-foreground">Handling</dt><dd className="mt-0.5 text-sm">{schedule.paused ? "Paused" : schedule.handling === "automatic" ? "Automatic" : "Manual"}</dd></div>
+      </dl>
+    </section>
+    {schedule.automatic_error && <Alert><AlertDescription>{schedule.automatic_error}</AlertDescription></Alert>}
+    {schedule.paused && <p className="text-xs text-muted-foreground">Resume starts at the next future due date. Existing pending review stays available.</p>}
+    {schedule.obligation_id && <p className="text-sm">Linked {schedule.type === "expense" ? "debt" : "receivable"}: {reminders.obligations.find(row => row.id === schedule.obligation_id)?.name ?? "obligation"}. Pending occurrences require principal review.</p>}
+    <div className="flex flex-wrap gap-2" aria-label="Schedule actions">
+      <Button variant="outline" disabled={recurrence.busy || planning.busy} onClick={() => setEditing(true)}>Edit plan</Button>
+      <Button variant="outline" disabled={recurrence.busy || planning.busy} onClick={() => void recurrence.save(schedule.id, schedule.paused ? "resume" : "pause", { version: schedule.version }).then(result => { if (result) onRefresh(); })}>{recurrence.busy ? "Saving…" : schedule.paused ? "Resume schedule" : "Pause schedule"}</Button>
+      <AlertDialog>
+        <AlertDialogTrigger render={<Button variant="outline" className="text-destructive" disabled={recurrence.busy || planning.busy}>Delete plan</Button>} />
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this plan?</AlertDialogTitle>
+            <AlertDialogDescription>Recorded history stays in Activity. Pending occurrences are cancelled and no balances change. The plan stops repeating.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={recurrence.busy || planning.busy}>Keep plan</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={recurrence.busy || planning.busy} onClick={() => void recurrence.save(schedule.id, "delete", { version: schedule.version }).then(result => { if (result) onClose(); })}>{recurrence.busy ? "Deleting…" : "Delete plan"}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+    <FinanceSchedulePayments scheduleId={schedule.id} paused={schedule.paused} nextDueDate={schedule.next_due_date} pendingCount={schedule.pending_count} planning={planning} renderPayment={(plan, onDone, retry) => renderPayment(plan, () => { onDone(); onRefresh(); }, retry)} />
+    {recurrence.saveError && <Alert><AlertDescription>{recurrence.saveError}<Button variant="outline" disabled={recurrence.busy} onClick={onRefresh}>Refresh schedule before editing</Button></AlertDescription></Alert>}
   </div>;
 }

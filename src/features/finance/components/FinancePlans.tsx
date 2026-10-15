@@ -2,6 +2,7 @@
 
 
 import { useEffect, useState, type FormEvent } from "react";
+import { format } from "date-fns";
 import type { FinancePlan } from "@/features/finance/planning-types";
 import type { FinancePlanningController } from "@/features/finance/use-finance-planning";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
@@ -10,19 +11,20 @@ import { useFinancePlanEntry } from "@/features/finance/use-finance-plan-entry";
 import { financeJson } from "@/features/finance/client-json";
 import { financeSheet, formatPHP as money, localCalendarDate } from "@/features/finance/presentation";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
 import { FinanceDateInput } from "./FinanceDateInputs";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel, FieldDescription, FieldError, FieldSet, FieldLegend } from "@/components/ui/field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { FinancePlanMatch } from "./FinancePlanMatch";
 import { FinanceObligations } from "./FinanceObligations";
 import { FinanceRecurrence } from "./FinanceRecurrence";
+import { FinancePlanCategories } from "./FinancePlanCategories";
+import { FinancePlanningList } from "./FinancePlanningList";
+import { useFinancePlanningList } from "../use-finance-planning-list";
 
 export interface ReminderOptions { obligations: FinanceObligation[]; loading: boolean; error: string; reload: () => void; hasMore: boolean; loadMore: () => void }
 
@@ -44,7 +46,8 @@ export function FinancePlans({
   const [detailErrorState, setDetailError] = useState<{ key: string; message: string } | null>(null);
   const [reload, setReload] = useState(0);
   const [futureOccurrence, setFutureOccurrence] = useState<FinancePlan | null>(null);
-  const [selectedState, setSelected] = useState<{ page: FinancePlanningController["page"]; values: FinancePlan[] } | null>(null);
+  const [scheduleSelection, setScheduleSelection] = useState<string | null>(null);
+  const list = useFinancePlanningList();
   const [remindersState, setReminders] = useState<{ key: string; values: FinanceObligation[]; total: number } | null>(null);
   const [remindersErrorState, setRemindersError] = useState<{ key: string; message: string } | null>(null);
   const [remindersReload, setRemindersReload] = useState(0);
@@ -58,10 +61,9 @@ export function FinancePlans({
   const remindersTotal = remindersState?.total ?? 0;
   const remindersLoading = remindersState?.key !== remindersKey && remindersErrorState?.key !== remindersKey;
   const remindersError = remindersErrorState?.key === remindersKey ? remindersErrorState.message : "";
-  const selected = selectedState?.page === planning.page ? selectedState.values : [];
   if (previousFocusPlanId !== focusPlanId) {
     setPreviousFocusPlanId(focusPlanId);
-    if (focusPlanId) setPanel(focusPlanId);
+    if (focusPlanId) { setPanel(focusPlanId); setReload(value => value + 1); }
   }
   useEffect(() => {
     if (!focusPlanId) return;
@@ -87,35 +89,29 @@ export function FinancePlans({
     return () => window.removeEventListener("finance-changed", changed);
   }, []);
   const remindersOptions: ReminderOptions = { obligations: reminders, loading: remindersLoading, error: remindersError, reload: () => { setRemindersOffset(0); setRemindersReload(value => value + 1); }, hasMore: reminders.length < remindersTotal, loadMore: () => setRemindersOffset(reminders.length) };
-  function reminderName(id: string) { return remindersOptions.obligations.find(row => row.id === id)?.name; }
-  function open(id: string) { planning.resetSave(); setPanel(id); }
-  const today = localCalendarDate();
-  const reminderLabel = (id: string) => `Reminder: ${reminderName(id) ?? "obligation linked"}`;
-  return <><FinanceRecurrence activity={activity} planning={planning} occurrence={futureOccurrence} onCloseOccurrence={() => setFutureOccurrence(null)} reminders={remindersOptions} /><section id="finance-plans" aria-label="Planned activity and recurring occurrences" className="mt-8 border-t border-border pt-6">
-    <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Planned activity and occurrences</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Expected income and expenses stay pending until you confirm actual activity. Planning never changes balances or consumes budgets.</p></div><Button onClick={() => open("create")}>Add plan</Button></div>
-    <div className="mt-4 flex flex-wrap gap-3"><Button variant="outline" disabled={planning.busy} onClick={() => void planning.save(null, "catch-up", {})}>{planning.busy ? "Preparing review…" : planning.hasMoreCatchUp ? "Load more missed occurrences" : "Refresh due occurrences"}</Button>{selected.length > 0 && <Button variant="outline" disabled={planning.busy} onClick={() => void planning.save(null, "skip", { plans: selected.map(plan => ({ id: plan.id, version: plan.version })) }).then(result => { if (result) setSelected(null); })}>Confirm skip {selected.length} selected occurrences</Button>}</div>
-    {planning.hasMoreCatchUp && <p className="mt-2 text-sm text-muted-foreground">More missed occurrences remain. Load the next catch-up batch; each batch stays pending.</p>}
+  function open(id: string) { planning.resetSave(); setReload(value => value + 1); setPanel(id); }
+  return <>
+    <FinancePlanningList list={list} busy={planning.busy} onAdd={() => { planning.resetSave(); setScheduleSelection("create"); }} onOpen={item => { if (item.kind === "schedule") setScheduleSelection(item.id); else open(item.id); }} />
+    <FinanceRecurrence activity={activity} planning={planning} selection={scheduleSelection} onCloseSelection={() => setScheduleSelection(null)} occurrence={futureOccurrence} onCloseOccurrence={() => setFutureOccurrence(null)} renderPayment={(plan, onDone, onRefresh) => <PlanPanel key={`${plan.id}:${plan.version}`} plan={plan} activity={activity} planning={planning} reminders={remindersOptions} onClose={onDone} onFuture={value => { onDone(); setFutureOccurrence(value); }} onRefresh={onRefresh} inline />} reminders={remindersOptions} />
+    {planning.notice && <p role="status" className="mt-4 text-sm">{planning.notice}</p>}
     {planning.saveError && !panel && <Alert className="mt-4"><AlertDescription>{planning.saveError} Retry the same action safely.</AlertDescription></Alert>}
     {remindersError && <Alert className="mt-4"><AlertDescription>{remindersError}<Button variant="outline" onClick={remindersOptions.reload}>Retry reminder options</Button></AlertDescription></Alert>}
-    <Field className="my-5 sm:max-w-xs"><FieldLabel htmlFor="plan-status">Plan status</FieldLabel><NativeSelect id="plan-status" className="w-full" value={planning.status} onChange={event => planning.changeStatus(event.target.value)}><NativeSelectOption value="pending">Pending review</NativeSelectOption><NativeSelectOption value="satisfied">Satisfied</NativeSelectOption><NativeSelectOption value="cancelled">Cancelled</NativeSelectOption><NativeSelectOption value="all">All plans</NativeSelectOption></NativeSelect></Field>
-    {planning.notice && <p role="status" className="mb-4 text-sm">{planning.notice}</p>}
-    {planning.error ? <Alert><AlertDescription>{planning.error}<Button variant="outline" onClick={() => void planning.refresh()}>Retry plans</Button></AlertDescription></Alert> : planning.loading ? <p role="status" className="py-6 text-sm text-muted-foreground">Loading plans…</p> : planning.page?.plans.length ? <ul className="divide-y divide-border">{planning.page.plans.map(plan => <li key={plan.id}>{plan.schedule_id && plan.status === "pending" && <label className="flex min-h-7 items-center gap-2 text-xs"><Checkbox disabled={planning.busy} checked={selected.some(row => row.id === plan.id)} onCheckedChange={checked => setSelected(current => { const rows = current?.page === planning.page ? current.values : []; return { page: planning.page, values: checked ? [...rows, plan] : rows.filter(row => row.id !== plan.id) }; })} />Select occurrence due {plan.due_date} for skipping</label>}<button className="flex min-h-11 w-full flex-wrap items-center justify-between gap-3 rounded-md px-1 py-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" onClick={() => open(plan.id)} aria-label={`Review ${plan.type} plan ${money(plan.amount_cents)} due ${plan.due_date}`}>
-      <span className="min-w-0 flex-1 basis-40"><span className="block break-words text-sm font-medium">{plan.text || plan.category_name || "Uncategorized"}</span><span className="mt-1 block break-words text-sm text-muted-foreground">{plan.schedule_id ? "Recurring · " : ""}{plan.obligation_id ? `${reminderLabel(plan.obligation_id)} · ` : ""}Due {plan.due_date} · {plan.account_name} · {plan.status === "pending" ? plan.due_date < today ? "Overdue" : plan.due_date === today ? "Due today" : "Upcoming" : plan.status === "satisfied" ? "Satisfied" : "Cancelled"}</span></span>
-      <span className="text-right text-sm"><span className="block">{plan.obligation_id ? "Principal " : "Planned "}{plan.type}</span><strong className="tabular-nums">{money(plan.amount_cents)}</strong></span>
-    </button></li>)}</ul> : <Empty><EmptyHeader><EmptyTitle>No {planning.status === "all" ? "" : planning.status} plans</EmptyTitle><EmptyDescription>Add expected income or an expense. It stays separate from actual activity until reviewed.</EmptyDescription></EmptyHeader></Empty>}
-    {planning.page && planning.page.total > 25 && <nav aria-label="Plan pages" className="mt-5 flex flex-wrap items-center gap-3"><Button variant="outline" disabled={!planning.offset || planning.loading} onClick={() => planning.setOffset(Math.max(0, planning.offset - 25))}>Previous plans</Button><span className="text-sm">{planning.offset + 1}-{Math.min(planning.offset + 25, planning.page.total)} of {planning.page.total}</span><Button variant="outline" disabled={planning.offset + 25 >= planning.page.total || planning.loading} onClick={() => planning.setOffset(planning.offset + 25)}>Next plans</Button></nav>}
-    <Sheet open={panel !== null} onOpenChange={value => { if (!value && !planning.busy) setPanel(null); }}><SheetContent className={financeSheet} showCloseButton={false}>
-      <SheetHeader className="border-b border-border p-4"><SheetTitle>{panel === "create" ? "Add one-time plan" : "Review planned activity"}</SheetTitle><SheetDescription>Due dates describe expectations. Transaction dates describe money that actually moved.</SheetDescription></SheetHeader>
+    <Sheet open={panel !== null} onOpenChange={value => { if (!value && !planning.busy) setPanel(null); }}><SheetContent className={`${financeSheet} overscroll-contain`}>
+      <SheetHeader className="border-b border-border p-4 pr-10"><SheetTitle>Review payment</SheetTitle><SheetDescription>Log what happened, match recorded activity, or delete the plan.</SheetDescription></SheetHeader>
       {detailError ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{detailError}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry plan inspection</Button><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div> : panel === "create" || detailValue ? <PlanPanel key={`${panel}:${detailValue?.version ?? "new"}:${reload}`} plan={detailValue} activity={activity} planning={planning} reminders={remindersOptions} onClose={() => setPanel(null)} onFuture={plan => { setPanel(null); setFutureOccurrence(plan); }} onRefresh={() => { planning.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><p role="status">Loading plan…</p><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div>}
     </SheetContent></Sheet>
-  </section><FinanceObligations
+  <FinanceObligations
     activity={activity}
     focusObligationId={focusObligationId}
     onFocusHandled={onFocusHandled}
   /></>;
 }
 
-function PlanPanel({ plan, activity, planning, reminders, onClose, onFuture, onRefresh }: { plan: FinancePlan | null; activity: FinanceActivityController; planning: FinancePlanningController; reminders: ReminderOptions; onClose: () => void; onFuture: (plan: FinancePlan) => void; onRefresh: () => void }) {
+function humanDate(iso: string) {
+  return format(new Date(`${iso}T12:00:00`), "MMMM d, yyyy");
+}
+
+export function PlanPanel({ plan, activity, planning, reminders, onClose, onFuture, onRefresh, inline = false }: { plan: FinancePlan | null; activity: FinanceActivityController; planning: FinancePlanningController; reminders: ReminderOptions; onClose: () => void; onFuture: (plan: FinancePlan) => void; onRefresh: () => void; inline?: boolean }) {
   const linked = !!plan?.obligation_id;
   const [reviewState, setReviewState] = useState<{ key: string; value: FinanceObligation } | null>(null);
   const [reviewErrorState, setReviewError] = useState<{ key: string; message: string } | null>(null);
@@ -132,7 +128,7 @@ function PlanPanel({ plan, activity, planning, reminders, onClose, onFuture, onR
     }).catch(e => { if (!abort.signal.aborted) setReviewError({ key: reviewKey, message: e instanceof Error ? e.message : "Could not inspect obligation." }); });
     return () => abort.abort();
   }, [plan?.obligation_id, reviewReload, reviewKey]);
-  const { mode, type, amount, setAmount, account, setAccount, dueDate, setDueDate, date, setDate, category, subcategory, setSubcategory, text, setText, association, setAssociation, feeType, changeFeeType, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory, feeSubcategoryId, setFeeSubcategoryId, feeCategories, feeSubcategories, cashSource, chooseCashSource, cashPick, selectCash, clearCash, cashPage, cashOffset, setCashOffset, cashLoading, cashError, retryCash, errors, editable, categories, subcategories, accounts, submit: save, changeMode, changeType, changeCategory, invalid } = useFinancePlanEntry(plan, activity, planning, reviewObligation, onClose);
+  const { mode, type, amount, setAmount, account, setAccount, dueDate, setDueDate, date, setDate, category, subcategory, setSubcategory, text, setText, association, setAssociation, feeType, changeFeeType, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory, feeSubcategoryId, setFeeSubcategoryId, feeCategories, feeSubcategories, cashSource, chooseCashSource, cashPick, selectCash, clearCash, cashPage, cashOffset, setCashOffset, cashLoading, cashError, retryCash, errors, editable, subcategories, accounts, submit: save, changeMode, changeType, changeCategory, invalid } = useFinancePlanEntry(plan, activity, planning, reviewObligation, onClose);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void save((event.nativeEvent as SubmitEvent).submitter?.getAttribute("name") === "another");
@@ -142,60 +138,83 @@ function PlanPanel({ plan, activity, planning, reminders, onClose, onFuture, onR
       : reviewLoading || !reviewObligation ? <p role="status">Loading outstanding principal…</p>
         : <p className="text-sm">{reviewObligation.kind === "debt" ? "Debt" : "Receivable"} <strong>{reviewObligation.name}</strong>: outstanding principal <strong className="tabular-nums">{money(reviewObligation.outstanding_cents)}</strong>.<Button variant="outline" className="mt-2" disabled={planning.busy} onClick={() => setReviewReload(value => value + 1)}>Refresh obligation progress</Button></p>}
   </section>;
-  return <div className="flex flex-1 flex-col gap-4 p-4">
-    {plan && <p className="text-sm">Planned {plan.type}{linked ? " (payment reminder)" : ""}: <strong className="tabular-nums">{money(plan.amount_cents)}</strong>. Due {plan.due_date} in {plan.account_name}. Status: {plan.status}.</p>}
+  const today = localCalendarDate();
+  const pendingPlan = plan?.status === "pending";
+  const planStatus = !plan ? "" : !pendingPlan ? plan.status === "satisfied" ? "Recorded" : "Skipped" : plan.due_date < today ? "Overdue" : plan.due_date === today ? "Due today" : "Pending";
+  return <div className={inline ? "flex flex-col gap-4 rounded-xl border border-border bg-background p-4" : "flex flex-1 flex-col gap-4 p-4"}>
+    {!(inline && mode === "post") && plan && <section aria-label="Plan summary" className="rounded-xl bg-muted/40 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="break-words text-base font-semibold">{plan.text || plan.category_name || (plan.type === "income" ? "Planned income" : "Planned expense")}</h3>
+          <p className="mt-1 break-words text-sm text-muted-foreground">{plan.category_name || "Uncategorized"} · {plan.account_name}</p>
+        </div>
+        <div className="shrink-0 text-right"><p className="text-base font-semibold tabular-nums">{money(plan.amount_cents)}</p></div>
+      </div>
+      <p className="mt-3 text-sm">{plan.status === "pending" ? <>{plan.schedule_id ? "Due" : "Expected"} {humanDate(plan.due_date)}</> : humanDate(plan.due_date)} · {planStatus} · {plan.handling === "automatic" ? "Automatic" : "Manual"}</p>
+      <p className="mt-1 text-xs text-muted-foreground">Planned time {plan.logged_time} ({plan.timezone}).{plan.status === "pending" ? plan.handling === "automatic" ? " Records automatically when due while the server is running." : " Manual confirmation required." : ""}</p>
+    </section>}
     {reviewBlock}
     {plan && !editable && <p className="text-sm text-muted-foreground">{plan.status === "satisfied" ? "Satisfied by a recorded transaction. Inspect it in Activity to correct, Delete or Revert. Delete preserves satisfaction; Revert reopens this plan." : "Cancelled without cash movement. Create a new plan if this expectation returns."}</p>}
-    {plan && editable && <div className="flex flex-wrap gap-2" aria-label="Plan actions"><Button variant="outline" disabled={planning.busy} onClick={() => changeMode("edit")}>{plan.schedule_id ? "Edit this occurrence only" : "Edit / reschedule"}</Button>{plan.schedule_id && <Button variant="outline" disabled={planning.busy} onClick={() => onFuture(plan)}>Edit this and future occurrences</Button>}<Button variant="outline" disabled={planning.busy} onClick={() => changeMode("post")}>{linked ? "Post actual payment" : "Post actual activity"}</Button><Button variant="outline" disabled={planning.busy} onClick={() => changeMode("match")}>{linked ? "Match recorded principal payment" : "Match existing activity"}</Button><Button variant="outline" disabled={planning.busy} onClick={() => changeMode("cancel")}>{plan.schedule_id ? "Skip occurrence" : "Cancel plan"}</Button></div>}
-    {editable && (mode === "match" && plan ? <FinancePlanMatch plan={plan} planning={planning} obligation={reviewObligation} onSaved={onClose} /> : mode === "cancel" && plan ? <section className="flex flex-col gap-4"><p className="text-sm">{plan.schedule_id ? "Skip this pending occurrence?" : "Cancel this pending expectation?"} It will leave forecasts and pending review. No balances, cash or obligation progress change.</p><Button disabled={planning.busy} onClick={() => void planning.save(plan.schedule_id ? null : plan.id, plan.schedule_id ? "skip" : "cancel", plan.schedule_id ? { plans: [{ id: plan.id, version: plan.version }] } : { version: plan.version }).then(result => { if (result) onClose(); })}>{planning.busy ? "Cancelling…" : plan.schedule_id ? "Confirm skip" : "Confirm cancellation"}</Button></section> : <form onSubmit={submit} noValidate className="flex flex-col gap-4">
-      <h3 className="text-base font-semibold">{mode === "post" ? linked ? "Confirm the actual principal payment" : "Confirm what actually happened" : plan ? "Edit expected activity" : "Expected activity"}</h3>
+    {plan && editable && !(inline && mode === "post") && <div className="flex flex-wrap gap-2" aria-label="Plan actions"><Button variant={mode === "post" ? "default" : "outline"} disabled={planning.busy} onClick={() => changeMode("post")}>{plan.type === "expense" ? "Log payment" : "Log income"}</Button><Button variant={mode === "edit" ? "default" : "outline"} disabled={planning.busy} onClick={() => changeMode("edit")}>{plan.schedule_id ? "Edit occurrence" : "Edit"}</Button><Button variant={mode === "match" ? "default" : "outline"} disabled={planning.busy} onClick={() => changeMode("match")}>Match activity</Button><Button variant="outline" className="text-destructive" disabled={planning.busy} onClick={() => changeMode("cancel")}>{plan.schedule_id ? "Skip occurrence" : "Delete plan"}</Button>{plan.schedule_id && <Button variant="outline" disabled={planning.busy} onClick={() => onFuture(plan)}>Edit this and future occurrences</Button>}</div>}
+    {plan && editable && inline && mode === "post" && <Button variant="outline" size="sm" className="self-start" disabled={planning.busy} onClick={() => changeMode("match")}>Match existing activity instead</Button>}
+    {editable && (mode === "match" && plan ? <FinancePlanMatch plan={plan} planning={planning} obligation={reviewObligation} onSaved={onClose} /> : mode === "cancel" && plan ? <section className="flex flex-col gap-4"><p className="text-sm">{plan.schedule_id ? "Skip this pending occurrence?" : "Delete this pending plan?"} {plan.schedule_id ? "It will leave forecasts and pending review." : "It will leave forecasts and pending review. Create a new plan if this expectation returns."} No balances, cash or obligation progress change.</p><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={planning.busy} onClick={() => changeMode("post")}>Back to review</Button><Button variant="destructive" disabled={planning.busy} onClick={() => void planning.save(plan.schedule_id ? null : plan.id, plan.schedule_id ? "skip" : "cancel", plan.schedule_id ? { plans: [{ id: plan.id, version: plan.version }] } : { version: plan.version }).then(result => { if (result) onClose(); })}>{planning.busy ? "Working…" : plan.schedule_id ? "Confirm skip" : "Delete plan"}</Button></div></section> : <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+      {mode === "post" && plan && linked && <h3 className="text-base font-semibold">Log principal payment</h3>}
+      {mode === "post" && !plan && <h3 className="text-base font-semibold">Expected activity</h3>}
+      {mode !== "post" && <h3 className="text-base font-semibold">{plan ? "Edit expected activity" : "Expected activity"}</h3>}
       <FieldGroup>
         {mode !== "post" && <Field><FieldLabel htmlFor="plan-type">Plan type</FieldLabel><NativeSelect id="plan-type" className="w-full" value={type} disabled={planning.busy} onChange={event => changeType(event.target.value)}><NativeSelectOption value="expense">Expense</NativeSelectOption><NativeSelectOption value="income">Income</NativeSelectOption></NativeSelect></Field>}
-        <Field data-invalid={!!errors.amount}><FieldLabel htmlFor="plan-amount">{mode === "post" ? linked ? "Principal amount (PHP)" : "Actual amount (PHP)" : "Expected amount (PHP)"}</FieldLabel><Input id="plan-amount" inputMode="decimal" value={amount} disabled={planning.busy || cashSource === "existing" && !!cashPick && mode === "post"} onChange={event => setAmount(event.target.value)} {...invalid("amount")} /><FieldError id="plan-error-amount">{errors.amount}</FieldError></Field>
-        <Field data-invalid={!!errors.account_id}><FieldLabel htmlFor="plan-account_id">{mode === "post" ? linked ? "Cash account" : "Actual account" : "Expected account"}</FieldLabel><NativeSelect id="plan-account_id" className="w-full" value={account} disabled={planning.busy || cashSource === "existing" && !!cashPick && mode === "post"} onChange={event => setAccount(event.target.value)} {...invalid("account_id")}><NativeSelectOption value="">Choose a money account</NativeSelectOption>{accounts.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}{row.archived ? " (archived)" : ""}</NativeSelectOption>)}</NativeSelect><FieldError id="plan-error-account_id">{errors.account_id}</FieldError></Field>
+        <Field data-invalid={!!errors.amount}><FieldLabel htmlFor="plan-amount">{mode === "post" ? linked ? "Principal amount (PHP)" : "Amount (PHP)" : "Expected amount (PHP)"}</FieldLabel><Input id="plan-amount" autoFocus={inline} inputMode="decimal" value={amount} disabled={planning.busy || cashSource === "existing" && !!cashPick && mode === "post"} onChange={event => setAmount(event.target.value)} {...invalid("amount")} /><FieldError id="plan-error-amount">{errors.amount}</FieldError></Field>
+        <Field data-invalid={!!errors.account_id}><FieldLabel htmlFor="plan-account_id">{mode === "post" ? "Account" : "Expected account"}</FieldLabel><NativeSelect id="plan-account_id" className="w-full" value={account} disabled={planning.busy || cashSource === "existing" && !!cashPick && mode === "post"} onChange={event => setAccount(event.target.value)} {...invalid("account_id")}><NativeSelectOption value="">Choose a money account</NativeSelectOption>{accounts.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}{row.archived ? " (archived)" : ""}</NativeSelectOption>)}</NativeSelect><FieldError id="plan-error-account_id">{errors.account_id}</FieldError></Field>
         {mode !== "post" && plan?.schedule_id && <Field><FieldLabel htmlFor="plan-association">Reminder association (this occurrence only)</FieldLabel><NativeSelect id="plan-association" className="w-full" value={association} disabled={planning.busy || reminders.loading} onChange={event => setAssociation(event.target.value)}><NativeSelectOption value="">Not associated</NativeSelectOption>{reminders.obligations.filter(row => row.kind === (type === "expense" ? "debt" : "receivable")).map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect>{reminders.hasMore && <Button type="button" variant="outline" disabled={reminders.loading || planning.busy} onClick={reminders.loadMore}>Load more obligations</Button>}<FieldDescription>Changing this applies only to this occurrence; the schedule keeps its own association for future occurrences.</FieldDescription></Field>}
-        {mode === "post" ? <Field data-invalid={!!errors.transaction_date}><FieldLabel htmlFor="plan-transaction_date">Actual transaction date</FieldLabel><FinanceDateInput id="plan-transaction_date" min="1000-01-01" max="9999-12-31" value={date} disabled={planning.busy || cashSource === "existing" && !!cashPick} onChange={setDate} {...invalid("transaction_date")} /><FieldDescription>{linked ? "The day the principal moved. The obligation payment and plan update together." : "The day money moved. Posting creates one actual transaction; the due date stays unchanged."}</FieldDescription><FieldError id="plan-error-transaction_date">{errors.transaction_date}</FieldError></Field> : <>
+        {mode === "post" ? <Field data-invalid={!!errors.transaction_date}><FieldLabel htmlFor="plan-transaction_date">{type === "income" ? "Date received" : "Date paid"}</FieldLabel><FinanceDateInput id="plan-transaction_date" min="1000-01-01" max="9999-12-31" value={date} disabled={planning.busy || cashSource === "existing" && !!cashPick} onChange={setDate} {...invalid("transaction_date")} /><FieldDescription>{linked ? "The day the principal moved. The obligation payment and plan update together." : "Defaults to today. The scheduled due date stays unchanged."}</FieldDescription><FieldError id="plan-error-transaction_date">{errors.transaction_date}</FieldError></Field> : <>
           <Field data-invalid={!!errors.due_date}><FieldLabel htmlFor="plan-due_date">Due date</FieldLabel><FinanceDateInput id="plan-due_date" min="1000-01-01" max="9999-12-31" value={dueDate} disabled={planning.busy} onChange={setDueDate} {...invalid("due_date")} /><FieldDescription>When you expect the activity, not a posting date.</FieldDescription><FieldError id="plan-error-due_date">{errors.due_date}</FieldError></Field>
-          <Field><FieldLabel htmlFor="plan-category">Category</FieldLabel><NativeSelect id="plan-category" className="w-full" value={category} disabled={planning.busy} onChange={event => changeCategory(event.target.value)}><NativeSelectOption value="">Uncategorized</NativeSelectOption>{categories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>
+          <FinancePlanCategories activity={activity} type={type} value={category} onChange={changeCategory} disabled={planning.busy} id="plan-category" />
           {subcategories.length > 0 && <Field><FieldLabel htmlFor="plan-subcategory">Subcategory</FieldLabel><NativeSelect id="plan-subcategory" className="w-full" value={subcategory} disabled={planning.busy} onChange={event => setSubcategory(event.target.value)}><NativeSelectOption value="">No subcategory</NativeSelectOption>{subcategories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>}
-          <Field><FieldLabel htmlFor="plan-text">Plan text (optional)</FieldLabel><Input id="plan-text" maxLength={2000} value={text} disabled={planning.busy} onChange={event => setText(event.target.value)} /></Field>
+          <Field><FieldLabel htmlFor="plan-text">Note (optional)</FieldLabel><Input id="plan-text" maxLength={2000} value={text} disabled={planning.busy} onChange={event => setText(event.target.value)} /></Field>
         </>}
-        {mode === "post" && linked && !cashPick && <FieldSet>
-          <FieldLegend>Separate interest or fee (optional)</FieldLegend>
-          <FieldDescription>Posted as its own linked activity next to the principal payment. Leave the amount blank to skip.</FieldDescription>
-          <Field><FieldLabel htmlFor="plan-fee-type">Fee type</FieldLabel><NativeSelect id="plan-fee-type" className="w-full" value={feeType} disabled={planning.busy} onChange={event => changeFeeType(event.target.value)}><NativeSelectOption value="expense">Expense</NativeSelectOption><NativeSelectOption value="income">Income</NativeSelectOption></NativeSelect></Field>
-          <Field data-invalid={!!errors.fee}><FieldLabel htmlFor="plan-fee-amount">Fee amount (PHP)</FieldLabel><Input id="plan-fee-amount" inputMode="decimal" value={feeAmount} disabled={planning.busy} onChange={event => setFeeAmount(event.target.value)} {...invalid("fee")} /><FieldError id="plan-error-fee">{errors.fee}</FieldError></Field>
-          <Field><FieldLabel htmlFor="plan-fee-category">Fee category</FieldLabel><NativeSelect id="plan-fee-category" className="w-full" value={feeCategoryId} disabled={planning.busy} onChange={event => changeFeeCategory(event.target.value)}><NativeSelectOption value="">Uncategorized</NativeSelectOption>{feeCategories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>
-          {!!feeSubcategories.length && <Field><FieldLabel htmlFor="plan-fee-subcategory">Fee subcategory</FieldLabel><NativeSelect id="plan-fee-subcategory" className="w-full" value={feeSubcategoryId} disabled={planning.busy} onChange={event => setFeeSubcategoryId(event.target.value)}><NativeSelectOption value="">No subcategory</NativeSelectOption>{feeSubcategories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>}
-        </FieldSet>}
-        {mode === "post" && linked && <FieldSet>
-          <FieldLegend>Cash effect</FieldLegend>
-          <FieldDescription>{cashPick ? "Cash was already recorded; no new cash moves and a separate fee cannot be added." : "Post new cash activity, or link cash already recorded for this payment."}</FieldDescription>
-          <RadioGroup name="plan-cash-source" value={cashSource} disabled={planning.busy} onValueChange={value => chooseCashSource(value === "existing" ? "existing" : "new")} aria-label="Cash effect source">
-            <label className="flex min-h-7 items-center gap-2 text-xs"><RadioGroupItem value="new" />Post new cash activity</label>
-            <label className="flex min-h-7 items-center gap-2 text-xs"><RadioGroupItem value="existing" />Link already recorded activity</label>
-          </RadioGroup>
-          {cashSource === "existing" && <section aria-label="Link existing cash activity" className="flex flex-col gap-3">
-            {cashError ? <Alert><AlertDescription>{cashError}<Button type="button" variant="outline" onClick={retryCash}>Retry payment activity</Button></AlertDescription></Alert>
-              : cashLoading || !cashPage ? <p role="status">Loading payment activity…</p>
-                : cashPage?.transactions.length ? <fieldset className="flex flex-col gap-2"><legend className="mb-2 text-sm font-medium">Choose one transaction</legend><RadioGroup aria-label="Choose one transaction" name="plan-cash-activity" value={cashPick?.id ?? ""} disabled={planning.busy} onValueChange={value => { const row = cashPage.transactions.find(row => row.id === value); if (row) selectCash(row); }}>
-                  {cashPage.transactions.map(row => <label key={row.id} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-md border border-border p-3 text-sm">
-                    <RadioGroupItem value={row.id} className="mt-1" />
-                    <span className="min-w-0 break-words"><strong className="tabular-nums">{money(row.amount_cents)}</strong> · {row.transaction_date}<span className="block">{row.account_name} · {row.category_name ?? "Uncategorized"}</span>{row.text && <span className="mt-1 block text-muted-foreground">{row.text}</span>}</span>
-                  </label>)}
-                </RadioGroup></fieldset>
-                  : <p className="text-sm text-muted-foreground">No eligible recorded activity. Post new cash activity instead.</p>}
-            {cashPage && cashPage.total > 25 && <nav aria-label="Payment activity pages" className="flex flex-wrap items-center gap-3"><Button type="button" variant="outline" disabled={!cashOffset || planning.busy} onClick={() => setCashOffset(Math.max(0, cashOffset - 25))}>Previous payments</Button><span className="text-sm">{cashOffset + 1}-{Math.min(cashOffset + 25, cashPage.total)} of {cashPage.total}</span><Button type="button" variant="outline" disabled={cashOffset + 25 >= cashPage.total || planning.busy} onClick={() => setCashOffset(cashOffset + 25)}>Next payments</Button></nav>}
-            {cashPick && <p className="text-sm">Link {money(cashPick.amount_cents)} on {cashPick.transaction_date}. Cash stays as recorded; the payment progress alone is new.</p>}
-            <Button type="button" variant="outline" className="self-start" disabled={!cashPick || planning.busy} onClick={clearCash}>Clear selection</Button>
-          </section>}
-        </FieldSet>}
+        {mode === "post" && linked && <FieldGroup className="rounded-xl border border-border p-3">
+          <details className="text-sm" open={cashSource === "existing" || !!feeAmount ? true : undefined}>
+            <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">Fee or recorded cash (advanced)</summary>
+            <FieldGroup className="mt-2">
+              {!cashPick && <FieldSet>
+                <FieldLegend>Separate interest or fee (optional)</FieldLegend>
+                <FieldDescription>Posted as its own linked activity next to the principal payment. Leave the amount blank to skip.</FieldDescription>
+                <Field><FieldLabel htmlFor="plan-fee-type">Fee type</FieldLabel><NativeSelect id="plan-fee-type" className="w-full" value={feeType} disabled={planning.busy} onChange={event => changeFeeType(event.target.value)}><NativeSelectOption value="expense">Expense</NativeSelectOption><NativeSelectOption value="income">Income</NativeSelectOption></NativeSelect></Field>
+                <Field data-invalid={!!errors.fee}><FieldLabel htmlFor="plan-fee-amount">Fee amount (PHP)</FieldLabel><Input id="plan-fee-amount" inputMode="decimal" value={feeAmount} disabled={planning.busy} onChange={event => setFeeAmount(event.target.value)} {...invalid("fee")} /><FieldError id="plan-error-fee">{errors.fee}</FieldError></Field>
+                <Field><FieldLabel htmlFor="plan-fee-category">Fee category</FieldLabel><NativeSelect id="plan-fee-category" className="w-full" value={feeCategoryId} disabled={planning.busy} onChange={event => changeFeeCategory(event.target.value)}><NativeSelectOption value="">Uncategorized</NativeSelectOption>{feeCategories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>
+                {!!feeSubcategories.length && <Field><FieldLabel htmlFor="plan-fee-subcategory">Fee subcategory</FieldLabel><NativeSelect id="plan-fee-subcategory" className="w-full" value={feeSubcategoryId} disabled={planning.busy} onChange={event => setFeeSubcategoryId(event.target.value)}><NativeSelectOption value="">No subcategory</NativeSelectOption>{feeSubcategories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>}
+              </FieldSet>}
+              <FieldSet>
+                <FieldLegend>Cash effect</FieldLegend>
+                <FieldDescription>{cashPick ? "Cash was already recorded; no new cash moves and a separate fee cannot be added." : "Post new cash activity, or link cash already recorded for this payment."}</FieldDescription>
+                <RadioGroup name="plan-cash-source" value={cashSource} disabled={planning.busy} onValueChange={value => chooseCashSource(value === "existing" ? "existing" : "new")} aria-label="Cash effect source">
+                  <label className="flex min-h-7 items-center gap-2 text-xs"><RadioGroupItem value="new" />Post new cash activity</label>
+                  <label className="flex min-h-7 items-center gap-2 text-xs"><RadioGroupItem value="existing" />Link already recorded activity</label>
+                </RadioGroup>
+                {cashSource === "existing" && <section aria-label="Link existing cash activity" className="flex flex-col gap-3">
+                  {cashError ? <Alert><AlertDescription>{cashError}<Button type="button" variant="outline" onClick={retryCash}>Retry payment activity</Button></AlertDescription></Alert>
+                    : cashLoading || !cashPage ? <p role="status">Loading payment activity…</p>
+                      : cashPage?.transactions.length ? <fieldset className="flex flex-col gap-2"><legend className="mb-2 text-sm font-medium">Choose one transaction</legend><RadioGroup aria-label="Choose one transaction" name="plan-cash-activity" value={cashPick?.id ?? ""} disabled={planning.busy} onValueChange={value => { const row = cashPage.transactions.find(row => row.id === value); if (row) selectCash(row); }}>
+                        {cashPage.transactions.map(row => <label key={row.id} className="flex min-h-11 cursor-pointer items-start gap-3 rounded-md border border-border p-3 text-sm">
+                          <RadioGroupItem value={row.id} className="mt-1" />
+                          <span className="min-w-0 break-words"><strong className="tabular-nums">{money(row.amount_cents)}</strong> · {row.transaction_date}<span className="block">{row.account_name} · {row.category_name ?? "Uncategorized"}</span>{row.text && <span className="mt-1 block text-muted-foreground">{row.text}</span>}</span>
+                        </label>)}
+                      </RadioGroup></fieldset>
+                        : <p className="text-sm text-muted-foreground">No eligible recorded activity. Post new cash activity instead.</p>}
+                  {cashPage && cashPage.total > 25 && <nav aria-label="Payment activity pages" className="flex flex-wrap items-center gap-3"><Button type="button" variant="outline" disabled={!cashOffset || planning.busy} onClick={() => setCashOffset(Math.max(0, cashOffset - 25))}>Previous payments</Button><span className="text-sm">{cashOffset + 1}-{Math.min(cashOffset + 25, cashPage.total)} of {cashPage.total}</span><Button type="button" variant="outline" disabled={cashOffset + 25 >= cashPage.total || planning.busy} onClick={() => setCashOffset(cashOffset + 25)}>Next payments</Button></nav>}
+                  {cashPick && <p className="text-sm">Link {money(cashPick.amount_cents)} on {cashPick.transaction_date}. Cash stays as recorded; the payment progress alone is new.</p>}
+                  <Button type="button" variant="outline" className="self-start" disabled={!cashPick || planning.busy} onClick={clearCash}>Clear selection</Button>
+                </section>}
+              </FieldSet>
+            </FieldGroup>
+          </details>
+        </FieldGroup>}
       </FieldGroup>
       <FinanceOptionStatus activity={activity} />
-      {mode === "post" && <p className="text-sm text-muted-foreground">{linked ? "Confirming records the principal payment, updates obligation progress and satisfies this occurrence. If already recorded, link it above instead of posting again." : "Confirming changes the selected account balance once. If already recorded, use Match existing activity instead."}</p>}
-      <div className="flex flex-wrap justify-end gap-2">{!plan && <Button type="submit" name="another" variant="outline" disabled={planning.busy}>Save and add another plan</Button>}<Button type="submit" disabled={planning.busy || mode === "post" && linked && (!!reviewError || !reviewObligation || reviewObligation.outstanding_cents <= 0 || cashSource === "existing" && !cashPick)}>{planning.busy ? "Saving…" : mode === "post" ? linked ? "Confirm and post payment" : "Confirm and post" : plan ? "Save plan changes" : "Save plan"}</Button></div>
+      {mode === "post" && <p className="text-sm text-muted-foreground">{linked ? "Confirming records the principal payment, updates obligation progress and satisfies this occurrence. If already recorded, link it above or use Match activity instead." : "Confirming changes the selected account balance once. If already recorded, use Match activity instead."}</p>}
+      <div className="flex flex-wrap justify-end gap-2">{!plan && <Button type="submit" name="another" variant="outline" disabled={planning.busy}>Save and add another plan</Button>}<Button type="submit" disabled={planning.busy || mode === "post" && linked && (!!reviewError || !reviewObligation || reviewObligation.outstanding_cents <= 0 || cashSource === "existing" && !cashPick)}>{planning.busy ? "Saving…" : mode === "post" ? linked || type === "expense" ? "Confirm payment" : "Confirm income" : plan ? "Save plan changes" : "Save plan"}</Button></div>
     </form>)}
     {planning.saveError && <Alert><AlertDescription>{planning.saveError} Retry unchanged fields for a safe request retry.{plan && <Button variant="outline" disabled={planning.busy} onClick={onRefresh}>Refresh plan before editing</Button>}</AlertDescription></Alert>}
-    <Button variant="outline" className="mt-auto self-end" disabled={planning.busy} onClick={onClose}>Close plan</Button>
+    {(!plan || inline) && <Button variant="outline" className="mt-auto self-end" disabled={planning.busy} onClick={onClose}>Cancel</Button>}
   </div>;
 }

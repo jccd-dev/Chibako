@@ -13,6 +13,8 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@/components/ui/native-select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { FinancePlanCategories } from "./FinancePlanCategories";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -42,7 +44,7 @@ import { FinanceTransferFields } from "./FinanceTransferFields";
 import { FinanceCashbackFields } from "./FinanceCashbackFields";
 import { useFinanceEntry } from "@/features/finance/use-finance-entry";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
-import { financeSheet, formatPHP } from "@/features/finance/presentation";
+import { financeSheet, formatPHP, formatHistoryDate } from "@/features/finance/presentation";
 
 const activityLabel = (type: FinanceTransaction["type"]) =>
   ({
@@ -155,7 +157,7 @@ export function FinanceActivityList({
           reverted records. Clear filters to return to all activity.
         </p>
       )}
-      <div className="mt-6 grid min-w-0 items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+      <div className="mt-4 grid min-w-0 items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
         <FinanceHistoryFilters activity={activity} />
         <div className="min-w-0">
           <FinanceOptionStatus activity={activity} />
@@ -177,48 +179,52 @@ export function FinanceActivityList({
             </p>
           ) : activity.page?.transactions.length ? (
             <ul className="divide-y divide-border">
-              {activity.page.transactions.map((row) => (
-                <li key={row.id}>
-                  <button
-                    type="button"
-                    className="flex w-full flex-wrap items-center justify-between gap-3 rounded-md px-1 py-4 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted"
-                    onClick={() => onInspect(row.id)}
-                    aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${row.transaction_date}`}
-                  >
-                    <div className="min-w-0 flex-1 basis-40">
-                      <p className="break-words text-sm font-medium">
-                        {row.obligation_payment
-                          ? principalPaymentLabel(row)
-                          : row.type === "income" || row.type === "expense"
-                            ? (row.category_name ?? "Uncategorized")
-                            : activityLabel(row.type)}
-                        {row.subcategory_name
-                          ? ` / ${row.subcategory_name}`
-                          : ""}
-                      </p>
-                      <p className="mt-1 break-words text-sm text-muted-foreground">
-                        {row.transaction_date} · {row.account_name}
+              {activity.page.transactions.map((row) => {
+                const titled = row.obligation_payment
+                  ? principalPaymentLabel(row)
+                  : row.type === "income" || row.type === "expense"
+                    ? (row.category_name ?? "Uncategorized")
+                    : activityLabel(row.type);
+                return (
+                  <li key={row.id}>
+                    <button
+                      type="button"
+                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted"
+                      onClick={() => onInspect(row.id)}
+                      aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}
+                    >
+                      <span className="min-w-0 truncate text-sm font-medium">
+                        {titled}
+                        {row.subcategory_name ? ` / ${row.subcategory_name}` : ""}
+                      </span>
+                      <strong className="justify-self-end text-sm tabular-nums">
+                        {formatPHP(row.amount_cents)}
+                      </strong>
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">
+                        {formatHistoryDate(row.transaction_date)} · {row.account_name}
                         {row.destination_account_name
                           ? ` to ${row.destination_account_name}`
                           : ""}
                         {row.cashback_expense_id ? " · Cashback" : row.linked_record_id ? " · Transfer fee" : ""}
-                        {row.hidden ? " · Hidden" : ""}
-                        {row.reverted ? " · Reverted" : ""}
-                      </p>
-                    </div>
-                    <p className="text-right text-sm">
-                      <span className="block">
-                        {row.obligation_payment
-                          ? principalPaymentLabel(row)
-                          : activityLabel(row.type)}
                       </span>
-                      <strong className="tabular-nums">
-                        {formatPHP(row.amount_cents)}
-                      </strong>
-                    </p>
-                  </button>
-                </li>
-              ))}
+                      {row.type === "income" || row.type === "expense" ? (
+                        <span className="justify-self-end text-xs text-muted-foreground">
+                          {activityLabel(row.type)}
+                        </span>
+                      ) : (
+                        <span aria-hidden="true" />
+                      )}
+                      {(row.hidden || row.reverted) && (
+                        <span className="col-span-2 text-xs">
+                          {row.hidden ? "Hidden" : ""}
+                          {row.hidden && row.reverted ? " · " : ""}
+                          {row.reverted ? "Reverted" : ""}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="py-8 text-sm text-muted-foreground">
@@ -448,7 +454,7 @@ export function FinanceTransactionDetails({
               )}
               <div>
                 <dt className="text-muted-foreground">Transaction date</dt>
-                <dd>{selected.transaction_date}</dd>
+                <dd>{formatHistoryDate(selected.transaction_date)}</dd>
               </div>
               {(selected.type === "income" || selected.type === "expense") && (
                 <div>
@@ -603,13 +609,6 @@ export function FinanceTransactionEntry({
   } = entry;
   const accountKey = type === "transfer" ? "source_account_id" : "account_id";
   const amountRef = useRef<HTMLInputElement>(null);
-  const categories = activity.classifications.filter(
-    (item) =>
-      item.kind === "category" &&
-      item.type === type &&
-      !item.parent_id &&
-      !item.archived,
-  );
   const subcategories = activity.classifications.filter(
     (item) => item.parent_id === categoryId && !item.archived,
   );
@@ -646,30 +645,36 @@ export function FinanceTransactionEntry({
         <form
           onSubmit={submit}
           noValidate
-          className="flex flex-1 flex-col gap-4 p-4"
+          className="flex flex-1 flex-col gap-6 p-4 sm:p-6"
         >
-          <FieldGroup>
+          <FieldGroup className="gap-6">
             <Field>
-              <FieldLabel htmlFor="transaction-type">
+              <FieldLabel id="transaction-type-label">
                 Transaction type
               </FieldLabel>
-              <NativeSelect
-                id="transaction-type"
-                className="w-full"
-                value={type}
+              <ToggleGroup
+                aria-labelledby="transaction-type-label"
+                value={[type]}
+                onValueChange={(values) => {
+                  if (values[0])
+                    changeType(
+                      values[0] as "expense" | "income" | "transfer",
+                    );
+                }}
+                variant="outline"
                 disabled={activity.busy}
-                onChange={(event) =>
-                  changeType(
-                    event.target.value as "income" | "expense" | "transfer",
-                  )
-                }
+                className="w-full"
               >
-                <NativeSelectOption value="expense">Expense</NativeSelectOption>
-                <NativeSelectOption value="income">Income</NativeSelectOption>
-                <NativeSelectOption value="transfer">
+                <ToggleGroupItem value="expense" className="min-h-11 flex-1">
+                  Expense
+                </ToggleGroupItem>
+                <ToggleGroupItem value="income" className="min-h-11 flex-1">
+                  Income
+                </ToggleGroupItem>
+                <ToggleGroupItem value="transfer" className="min-h-11 flex-1">
                   Transfer
-                </NativeSelectOption>
-              </NativeSelect>
+                </ToggleGroupItem>
+              </ToggleGroup>
             </Field>
             <Field data-invalid={!!errors.amount}>
               <FieldLabel htmlFor="transaction-amount">Amount (PHP)</FieldLabel>
@@ -679,6 +684,7 @@ export function FinanceTransactionEntry({
                 inputMode="decimal"
                 value={amount}
                 disabled={activity.busy}
+                placeholder="0.00"
                 onChange={(event) => setAmount(event.target.value)}
                 className="tabular-nums"
                 {...errorProps("amount")}
@@ -721,145 +727,136 @@ export function FinanceTransactionEntry({
             {type === "transfer" && (
               <FinanceTransferFields activity={activity} entry={entry} />
             )}
-            <Field data-invalid={!!errors.transaction_date}>
-              <FieldLabel htmlFor="transaction-transaction_date">
-                Transaction date
-              </FieldLabel>
-              <FinanceDateInput
-                id="transaction-transaction_date"
-                min="1000-01-01"
-                max="9999-12-31"
-                value={date}
-                disabled={activity.busy}
-                onChange={setDate}
-                {...errorProps("transaction_date")}
-              />
+            <FieldGroup className="rounded-xl bg-muted/50 p-4">
+              <Field data-invalid={!!errors.transaction_date}>
+                <FieldLabel htmlFor="transaction-transaction_date">
+                  Transaction date
+                </FieldLabel>
+                <FinanceDateInput
+                  id="transaction-transaction_date"
+                  min="1000-01-01"
+                  max="9999-12-31"
+                  value={date}
+                  disabled={activity.busy}
+                  onChange={setDate}
+                  {...errorProps("transaction_date")}
+                />
+                <FieldError id="error-transaction_date">
+                  {errors.transaction_date}
+                </FieldError>
+              </Field>
               <FieldDescription>
                 The calendar day money moved, not when you entered it.
               </FieldDescription>
-              <FieldError id="error-transaction_date">
-                {errors.transaction_date}
-              </FieldError>
-            </Field>
+            </FieldGroup>
             {type !== "transfer" && (
-              <Field>
-                <FieldLabel htmlFor="transaction-category">Category</FieldLabel>
-                <NativeSelect
-                  id="transaction-category"
-                  className="w-full"
-                  value={categoryId}
-                  disabled={activity.busy}
-                  onChange={(event) => changeCategory(event.target.value)}
-                >
-                  <NativeSelectOption value="">
-                    Uncategorized
-                  </NativeSelectOption>
-                  {categories.map((category) => (
-                    <NativeSelectOption key={category.id} value={category.id}>
-                      {category.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
+              <FinancePlanCategories
+                activity={activity}
+                type={type}
+                value={categoryId}
+                onChange={changeCategory}
+                disabled={activity.busy}
+                id="transaction-category"
+              />
             )}
-            {type !== "transfer" && subcategories.length > 0 && (
-              <Field>
-                <FieldLabel htmlFor="transaction-subcategory">
-                  Subcategory
-                </FieldLabel>
-                <NativeSelect
-                  id="transaction-subcategory"
-                  className="w-full"
-                  value={subcategoryId}
-                  disabled={activity.busy}
-                  onChange={(event) => setSubcategoryId(event.target.value)}
-                >
-                  <NativeSelectOption value="">
-                    No subcategory
-                  </NativeSelectOption>
-                  {subcategories.map((item) => (
-                    <NativeSelectOption key={item.id} value={item.id}>
-                      {item.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
+            {!activity.accounts.some(
+              (account) => !account.archived && account.kind === "money",
+            ) && (
+              <p className="text-sm text-muted-foreground">
+                Create a money account in Accounts before recording activity.
+              </p>
+            )}
+            <details className="rounded-xl border border-border p-4">
+              <summary className="cursor-pointer text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
+                Additional details
+              </summary>
+              <FieldGroup className="mt-4">
+                {type !== "transfer" && subcategories.length > 0 && (
+                  <Field>
+                    <FieldLabel htmlFor="transaction-subcategory">
+                      Subcategory
+                    </FieldLabel>
+                    <NativeSelect
+                      id="transaction-subcategory"
+                      className="w-full"
+                      value={subcategoryId}
+                      disabled={activity.busy}
+                      onChange={(event) => setSubcategoryId(event.target.value)}
+                    >
+                      <NativeSelectOption value="">
+                        No subcategory
+                      </NativeSelectOption>
+                      {subcategories.map((item) => (
+                        <NativeSelectOption key={item.id} value={item.id}>
+                          {item.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                )}
+                <Field>
+                  <FieldLabel htmlFor="transaction-text">
+                    Transaction text
+                  </FieldLabel>
+                  <Textarea
+                    id="transaction-text"
+                    value={text}
+                    maxLength={2000}
+                    disabled={activity.busy}
+                    onChange={(event) => setText(event.target.value)}
+                  />
+                </Field>
+                <FieldSet>
+                  <FieldLegend>Tags</FieldLegend>
+                  {activity.classifications
+                    .filter((item) => item.kind === "tag" && !item.archived)
+                    .map((tag) => (
+                      <label
+                        key={tag.id}
+                        className="flex min-h-7 items-center gap-2 text-xs"
+                      >
+                        <Checkbox
+                          checked={tagIds.includes(tag.id)}
+                          disabled={
+                            activity.busy ||
+                            (!tagIds.includes(tag.id) && tagIds.length >= 20)
+                          }
+                          onCheckedChange={(checked) =>
+                            setTagIds((current) =>
+                              checked
+                                ? [...current, tag.id]
+                                : current.filter((id) => id !== tag.id),
+                            )
+                          }
+                        />
+                        {tag.name}
+                      </label>
+                    ))}
+                  <FieldDescription>
+                    Manage tags in the Manage tab. Up to 20 per transaction.
+                  </FieldDescription>
+                </FieldSet>
+                <FieldSet>
+                  <FieldLegend>Optional Note links</FieldLegend>
+                  <FinanceNotePicker
+                    notes={notes}
+                    onChange={setNotes}
+                    disabled={activity.busy}
+                  />
+                </FieldSet>
+              </FieldGroup>
+            </details>
+            <FinanceOptionStatus activity={activity} />
+            {activity.saveError && (
+              <Alert>
+                <AlertDescription>
+                  {activity.saveError} Your entries are kept. Retry to safely
+                  reuse the same request.
+                </AlertDescription>
+              </Alert>
             )}
           </FieldGroup>
-          {!activity.accounts.some(
-            (account) => !account.archived && account.kind === "money",
-          ) && (
-            <p className="text-sm text-muted-foreground">
-              Create a money account in Accounts before recording activity.
-            </p>
-          )}
-          <FinanceOptionStatus activity={activity} />
-          <details>
-            <summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:outline-2 focus-visible:outline-ring">
-              Additional details
-            </summary>
-            <FieldGroup className="mt-3">
-              <Field>
-                <FieldLabel htmlFor="transaction-text">
-                  Transaction text
-                </FieldLabel>
-                <Textarea
-                  id="transaction-text"
-                  value={text}
-                  maxLength={2000}
-                  disabled={activity.busy}
-                  onChange={(event) => setText(event.target.value)}
-                />
-              </Field>
-              <FieldSet>
-                <FieldLegend>Tags</FieldLegend>
-                {activity.classifications
-                  .filter((item) => item.kind === "tag" && !item.archived)
-                  .map((tag) => (
-                    <label
-                      key={tag.id}
-                      className="flex min-h-7 items-center gap-2 text-xs"
-                    >
-                      <Checkbox
-                        checked={tagIds.includes(tag.id)}
-                        disabled={
-                          activity.busy ||
-                          (!tagIds.includes(tag.id) && tagIds.length >= 20)
-                        }
-                        onCheckedChange={(checked) =>
-                          setTagIds((current) =>
-                            checked
-                              ? [...current, tag.id]
-                              : current.filter((id) => id !== tag.id),
-                          )
-                        }
-                      />
-                      {tag.name}
-                    </label>
-                  ))}
-                <FieldDescription>
-                  Manage tags in the Manage tab. Up to 20 per transaction.
-                </FieldDescription>
-              </FieldSet>
-              <FieldSet>
-                <FieldLegend>Optional Note links</FieldLegend>
-                <FinanceNotePicker
-                  notes={notes}
-                  onChange={setNotes}
-                  disabled={activity.busy}
-                />
-              </FieldSet>
-            </FieldGroup>
-          </details>
-          {activity.saveError && (
-            <Alert>
-              <AlertDescription>
-                {activity.saveError} Your entries are kept. Retry to safely
-                reuse the same request.
-              </AlertDescription>
-            </Alert>
-          )}
-          <div className="mt-auto flex flex-wrap justify-end gap-2 pt-4">
+          <div className="sticky bottom-0 -mx-4 mt-auto flex flex-wrap justify-end gap-2 border-t border-border bg-background p-4 sm:-mx-6 sm:px-6">
             <Button
               type="button"
               variant="outline"

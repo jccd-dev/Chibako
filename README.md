@@ -431,6 +431,65 @@ Contributors can check discovery before publishing without installing anything:
 npx skills add ./skills --list
 ```
 
+## Finance planning
+
+Finance → Planning uses one **Plans** list for recurring schedules and one-time
+plans. Filter by **All**, **Needs attention**, **Upcoming**, or **Paused**. Open a
+schedule to review its payments, log or match actual activity, skip a payment, or
+view recorded history. Use **Confirm** or **Confirm income** beside a pending payment
+to confirm actual activity inline in the same overview drawer, including early
+payments on automatic schedules. Recording or matching a recurring payment prepares
+the next payment automatically, including when paid early. Recorded payments are
+not posted again automatically. Due counts stay on the schedule instead
+of a separate queue. Payment history is shown newest first.
+
+Use **Edit plan** in the overview to change pending and future occurrences. **Delete plan**
+stops recurrence and cancels its pending payments while retaining recorded cash activity
+and audit history. Reverting recorded activity from a deleted schedule does not reopen
+its payments.
+
+Choose **Add plan**, then select income or expense. New plans default to recurring,
+monthly, and manual handling. Use **Set as recurring** to switch to a one-time plan,
+or choose a repeat preset or custom interval, handling, and ending controls.
+**Every 2 months** means exactly that; bi-weekly means every two weeks. The schedule preview shows the first and next dates before saving.
+
+Income and expense plans are expectations until posted or matched to actual activity.
+Recurring schedules support daily, weekly, monthly, and yearly intervals, plus custom
+interval counts. Month-end dates remain anchored: January 31 becomes February 28,
+then March 31. Plans and schedules store `logged_time` (`HH:mm`, default `00:00`),
+`timezone` (IANA, default `UTC`).
+
+Schedules default to `handling: "manual"`, including existing and imported schedules.
+Manual plans need confirmation before changing account balances. Opting into
+`handling: "automatic"` requires both `finance:manage` and `finance:write`.
+The running Next.js Node server checks automatic schedules at startup and every minute,
+even while the browser is closed. After downtime it catches up missed due dates in
+bounded batches. The server must stay running; static hosting, suspended/serverless
+processes, and the standalone MCP stdio process do not run this scheduler.
+Build and test phases do not start the runner. No external cron service is required.
+
+Handling belongs to each occurrence: editing "this and future" preserves earlier
+manual or automatic plans. The schedule handling sets the default for newly generated
+occurrences; each plan returns its own `handling`. Global pause stops all automatic
+occurrences of that schedule.
+
+Automatic plans post the expected amount/account once, on the schedule's local date
+and time. Paused schedules do not post. A skipped occurrence stays skipped; reverting
+a posted occurrence reopens it for manual review without automatic reposting. Failed
+posting leaves no partial financial effects, exposes `automatic_error` on its schedule,
+and retries on the next check. Linked debt/receivable reminders always use manual
+handling so principal and fees can be reviewed. Automatic posts use the trusted-local
+audit identity, and SQLite write transactions serialize competing server processes.
+
+Optional `max_occurrences` and `total_limit` (PHP decimal input, returned as
+`total_limit_cents`) cap scheduled slots, including skipped slots. A total allows only
+whole payments: PHP 25 at PHP 12 per slot creates two slots. It measures the planned
+budget at the current schedule amount, rather than actual posted spending. Changing
+the amount recalculates that slot budget; satisfied history stays unchanged. Cadence
+edits retain earlier consumed slots. Shortening limits cancels affected future pending
+slots; extending limits can restore boundary cancellations but never explicit skips.
+The inclusive `end_date` remains an additional boundary.
+
 ## 🔌 REST API reference
 
 | Method | Path | Scope | Description |

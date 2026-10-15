@@ -11,6 +11,7 @@ import { listPlans, getPlan, updatePlan, postPlan, matchPlan } from "../src/feat
 import { postTransaction } from "../src/features/finance/activity";
 import { hideActivity, revertActivity } from "../src/features/finance/corrections";
 import type { FinanceActor } from "../src/features/finance/types";
+import type { FinancePlan } from "../src/features/finance/planning-types";
 
 const vault = mkdtempSync(join(tmpdir(), "chibako-recurrence-"));
 process.env.CHIBAKO_DATA_DIR = vault;
@@ -55,6 +56,33 @@ test("catch-up is bounded and resumable with paginated missed review and one nex
   assert.equal(listPlans(owner, { schedule_id: row.id, offset: 1097 }).plans[0].due_date, "2023-01-02");
   assert.equal(catchup("2023-01-01").created_count, 0);
   assert.equal(getAccount(owner, cash.id).balance_cents, 100000);
+});
+
+test("early payment logging and matching prepare exactly one next occurrence without extending the cap", () => {
+  const cash = account();
+  for (const mode of ["post", "match"] as const) {
+    const row = schedule(cash.id, { start_date: "2026-11-15", end_date: null, max_occurrences: 2 });
+    catchup("2026-10-15");
+    const first: FinancePlan = listPlans(owner, { schedule_id: row.id }).plans[0];
+    assert.equal(first.due_date, "2026-11-15");
+    function record(plan: FinancePlan): void {
+      if (mode === "post") {
+        postPlan(owner, plan.id, { ...action(plan.version), account_id: cash.id, amount: "12", transaction_date: "2026-10-15" });
+        return;
+      }
+      const transaction = postTransaction(owner, { request_id: randomUUID(), type: "expense", account_id: cash.id, amount: "12", transaction_date: "2026-10-15" }).transaction;
+      matchPlan(owner, plan.id, { ...action(plan.version), transaction_id: transaction.id, transaction_version: transaction.version });
+    }
+    record(first);
+    const balance: number = getAccount(owner, cash.id).balance_cents;
+    assert.equal(catchup("2026-10-15").created_count, 1);
+    assert.deepEqual(listPlans(owner, { schedule_id: row.id }).plans.map(plan => plan.due_date), ["2026-12-15"]);
+    assert.equal(catchup("2026-10-15").created_count, 0);
+    assert.equal(getAccount(owner, cash.id).balance_cents, balance);
+    record(listPlans(owner, { schedule_id: row.id }).plans[0]);
+    assert.equal(catchup("2026-10-15").created_count, 0);
+    assert.equal(listPlans(owner, { schedule_id: row.id, status: "all" }).total, 2);
+  }
 });
 
 test("pause retains pending review; resume skips paused dates and defaults to the next future anchored occurrence", () => {

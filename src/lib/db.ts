@@ -454,6 +454,23 @@ export function getDb(): Database.Database {
       const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
       if (!columns.some(column => column.name === "obligation_id")) db.exec(`ALTER TABLE ${table} ADD COLUMN obligation_id TEXT REFERENCES finance_obligations(id)`);
     }
+    for (const table of ["finance_plans", "finance_schedules"]) {
+      const columns = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(column => column.name));
+      if (!columns.has("logged_time")) db.exec(`ALTER TABLE ${table} ADD COLUMN logged_time TEXT NOT NULL DEFAULT '00:00'`);
+      if (!columns.has("timezone")) db.exec(`ALTER TABLE ${table} ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'`);
+      if (table === "finance_plans") {
+        if (!columns.has("automatic_eligible")) db.exec("ALTER TABLE finance_plans ADD COLUMN automatic_eligible INTEGER NOT NULL DEFAULT 0 CHECK (automatic_eligible IN (0,1))");
+        if (!columns.has("slot_index")) db.exec("ALTER TABLE finance_plans ADD COLUMN slot_index INTEGER CHECK (slot_index >= 0)");
+        if (!columns.has("automatic_posted")) db.exec("ALTER TABLE finance_plans ADD COLUMN automatic_posted INTEGER NOT NULL DEFAULT 0 CHECK (automatic_posted IN (0,1)); UPDATE finance_plans SET automatic_posted=1 WHERE status='satisfied'");
+      } else {
+        if (!columns.has("handling")) db.exec("ALTER TABLE finance_schedules ADD COLUMN handling TEXT NOT NULL DEFAULT 'manual' CHECK (handling IN ('manual','automatic'))");
+        if (!columns.has("max_occurrences")) db.exec("ALTER TABLE finance_schedules ADD COLUMN max_occurrences INTEGER CHECK (max_occurrences BETWEEN 1 AND 4000000)");
+        if (!columns.has("total_limit_cents")) db.exec("ALTER TABLE finance_schedules ADD COLUMN total_limit_cents INTEGER CHECK (total_limit_cents IS NULL OR (typeof(total_limit_cents)='integer' AND total_limit_cents BETWEEN 1 AND 9007199254740991))");
+        if (!columns.has("slot_offset")) db.exec("ALTER TABLE finance_schedules ADD COLUMN slot_offset INTEGER NOT NULL DEFAULT 0 CHECK (slot_offset >= 0)");
+        if (!columns.has("automatic_error")) db.exec("ALTER TABLE finance_schedules ADD COLUMN automatic_error TEXT");
+        if (!columns.has("deleted_at")) db.exec("ALTER TABLE finance_schedules ADD COLUMN deleted_at INTEGER");
+      }
+    }
     const paymentColumns = db.prepare("PRAGMA table_info(finance_obligation_payments)").all() as Array<{ name: string }>;
     if (!paymentColumns.some(column => column.name === "fee_transaction_id")) db.exec("ALTER TABLE finance_obligation_payments ADD COLUMN fee_transaction_id TEXT REFERENCES finance_transactions(id)");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_payment_fee ON finance_obligation_payments(fee_transaction_id)");

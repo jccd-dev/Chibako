@@ -13,7 +13,7 @@ import { decimalPHP, localCalendarDate } from "./presentation";
 
 export function useFinancePlanEntry(plan: FinancePlan | null, activity: FinanceActivityController, planning: FinancePlanningController, obligation: FinanceObligation | null, onClose: () => void) {
   const linked = !!plan?.obligation_id;
-  const [mode, setMode] = useState<"edit" | "post" | "match" | "cancel">("edit");
+  const [mode, setMode] = useState<"edit" | "post" | "match" | "cancel">(plan?.status === "pending" ? "post" : "edit");
   const [type, setType] = useState<"income" | "expense">(plan?.type ?? "expense");
   const [amount, setAmount] = useState(plan ? decimalPHP(plan.amount_cents) : "");
   const [account, setAccount] = useState(plan?.account_id ?? "");

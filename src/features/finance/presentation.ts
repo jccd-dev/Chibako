@@ -12,6 +12,15 @@ export function allocationWarningText(result: { allocation_shortfalls?: { shortf
   return shortfalls?.length ? ` Goal allocation shortfall: ${shortfalls.map(row => formatPHP(row.shortfall_cents)).join("; ")}. Review goal reservations in Planning.` : "";
 }
 
+const historyMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function formatHistoryDate(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  const month = match ? Number(match[2]) : 0;
+  if (!match || month < 1 || month > 12) return iso;
+  return `${historyMonths[month - 1]} ${Number(match[3])}, ${match[1]}`;
+}
+
 export function localCalendarDate(): string {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;

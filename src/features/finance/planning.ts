@@ -13,15 +13,18 @@ import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, pla
 
 const selection = `SELECT p.*, a.name AS account_name, c.name AS category_name FROM finance_plans p
   JOIN finance_accounts a ON a.id = p.account_id LEFT JOIN finance_classifications c ON c.id = p.category_id`;
-type PlanRow = Omit<FinancePlan, "currency" | "tag_ids"> & {
-  text: string; tag_ids: string; created_at: number; updated_at: number; schedule_generation: number | null;
+type PlanRow = Omit<FinancePlan, "currency" | "tag_ids" | "handling"> & {
+  automatic_eligible: number; text: string; tag_ids: string; created_at: number; updated_at: number; schedule_generation: number | null;
   cancel_reason: "skipped" | "boundary" | "cadence" | null;
 };
 function fromRow(row: PlanRow, details: boolean): FinancePlan {
   const { text, tag_ids, created_at, updated_at, ...compact } = row;
   Reflect.deleteProperty(compact, "schedule_generation");
   Reflect.deleteProperty(compact, "cancel_reason");
-  return { ...compact, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
+  Reflect.deleteProperty(compact, "automatic_posted");
+  Reflect.deleteProperty(compact, "slot_index");
+  Reflect.deleteProperty(compact, "automatic_eligible");
+  return { ...compact, handling: row.automatic_eligible ? "automatic" : "manual", currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
 }
 export function readPlan(id: string, details = false): FinancePlan {
   const row = getDb().prepare(`${selection} WHERE p.id = ?`).get(id) as PlanRow | undefined;
@@ -56,7 +59,8 @@ export function listPlans(actor: FinanceActor, input: unknown = {}): PlanPage {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", db = getDb();
   return db.transaction(() => {
     const { total } = db.prepare(`SELECT COUNT(*) AS total FROM finance_plans p ${where}`).get(...values) as { total: number };
-    const rows = db.prepare(`${selection} ${where} ORDER BY p.due_date, p.id LIMIT ? OFFSET ?`).all(...values, query.limit, query.offset) as PlanRow[];
+    const direction = query.order === "newest" ? "DESC" : "ASC";
+    const rows = db.prepare(`${selection} ${where} ORDER BY p.due_date ${direction}, p.id ${direction} LIMIT ? OFFSET ?`).all(...values, query.limit, query.offset) as PlanRow[];
     return { plans: rows.map(row => fromRow(row, query.include_details)), total, limit: query.limit, offset: query.offset };
   })();
 }
@@ -87,8 +91,8 @@ export function createPlan(actor: FinanceActor, input: unknown): { plan: Finance
   return financeMutation(actor, request_id, "plan.create", payload, () => {
     validatePlanAccount(payload.account_id); validateTransactionClassifications(payload);
     const id = randomUUID(), timestamp = now();
-    getDb().prepare("INSERT INTO finance_plans (id,type,account_id,amount_cents,due_date,category_id,subcategory_id,text,tag_ids,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-      .run(id, payload.type, payload.account_id, amount, payload.due_date, payload.category_id, payload.subcategory_id, payload.text, JSON.stringify(payload.tag_ids), timestamp, timestamp);
+    getDb().prepare("INSERT INTO finance_plans (id,type,account_id,amount_cents,due_date,category_id,subcategory_id,text,tag_ids,created_at,updated_at,logged_time,timezone) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, payload.type, payload.account_id, amount, payload.due_date, payload.category_id, payload.subcategory_id, payload.text, JSON.stringify(payload.tag_ids), timestamp, timestamp, payload.logged_time, payload.timezone);
     return { result: { plan: readPlan(id) }, affectedIds: [id], before: null, after: readPlan(id, true) };
   });
 }
@@ -102,13 +106,13 @@ export function updatePlan(actor: FinanceActor, id: string, input: unknown): { p
     validatePlanObligation(after.obligation_id, after.type);
     if (after.account_id !== before.account_id) validatePlanAccount(after.account_id);
     if (patch.type !== undefined || patch.category_id !== undefined || patch.subcategory_id !== undefined || patch.tag_ids !== undefined) validateTransactionClassifications(after);
-    getDb().prepare("UPDATE finance_plans SET type=?,account_id=?,amount_cents=?,due_date=?,category_id=?,subcategory_id=?,text=?,tag_ids=?,obligation_id=?,version=version+1,updated_at=? WHERE id=?")
-      .run(after.type, after.account_id, after.amount_cents, after.due_date, after.category_id, after.subcategory_id, after.text ?? "", JSON.stringify(after.tag_ids), after.obligation_id, now(), id);
+    getDb().prepare("UPDATE finance_plans SET type=?,account_id=?,amount_cents=?,due_date=?,category_id=?,subcategory_id=?,text=?,tag_ids=?,obligation_id=?,logged_time=?,timezone=?,automatic_eligible=CASE WHEN ? IS NULL THEN automatic_eligible ELSE 0 END,version=version+1,updated_at=? WHERE id=?")
+      .run(after.type, after.account_id, after.amount_cents, after.due_date, after.category_id, after.subcategory_id, after.text ?? "", JSON.stringify(after.tag_ids), after.obligation_id, after.logged_time, after.timezone, after.obligation_id, now(), id);
     return { result: { plan: readPlan(id) }, affectedIds: [id], before, after: readPlan(id, true) };
   });
 }
 function satisfy(plan: FinancePlan, transactionId: string): SatisfiedPlan {
-  getDb().prepare("UPDATE finance_plans SET status='satisfied',transaction_id=?,version=version+1,updated_at=? WHERE id=?").run(transactionId, now(), plan.id);
+  getDb().prepare("UPDATE finance_plans SET status='satisfied',transaction_id=?,automatic_posted=1,version=version+1,updated_at=? WHERE id=?").run(transactionId, now(), plan.id);
   const transaction = readTransaction(transactionId, false), balance = readAccountBalance(transaction.account_id).balance_cents;
   return { plan: readPlan(plan.id), transaction, balance_cents: balance, ...financeBalanceWarnings([{ account_id: transaction.account_id, balance_cents: balance }]) };
 }
@@ -163,8 +167,14 @@ export function reopenPlanForTransaction(transactionId: string): { before: Finan
   const db = getDb(), row = db.prepare("SELECT id FROM finance_plans WHERE transaction_id = ? AND status = 'satisfied'").get(transactionId) as { id: string } | undefined;
   if (!row) return null;
   const before = readPlan(row.id, true);
+  // Deleting a schedule must not revive its payments when recorded cash is reverted.
+  if (before.schedule_id && db.prepare("SELECT id FROM finance_schedules WHERE id=? AND deleted_at IS NOT NULL").get(before.schedule_id)) {
+    if (before.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Plan version limit reached", 409, "version_conflict");
+    db.prepare("UPDATE finance_plans SET status='cancelled',transaction_id=NULL,cancel_reason='boundary',automatic_eligible=0,version=version+1,updated_at=? WHERE id=?").run(now(), row.id);
+    return { before, after: readPlan(row.id) };
+  }
   if (before.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Plan version limit reached", 409, "version_conflict");
-  db.prepare("UPDATE finance_plans SET status='pending',transaction_id=NULL,version=version+1,updated_at=? WHERE id=?").run(now(), row.id);
+  db.prepare("UPDATE finance_plans SET status='pending',transaction_id=NULL,automatic_eligible=0,version=version+1,updated_at=? WHERE id=?").run(now(), row.id);
   return { before, after: readPlan(row.id) };
 }
 export function cancelPlan(actor: FinanceActor, id: string, input: unknown): { plan: FinancePlan } {

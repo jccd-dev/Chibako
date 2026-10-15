@@ -48,7 +48,13 @@ export function useFinancePlanning(activityNotice: string, onSaved: () => Promis
       window.dispatchEvent(new Event("finance-changed"));
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not save the plan. Try again."); saving.current = false; setBusy(false); return null; }
     const label = { create: "Plan saved. Balances unchanged", edit: "Plan updated. Balances unchanged", cancel: "Plan cancelled. Balances unchanged", post: "Actual activity posted once", match: "Existing activity matched. No new cash movement", skip: "Selected occurrences skipped. Balances unchanged", "catch-up": "Due occurrences prepared for review. Balances unchanged" }[operation];
-    setNotice(`${label}.${"balance_cents" in result ? ` Account balance: ${formatPHP(result.balance_cents)}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${result.obligation ? ` Obligation remaining principal: ${formatPHP(result.obligation.outstanding_cents)}.${result.obligation.status === "settled" || result.obligation.status === "paid" ? " The obligation is fully satisfied." : ""}` : ""}${allocationWarningText(result)}` : ""}`);
+    setNotice(operation === "catch-up" ? "" : `${label}.${"balance_cents" in result ? ` Account balance: ${formatPHP(result.balance_cents)}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${result.obligation ? ` Obligation remaining principal: ${formatPHP(result.obligation.outstanding_cents)}.${result.obligation.status === "settled" || result.obligation.status === "paid" ? " The obligation is fully satisfied." : ""}` : ""}${allocationWarningText(result)}` : ""}`);
+    if ((operation === "post" || operation === "match") && "plan" in result && result.plan.schedule_id) {
+      try {
+        const catchUp = await fetch("/api/finance/plans/catch-up", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: crypto.randomUUID(), through_date: localCalendarDate() }) }).then(financeJson<{ created_count: number; has_more: boolean }>);
+        setHasMoreCatchUp(catchUp.has_more);
+      } catch { setSaveError("Payment recorded, but the next occurrence could not be prepared. Reload and run catch-up on the plan."); }
+    }
     try { await Promise.all([refresh(), onSaved()]); }
     catch { setError("Plan saved, but related totals could not refresh. Reload before making further changes."); }
     finally { saving.current = false; setBusy(false); }

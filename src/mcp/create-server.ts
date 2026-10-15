@@ -525,7 +525,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postObligationPaymentSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postObligationPayment(actor, args) })));
     server.registerTool("catch_up_finance_plans", {
-      title: "Catch up recurring pending review", description: "Generate at most 1000 pending recurring occurrences through through_date (default today), plus one next upcoming per active schedule. No cash effects. Requires finance:write and request_id. Repeat with fresh request IDs while has_more; identical retries return the original result.",
+      title: "Catch up recurring pending review", description: "Generate at most 1000 pending recurring occurrences through through_date (default today), plus one next upcoming per active schedule, respecting slot limits. This call has no cash effects; automatic schedules are posted separately by the running server when their local due time arrives. Requires finance:write and request_id. Repeat with fresh request IDs while has_more; identical retries return the original result.",
       inputSchema: catchUpPlansSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...catchUpPlans(actor, args) })));
     server.registerTool("skip_finance_plans", {
@@ -533,7 +533,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: skipPlansSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...skipPlans(actor, args) })));
     server.registerTool("create_finance_plan", {
-      title: "Plan one-time income or expense", description: "Create pending PHP activity with due_date and expected amount/account, without changing balances or actual spending. Requires finance:write and request_id.",
+      title: "Plan one-time income or expense", description: "Create pending PHP activity with due_date and expected amount/account, without changing balances or actual spending. Optional logged_time (HH:mm, default 00:00) and timezone (IANA, default UTC). Requires finance:write and request_id.",
       inputSchema: createPlanSchema, annotations,
     }, args => financeResult("finance:write", actor => createPlan(actor, args)));
     server.registerTool("update_finance_plan", {
@@ -612,11 +612,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: setGoalAllocationSchema.extend({ id: getGoalSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => setGoalAllocation(actor, id, args)));
     server.registerTool("create_finance_schedule", {
-      title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. Optional obligation_id associates debt expense or receivable income reminders; posting explicitly reviews principal and fees. May start paused for reviewed imports. Requires finance:manage and request_id; no pending generation or cash effect.",
+      title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. handling defaults to manual. Automatic handling also requires finance:write and posts at logged_time in the IANA timezone while the Next server runs, including missed dates after restart. Obligation reminders require manual handling. Optional max_occurrences or total_limit (PHP decimal) cap scheduled slots including skips; no partial final payment. Imported schedules remain manual and may start paused. Requires finance:manage and request_id.",
       inputSchema: createScheduleSchema, annotations,
     }, args => financeResult("finance:manage", actor => createSchedule(actor, args)));
     server.registerTool("update_finance_schedule", {
-      title: "Edit this and future occurrences", description: "Change a schedule from selected pending from_plan_id onward, including nullable obligation_id. Requires schedule version, from_plan_version and request_id. Earlier occurrences and satisfied history remain intact. For one occurrence use update_finance_plan. Cadence changes cancel obsolete future pending expectations and restart from selected/new start_date; catch up explicitly afterward.",
+      title: "Edit this and future occurrences", description: "Change a schedule from selected pending from_plan_id onward, including nullable obligation_id. Requires schedule version, from_plan_version and request_id. Earlier occurrences and satisfied history remain intact. For one occurrence use update_finance_plan. Cadence changes cancel obsolete future pending expectations and restart from selected/new start_date. Slot caps retain the earlier slot count. Total-limit slots use the current amount. Manual schedules need catch-up; automatic schedules run on the server. Editing an automatic schedule also requires finance:write.",
       inputSchema: updateScheduleSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateSchedule(actor, id, args)));
     server.registerTool("pause_finance_schedule", {
@@ -624,7 +624,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: scheduleActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => pauseSchedule(actor, id, args)));
     server.registerTool("resume_finance_schedule", {
-      title: "Resume recurring schedule", description: "Explicitly resume a paused schedule from its next future anchored due date, skipping dates while paused. Existing pending review and history remain. Requires finance:manage, request_id and current version.",
+      title: "Resume recurring schedule", description: "Explicitly resume a paused schedule from its next future anchored due date, skipping dates while paused. Existing pending review and history remain. Requires finance:manage, request_id and current version; automatic schedules also require finance:write.",
       inputSchema: scheduleActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => resumeSchedule(actor, id, args)));
     server.registerTool("set_finance_budget", {

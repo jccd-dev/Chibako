@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { ActivityPage } from "../activity-types";
 import { financeJson } from "../client-json";
-import { formatPHP } from "../presentation";
+import { formatPHP, formatHistoryDate } from "../presentation";
 
 const labels = {
   income: "Income",
@@ -92,31 +92,32 @@ export function FinanceAccountHistory({
               <button
                 type="button"
                 onClick={() => onInspect(row.id)}
-                aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${row.transaction_date}`}
-                className="flex w-full flex-wrap items-start justify-between gap-2 rounded-md px-1 py-3 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}
+                className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
               >
-              <div className="min-w-0 flex-1">
-                <p className="break-words text-sm font-medium">
-                  {row.obligation_payment
-                    ? row.type === "expense"
-                      ? "Debt payment"
-                      : "Receivable collection"
-                    : (row.category_name ?? labels[row.type])}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {row.transaction_date}
-                  {row.hidden ? " / Hidden" : ""}
-                  {row.reverted ? " / Reverted" : ""}
-                </p>
-                {row.destination_account_name && (
-                  <p className="mt-1 break-words text-xs text-muted-foreground">
-                    {row.account_name} to {row.destination_account_name}
-                  </p>
-                )}
-              </div>
-              <p className="text-sm tabular-nums">
+              <span className="min-w-0 truncate text-sm font-medium">
+                {row.obligation_payment
+                  ? row.type === "expense"
+                    ? "Debt payment"
+                    : "Receivable collection"
+                  : (row.category_name ?? labels[row.type])}
+              </span>
+              <p className="justify-self-end text-sm tabular-nums">
                 {formatPHP(row.amount_cents)}
               </p>
+              <span className="min-w-0 truncate text-xs text-muted-foreground">
+                {formatHistoryDate(row.transaction_date)}
+                {row.destination_account_name
+                  ? ` · ${row.account_name} to ${row.destination_account_name}`
+                  : ""}
+              </span>
+              {row.hidden || row.reverted ? (
+                <span className="col-span-2 text-xs text-muted-foreground">
+                  {row.hidden ? "Hidden" : ""}
+                  {row.hidden && row.reverted ? " · " : ""}
+                  {row.reverted ? "Reverted" : ""}
+                </span>
+              ) : null}
               </button>
             </li>
           ))}
