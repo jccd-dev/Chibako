@@ -27,6 +27,8 @@ import { FinancePlanToggle } from "./FinancePlanToggle";
 import { FinanceScheduleFields } from "./FinanceScheduleFields";
 import { FinanceSchedulePreview } from "./FinanceSchedulePreview";
 import { FinanceOptionStatus } from "./FinanceActivity";
+import { MoneyInput } from "./MoneyInput";
+import { financeDrawerFooter } from "@/features/finance/presentation";
 import type { ReminderOptions } from "./FinancePlans";
 
 export function FinancePlanningForm({
@@ -135,13 +137,13 @@ export function FinancePlanningForm({
         </Field>
         <Field data-invalid={!!errors.amount}>
           <FieldLabel htmlFor="schedule-amount">Amount (PHP)</FieldLabel>
-          <Input
+          <MoneyInput
             id="schedule-amount"
             inputMode="decimal"
             value={amount}
             disabled={busy}
             placeholder="0.00"
-            onChange={(event) => setAmount(event.target.value)}
+            onValueChange={(value) => setAmount(value)}
             {...invalid("amount")}
           />
           <FieldError id="schedule-error-amount">{errors.amount}</FieldError>
@@ -375,7 +377,7 @@ export function FinancePlanningForm({
           </Alert>
         )}
       </FieldGroup>
-      <div className="sticky bottom-0 -mx-4 mt-auto flex flex-wrap justify-end gap-2 border-t border-border bg-background p-4 sm:-mx-6 sm:px-6">
+      <div className={financeDrawerFooter}>
         <Button
           type="button"
           variant="outline"

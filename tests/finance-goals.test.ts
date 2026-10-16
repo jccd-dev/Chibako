@@ -99,10 +99,8 @@ test("invalid money/accounts and aggregate overflow reject atomically at the exa
   assert.deepEqual(getGoal(owner, g.id), before);
   assert.equal(listGoalAccounts(owner).accounts.find(row => row.account_id === b.id)?.reserved_cents, 0);
   assert.equal(expense(a.id, "90071992547409.91").balance_cents, 0);
-  const below = expense(a.id, "0.01");
-  assert.deepEqual(below.warnings, ["negative_balance", "allocation_shortfall"]);
-  assert.equal(below.allocation_shortfalls?.[0].shortfall_cents, Number.MAX_SAFE_INTEGER);
-  assert.equal(getAccount(owner, a.id).balance_cents, -1);
+  assert.throws(() => expense(a.id, "0.01"), { code: "insufficient_funds" });
+  assert.equal(getAccount(owner, a.id).balance_cents, 0);
 });
 
 const context = { params: Promise.resolve({}) };

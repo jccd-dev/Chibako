@@ -5,6 +5,7 @@ import { postTransactionSchema } from "./activity-types";
 import { postTransferSchema } from "./movement-types";
 import { cashbackCents, cashbackSchema, type CashbackInput } from "./cashback-types";
 import { decimalCents } from "./money";
+import { financeBalanceShortfall } from "./balance-gate";
 import { localCalendarDate } from "./presentation";
 import type { FinanceNoteChoice } from "./note-link-types";
 import type { FinanceActivityController } from "./use-finance-activity";
@@ -47,7 +48,9 @@ export function useFinanceEntry(activity: FinanceActivityController, open: boole
   function changeCashbackMode(mode: "off" | CashbackInput["mode"]) {
     setCashbackMode(mode); setCashbackValue("");
   }
+  const shortfall = type === "expense" ? financeBalanceShortfall({ accounts: activity.accounts, account_id: accountId, amount, subject: "expense" }) : null;
   async function save(another: boolean): Promise<{ saved: boolean; invalidField?: string }> {
+    if (shortfall) return { saved: false, invalidField: "amount" };
     const input = { type, amount, account_id: accountId, transaction_date: date, category_id: categoryId || null, subcategory_id: subcategoryId || null, text, tag_ids: tagIds, note_ids: notes.map(note => note.id), ...(cashback ? { cashback } : {}) };
     const transfer = { source_account_id: accountId, destination_account_id: destinationId, amount, transaction_date: date, text, tag_ids: tagIds, note_ids: notes.map(note => note.id), ...(hasFee ? { fee: { amount: feeAmount, category_id: feeCategoryId, subcategory_id: feeSubcategoryId || null } } : {}) };
     const parsed = type === "transfer" ? postTransferSchema.safeParse({ request_id: "validate", ...transfer }) : postTransactionSchema.safeParse({ request_id: "validate", ...input });
@@ -75,5 +78,5 @@ export function useFinanceEntry(activity: FinanceActivityController, open: boole
     return { saved: true };
   }
 
-  return { cashbackMode, changeCashbackMode, cashbackValue, setCashbackValue, cashbackPreview, destinationId, setDestinationId, hasFee, setHasFee, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory: (value: string) => { setFeeCategoryId(value); setFeeSubcategoryId(""); }, feeSubcategoryId, setFeeSubcategoryId, type, changeType, amount, setAmount, accountId, setAccountId, date, setDate, categoryId, changeCategory, subcategoryId, setSubcategoryId, text, setText, tagIds, setTagIds, notes, setNotes, errors, save };
+  return { cashbackMode, changeCashbackMode, cashbackValue, setCashbackValue, cashbackPreview, shortfall, destinationId, setDestinationId, hasFee, setHasFee, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory: (value: string) => { setFeeCategoryId(value); setFeeSubcategoryId(""); }, feeSubcategoryId, setFeeSubcategoryId, type, changeType, amount, setAmount, accountId, setAccountId, date, setDate, categoryId, changeCategory, subcategoryId, setSubcategoryId, text, setText, tagIds, setTagIds, notes, setNotes, errors, save };
 }

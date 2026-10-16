@@ -16,7 +16,6 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FinancePlanCategories } from "./FinancePlanCategories";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Field,
@@ -42,9 +41,10 @@ import { FinanceDateInput, FinanceMonthInput } from "./FinanceDateInputs";
 import { FinanceNoteLinks, FinanceNotePicker } from "./FinanceNoteLinks";
 import { FinanceTransferFields } from "./FinanceTransferFields";
 import { FinanceCashbackFields } from "./FinanceCashbackFields";
+import { MoneyInput } from "./MoneyInput";
 import { useFinanceEntry } from "@/features/finance/use-finance-entry";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
-import { financeSheet, formatPHP, formatHistoryDate } from "@/features/finance/presentation";
+import { financeDrawerFooter, financeSheet, formatPHP, formatHistoryDate } from "@/features/finance/presentation";
 
 const activityLabel = (type: FinanceTransaction["type"]) =>
   ({
@@ -329,7 +329,7 @@ export function FinanceTransactionDetails({
             spending on the date money returns.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
           {inspectionError ? (
             <Alert>
               <AlertDescription>
@@ -514,14 +514,17 @@ export function FinanceTransactionDetails({
               onSaved={(id) => void inspect(id)}
             />
           )}
-          <Button
-            variant="outline"
-            disabled={activity.busy}
-            className="mt-auto self-end"
-            onClick={onClose}
-          >
-            Close details
-          </Button>
+        </div>
+        <div className="shrink-0 border-t border-border p-4">
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              disabled={activity.busy}
+              onClick={onClose}
+            >
+              Close details
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -605,6 +608,7 @@ export function FinanceTransactionEntry({
     notes,
     setNotes,
     errors,
+    shortfall,
     save,
   } = entry;
   const accountKey = type === "transfer" ? "source_account_id" : "account_id";
@@ -645,7 +649,7 @@ export function FinanceTransactionEntry({
         <form
           onSubmit={submit}
           noValidate
-          className="flex flex-1 flex-col gap-6 p-4 sm:p-6"
+          className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0"
         >
           <FieldGroup className="gap-6">
             <Field>
@@ -678,14 +682,14 @@ export function FinanceTransactionEntry({
             </Field>
             <Field data-invalid={!!errors.amount}>
               <FieldLabel htmlFor="transaction-amount">Amount (PHP)</FieldLabel>
-              <Input
+              <MoneyInput
                 ref={amountRef}
                 id="transaction-amount"
                 inputMode="decimal"
                 value={amount}
                 disabled={activity.busy}
                 placeholder="0.00"
-                onChange={(event) => setAmount(event.target.value)}
+                onValueChange={(value) => setAmount(value)}
                 className="tabular-nums"
                 {...errorProps("amount")}
               />
@@ -724,6 +728,11 @@ export function FinanceTransactionEntry({
                 {errors[accountKey]}
               </FieldError>
             </Field>
+            {shortfall && (
+              <p role="alert" className="text-sm text-destructive">
+                {shortfall.message}
+              </p>
+            )}
             {type === "transfer" && (
               <FinanceTransferFields activity={activity} entry={entry} />
             )}
@@ -856,7 +865,7 @@ export function FinanceTransactionEntry({
               </Alert>
             )}
           </FieldGroup>
-          <div className="sticky bottom-0 -mx-4 mt-auto flex flex-wrap justify-end gap-2 border-t border-border bg-background p-4 sm:-mx-6 sm:px-6">
+          <div className={financeDrawerFooter}>
             <Button
               type="button"
               variant="outline"
@@ -869,11 +878,14 @@ export function FinanceTransactionEntry({
               type="submit"
               name="another"
               variant="outline"
-              disabled={activity.busy}
+              disabled={activity.busy || !!shortfall}
             >
               Save and add another
             </Button>
-            <Button type="submit" disabled={activity.busy}>
+            <Button
+              type="submit"
+              disabled={activity.busy || !!shortfall}
+            >
               {activity.busy ? "Saving…" : "Save transaction"}
             </Button>
           </div>

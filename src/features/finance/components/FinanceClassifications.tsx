@@ -5,14 +5,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { IconCategory } from "@tabler/icons-react";
 import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { FinanceClassification } from "@/features/finance/activity-types";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import { useFinanceClassifications } from "@/features/finance/use-finance-classifications";
-import { financeSheet } from "@/features/finance/presentation";
+import { financeDrawerFooter, financeSheet } from "@/features/finance/presentation";
 import { FinanceOptionStatus } from "./FinanceActivity";
 
 function ClassificationBadge({
@@ -27,24 +27,21 @@ function ClassificationBadge({
   onClick: () => void;
 }) {
   return (
-    <Badge
-      variant={item.archived ? "outline" : "secondary"}
-      className={`h-auto! min-h-11 min-w-11 max-w-full transition-none disabled:pointer-events-none disabled:opacity-50 ${item.archived ? "border-dashed hover:bg-muted" : "hover:bg-secondary/80"}`}
-      render={
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onClick}
-          aria-label={`Manage ${item.name}${item.archived ? " (archived)" : ""}`}
-        />
-      }
+    <Button
+      type="button"
+      variant="outline"
+      className={`h-auto min-h-9 min-w-9 gap-2 px-2.5 py-1.5 transition-none disabled:pointer-events-none disabled:opacity-50 ${item.archived ? "border-dashed hover:bg-muted" : ""}`}
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={`Manage ${item.name}${item.archived ? " (archived)" : ""}`}
     >
+      <IconCategory aria-hidden="true" />
       <span className="min-w-0 whitespace-normal text-left text-sm [overflow-wrap:anywhere]">
         {item.name}
         {count !== undefined && count > 0 && <span className="text-muted-foreground"> ({count})</span>}
         {item.archived && <span className="text-muted-foreground"> Archived</span>}
       </span>
-    </Badge>
+    </Button>
   );
 }
 
@@ -157,8 +154,8 @@ export function FinanceClassifications({ activity }: { activity: FinanceActivity
             <SheetTitle>{sheetTitle}</SheetTitle>
             <SheetDescription>{sheetDescription}</SheetDescription>
           </SheetHeader>
-          <form onSubmit={event => { event.preventDefault(); void model.submit(); }} className="flex flex-1 flex-col gap-4 p-4">
-            <FieldGroup>
+          <form onSubmit={event => { event.preventDefault(); void model.submit(); }} className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
+            <FieldGroup className="gap-6">
               <Field>
                 <FieldLabel htmlFor="classification-name">{nameLabel}</FieldLabel>
                 <Input id="classification-name" required maxLength={120} value={model.draftName} disabled={activity.busy} onChange={event => model.setDraftName(event.target.value)} />
@@ -176,12 +173,12 @@ export function FinanceClassifications({ activity }: { activity: FinanceActivity
               {view.kind === "create-subcategory" && <FieldDescription>Adds an {view.parent.type === "income" ? "income" : "expense"} subcategory in {view.parent.name}. Type and parent are fixed.</FieldDescription>}
             </FieldGroup>
             {activity.saveError && <Alert><AlertDescription>{activity.saveError} Your entries are kept. Reopen this classification if it has changed.</AlertDescription></Alert>}
-            <div className="mt-auto flex flex-wrap justify-end gap-2">
+            <div className={view.kind === "manage-category" ? "mt-auto flex flex-wrap justify-end gap-2 border-t border-border pt-5" : financeDrawerFooter}>
               <Button type="button" variant="outline" disabled={childBack ? activity.busy || model.dirty : activity.busy} onClick={childBack ? model.backToParent : model.close}>{childBack && model.childParent ? "Back to category" : "Cancel"}</Button>
               <Button type="submit" disabled={activity.busy || !model.draftName.trim()}>{activity.busy ? "Saving…" : submitLabel}</Button>
             </div>
             {view.kind === "manage-category" && (
-              <div className="border-t border-border pt-5">
+              <div className="mb-4 border-t border-border pt-5 sm:mb-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <h3 className="text-sm font-medium">Subcategories</h3>
                   {!view.item.archived && <Button type="button" variant="outline" disabled={activity.busy || model.dirty} onClick={() => model.openCreateSubcategory(view.item)}>Add subcategory</Button>}

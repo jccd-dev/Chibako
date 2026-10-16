@@ -4,7 +4,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { format, lastDayOfMonth, parse } from "date-fns";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { MoneyInput } from "./MoneyInput";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -18,7 +18,8 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { FinanceDateInput, FinanceMonthInput } from "./FinanceDateInputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
-import { financeSheet, formatPHP as money } from "@/features/finance/presentation";
+import { FinancePlanCategories } from "./FinancePlanCategories";
+import { financeDrawerFooter, financeSheet, formatPHP as money } from "@/features/finance/presentation";
 import type { FinanceReportsController } from "@/features/finance/use-finance-reports";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import type { FinanceBudgetController } from "@/features/finance/use-finance-budget";
@@ -133,7 +134,6 @@ export function FinanceBudgets({
     if (!focusCategoryId || !focusMonth) return;
     void openFocusedBudget(focusCategoryId, focusMonth);
   }, [focusCategoryId, focusMonth, onFocusHandled]);
-  const categories = activity.classifications.filter(row => row.kind === "category" && row.type === "expense" && !row.parent_id);
   return <section id="finance-budgets" aria-label="Monthly budgets">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-semibold">Monthly budgets</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Expense-category limits include all subcategories and accounts. Calendar months start on day 1, without rollover.</p></div><Button onClick={() => setOpen(true)}>Set budget</Button></div>
     <p className="mt-5 text-sm text-muted-foreground">Review spending against limits in Overview. Forward changes preserve earlier months. Use an explicit correction for one month.</p>
@@ -141,16 +141,26 @@ export function FinanceBudgets({
     <FinanceOptionStatus activity={activity} />
     <Sheet open={open} onOpenChange={value => { if (!busy) setOpen(value); }}><SheetContent showCloseButton={false} className={financeSheet}>
       <SheetHeader className="border-b border-border p-4"><SheetTitle>Set monthly budget</SheetTitle><SheetDescription>Choose a forward limit or an explicit correction to one month.</SheetDescription></SheetHeader>
-      <form onSubmit={event => { event.preventDefault(); void budget.save(); }} className="flex flex-1 flex-col gap-4 p-4">
-        <FieldGroup>
-          <Field><FieldLabel htmlFor="budget-category">Expense category</FieldLabel><NativeSelect id="budget-category" required className="w-full" disabled={busy} value={category} onChange={event => setCategory(event.target.value)}><NativeSelectOption value="">Choose a category</NativeSelectOption>{categories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}{row.archived ? " (archived)" : ""}</NativeSelectOption>)}</NativeSelect><FieldDescription>Includes subcategories. Create expense categories in Manage.</FieldDescription></Field>
-          <Field><FieldLabel htmlFor="budget-month">Budget month</FieldLabel><FinanceMonthInput id="budget-month" required min="1000-01" max="9999-12" disabled={busy} value={month} onChange={setMonth} /></Field>
-          <Field><FieldLabel htmlFor="budget-mode">Apply change</FieldLabel><NativeSelect id="budget-mode" className="w-full" disabled={busy} value={mode} onChange={event => setMode(event.target.value)}><NativeSelectOption value="forward">From this month onward</NativeSelectOption><NativeSelectOption value="correction">Correct this month only</NativeSelectOption></NativeSelect><FieldDescription>{mode === "forward" ? "Replaces all limits and corrections from this month onward. Earlier months stay unchanged." : "Changes only this month, preserving earlier and later limits."}</FieldDescription></Field>
-          <Field><FieldLabel htmlFor="budget-amount">Monthly limit (PHP)</FieldLabel><Input id="budget-amount" required inputMode="decimal" pattern="\d+(\.\d{1,2})?" disabled={busy || !snapshot} value={amount} onChange={event => setAmount(event.target.value)} /><FieldDescription>{snapshot ? `Current limit: ${snapshot.limit_cents === null ? "no budget" : money(snapshot.limit_cents)}. A zero limit warns on any spending.` : category ? "Loading the selected limit…" : "Choose a category first."}</FieldDescription></Field>
+      <form onSubmit={event => { event.preventDefault(); void budget.save(); }} className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
+        <FieldGroup className="gap-6">
+          <FinancePlanCategories
+            activity={activity}
+            type="expense"
+            value={category}
+            onChange={setCategory}
+            disabled={busy}
+            id="budget-category"
+          />
+          <FieldGroup className="rounded-xl bg-muted/50 p-4">
+            <Field><FieldLabel htmlFor="budget-month">Budget month</FieldLabel><FinanceMonthInput id="budget-month" required min="1000-01" max="9999-12" disabled={busy} value={month} onChange={setMonth} /></Field>
+            <Field><FieldLabel htmlFor="budget-mode">Apply change</FieldLabel><NativeSelect id="budget-mode" className="w-full" disabled={busy} value={mode} onChange={event => setMode(event.target.value)}><NativeSelectOption value="forward">From this month onward</NativeSelectOption><NativeSelectOption value="correction">Correct this month only</NativeSelectOption></NativeSelect></Field>
+            <FieldDescription>{mode === "forward" ? "Replaces all limits and corrections from this month onward. Earlier months stay unchanged." : "Changes only this month, preserving earlier and later limits."}</FieldDescription>
+          </FieldGroup>
+          <Field><FieldLabel htmlFor="budget-amount">Monthly limit (PHP)</FieldLabel><MoneyInput id="budget-amount" required inputMode="decimal" pattern="\d{1,3}(,\d{3})*(\.\d{1,2})?" className="tabular-nums" placeholder="0.00" disabled={busy || !snapshot} value={amount} onValueChange={value => setAmount(value)} /><FieldDescription>{snapshot ? `Current limit: ${snapshot.limit_cents === null ? "no budget" : money(snapshot.limit_cents)}. A zero limit warns on any spending.` : category ? "Loading the selected limit…" : "Choose a category first."}</FieldDescription></Field>
+          {loadError && <Alert><AlertDescription>{loadError}<Button variant="outline" onClick={budget.refresh}>Retry budget</Button></AlertDescription></Alert>}
+          {saveError && <Alert><AlertDescription>{saveError} Refresh the selected limit before changing a stale version.<Button variant="outline" disabled={busy} onClick={budget.refresh}>Refresh budget</Button></AlertDescription></Alert>}
         </FieldGroup>
-        {loadError && <Alert><AlertDescription>{loadError}<Button variant="outline" onClick={budget.refresh}>Retry budget</Button></AlertDescription></Alert>}
-        {saveError && <Alert><AlertDescription>{saveError} Refresh the selected limit before changing a stale version.<Button variant="outline" disabled={busy} onClick={budget.refresh}>Refresh budget</Button></AlertDescription></Alert>}
-        <div className="mt-auto flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" disabled={busy || !snapshot || !amount}>{busy ? "Saving…" : "Save budget"}</Button></div>
+        <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" disabled={busy || !snapshot || !amount}>{busy ? "Saving…" : "Save budget"}</Button></div>
       </form>
     </SheetContent></Sheet>
   </section>;

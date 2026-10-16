@@ -9,13 +9,14 @@ import type { FinanceActivityController } from "./use-finance-activity";
 import { createPlanSchema, updatePlanSchema, postPlanSchema } from "./planning-types";
 import { financeJson } from "./client-json";
 import { decimalCents } from "./money";
-import { decimalPHP, localCalendarDate } from "./presentation";
+import { financeBalanceShortfall } from "./balance-gate";
+import { decimalPHPInput, localCalendarDate } from "./presentation";
 
 export function useFinancePlanEntry(plan: FinancePlan | null, activity: FinanceActivityController, planning: FinancePlanningController, obligation: FinanceObligation | null, onClose: () => void) {
   const linked = !!plan?.obligation_id;
   const [mode, setMode] = useState<"edit" | "post" | "match" | "cancel">(plan?.status === "pending" ? "post" : "edit");
   const [type, setType] = useState<"income" | "expense">(plan?.type ?? "expense");
-  const [amount, setAmount] = useState(plan ? decimalPHP(plan.amount_cents) : "");
+  const [amount, setAmount] = useState(plan ? decimalPHPInput(plan.amount_cents) : "");
   const [account, setAccount] = useState(plan?.account_id ?? "");
   const [dueDate, setDueDate] = useState(plan?.due_date ?? localCalendarDate());
   const [date, setDate] = useState(localCalendarDate);
@@ -61,7 +62,12 @@ export function useFinancePlanEntry(plan: FinancePlan | null, activity: FinanceA
     return () => abort.abort();
   }, [linked, mode, cashSource, cashOffset, cashReload, planType]);
 
+  const shortfall = mode === "post" && type === "expense" && cashSource === "new"
+    ? financeBalanceShortfall({ accounts, account_id: account, amount, newly_posted_fee_amount: linked && feeType === "expense" ? feeAmount : "", subject: "payment" })
+    : null;
+
   async function submit(another: boolean) {
+    if (shortfall) return;
     if (linked && mode === "post" && (!obligation || cashSource === "existing" && !cashPick)) return;
     const fields = { type, amount, account_id: account, due_date: dueDate, category_id: category || null, subcategory_id: subcategory || null, text, tag_ids: plan?.tag_ids ?? [], ...(plan?.schedule_id ? { obligation_id: association || null } : {}) };
     const cash = cashSource === "existing" && cashPick ? { cash_activity_id: cashPick.id, cash_activity_version: cashPick.version } : {};
@@ -82,14 +88,14 @@ export function useFinancePlanEntry(plan: FinancePlan | null, activity: FinanceA
     if (another && !plan) { setAmount(""); setText(""); requestAnimationFrame(() => document.getElementById("plan-amount")?.focus()); }
     else onClose();
   }
-  function changeMode(value: typeof mode) { planning.resetSave(); setErrors({}); setMode(value); setAmount(plan ? decimalPHP(plan.amount_cents) : ""); setAccount(plan?.account_id ?? ""); setFeeAmount(""); setFeeCategoryId(""); setFeeSubcategoryId(""); setFeeType("expense"); setCashSource("new"); setCashPick(null); setCashPage(null); setCashError(""); setCashOffset(0); }
+  function changeMode(value: typeof mode) { planning.resetSave(); setErrors({}); setMode(value); setAmount(plan ? decimalPHPInput(plan.amount_cents) : ""); setAccount(plan?.account_id ?? ""); setFeeAmount(""); setFeeCategoryId(""); setFeeSubcategoryId(""); setFeeType("expense"); setCashSource("new"); setCashPick(null); setCashPage(null); setCashError(""); setCashOffset(0); }
   function changeType(value: string) { setType(value === "income" ? "income" : "expense"); setCategory(""); setSubcategory(""); setAssociation(""); }
   function changeCategory(value: string) { setCategory(value); setSubcategory(""); }
   function changeFeeType(value: string) { setFeeType(value === "income" ? "income" : "expense"); setFeeCategoryId(""); setFeeSubcategoryId(""); }
   function changeFeeCategory(value: string) { setFeeCategoryId(value); setFeeSubcategoryId(""); }
   function chooseCashSource(value: string) { setCashSource(value === "existing" ? "existing" : "new"); clearCash(); setCashOffset(0); }
-  function selectCash(record: FinanceTransaction) { setCashPick(record); setErrors({}); setAmount(decimalPHP(record.amount_cents)); setAccount(record.account_id); setDate(record.transaction_date); setFeeAmount(""); }
-  function clearCash() { setCashPick(null); setErrors({}); setAmount(plan ? decimalPHP(plan.amount_cents) : ""); setAccount(plan?.account_id ?? ""); setDate(localCalendarDate()); setCashReload(n => n + 1); }
+  function selectCash(record: FinanceTransaction) { setCashPick(record); setErrors({}); setAmount(decimalPHPInput(record.amount_cents)); setAccount(record.account_id); setDate(record.transaction_date); setFeeAmount(""); }
+  function clearCash() { setCashPick(null); setErrors({}); setAmount(plan ? decimalPHPInput(plan.amount_cents) : ""); setAccount(plan?.account_id ?? ""); setDate(localCalendarDate()); setCashReload(n => n + 1); }
   function invalid(key: string) { return { "aria-invalid": !!errors[key], "aria-describedby": errors[key] ? `plan-error-${key}` : undefined }; }
-  return { mode, type, amount, setAmount, account, setAccount, dueDate, setDueDate, date, setDate, category, subcategory, setSubcategory, text, setText, association, setAssociation, feeType, changeFeeType, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory, feeSubcategoryId, setFeeSubcategoryId, feeCategories, feeSubcategories, cashSource, chooseCashSource, cashPick, selectCash, clearCash, cashPage, cashOffset, setCashOffset, cashLoading, cashError, retryCash: () => setCashReload(value => value + 1), errors, editable, categories, subcategories, accounts, submit, changeMode, changeType, changeCategory, invalid };
+  return { mode, type, amount, setAmount, account, setAccount, dueDate, setDueDate, date, setDate, category, subcategory, setSubcategory, text, setText, association, setAssociation, feeType, changeFeeType, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory, feeSubcategoryId, setFeeSubcategoryId, feeCategories, feeSubcategories, cashSource, chooseCashSource, cashPick, selectCash, clearCash, cashPage, cashOffset, setCashOffset, cashLoading, cashError, retryCash: () => setCashReload(value => value + 1), errors, editable, shortfall, categories, subcategories, accounts, submit, changeMode, changeType, changeCategory, invalid };
 }

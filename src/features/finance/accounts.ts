@@ -40,6 +40,10 @@ export function readAccountBalance(id: string): FinanceAccount {
   return accountFromRow(row);
 }
 
+export function requireSufficientFunds(balanceCents: number | bigint, outgoingCents: number | bigint) {
+  if (BigInt(balanceCents) < BigInt(outgoingCents)) throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
+}
+
 export function getAccount(actor: FinanceActor, id: string): FinanceAccount {
   authorizeFinance(actor, "finance:read");
   return readAccountBalance(parse(getAccountSchema, { id }).id);

@@ -11,6 +11,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import {
+  financeDrawerFooter,
   financeSheet,
 } from "@/features/finance/presentation";
 import { useFinanceImportInspection } from "@/features/finance/use-finance-import-inspection";
@@ -92,7 +93,7 @@ export function FinanceImportInspection({
             and is never saved.
           </SheetDescription>
         </SheetHeader>
-        <div className="flex flex-1 flex-col gap-4 p-4">
+        <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
           <input
             ref={inputRef}
             id="tarsi-backup-file"
@@ -457,7 +458,7 @@ export function FinanceImportInspection({
             </>
           )}
 
-          <div className="mt-auto flex justify-end pt-4">
+          <div className={financeDrawerFooter}>
             <Button
               type="button"
               variant="outline"

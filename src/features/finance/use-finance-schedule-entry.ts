@@ -7,7 +7,7 @@ import { createScheduleSchema, updateScheduleSchema } from "./recurrence-types";
 import type { FinanceActivityController } from "./use-finance-activity";
 import type { FinancePlanningController } from "./use-finance-planning";
 import type { FinanceRecurrenceController } from "./use-finance-recurrence";
-import { decimalPHP, localCalendarDate } from "./presentation";
+import { decimalPHPInput, localCalendarDate } from "./presentation";
 import { decimalCents } from "./money";
 import { repeatPreset, repeatPresets } from "./repeat-presets";
 
@@ -16,7 +16,7 @@ type EndCondition = "forever" | "date" | "payments" | "total";
 export function useFinanceScheduleEntry(schedule: FinanceSchedule | null, occurrence: FinancePlan | null, activity: FinanceActivityController, recurrence: FinanceRecurrenceController, planning: FinancePlanningController, onClose: () => void, onBusyChange: (busy: boolean) => void, initialRecurring = true, editMode = false) {
   const source = occurrence ?? schedule;
   const [type, setType] = useState(source?.type ?? "expense");
-  const [amount, setAmount] = useState(source ? decimalPHP(source.amount_cents) : "");
+  const [amount, setAmount] = useState(source ? decimalPHPInput(source.amount_cents) : "");
   const [account, setAccount] = useState(source?.account_id ?? "");
   const [category, setCategory] = useState(source?.category_id ?? "");
   const [subcategory, setSubcategory] = useState(source?.subcategory_id ?? "");
@@ -35,7 +35,7 @@ export function useFinanceScheduleEntry(schedule: FinanceSchedule | null, occurr
   const [endCondition, setEndCondition] = useState<EndCondition>(initialEndCondition);
   const [end, setEnd] = useState(schedule?.end_date ?? "");
   const [payments, setPayments] = useState(String(schedule?.max_occurrences ?? 12));
-  const [total, setTotal] = useState(schedule?.total_limit_cents ? decimalPHP(schedule.total_limit_cents) : "");
+  const [total, setTotal] = useState(schedule?.total_limit_cents ? decimalPHPInput(schedule.total_limit_cents) : "");
   const [handling, setHandling] = useState<"manual" | "automatic">(schedule?.handling ?? "manual");
   const submitting = useRef(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -50,8 +50,8 @@ export function useFinanceScheduleEntry(schedule: FinanceSchedule | null, occurr
     const common = { type, amount, account_id: account, category_id: category || null, subcategory_id: subcategory || null, text, tag_ids: source?.tag_ids ?? [], logged_time: time, timezone };
     const recurrenceChanged = !schedule || Number(count) !== schedule.interval_count || unit !== schedule.interval_unit || start !== (occurrence?.occurrence_date ?? schedule.start_date);
     const limits = { end_date: endCondition === "date" ? end || null : null, max_occurrences: endCondition === "payments" ? Number(payments) : null, total_limit: endCondition === "total" ? total : null };
-    const endingUnchanged = schedule && endCondition === initialEndCondition && (endCondition === "date" ? end === schedule.end_date : endCondition === "payments" ? Number(payments) === schedule.max_occurrences : endCondition === "total" ? schedule.total_limit_cents !== null && total === decimalPHP(schedule.total_limit_cents) : true);
-    const preservedLimits = endingUnchanged ? { end_date: schedule.end_date, max_occurrences: schedule.max_occurrences, total_limit: schedule.total_limit_cents === null ? null : decimalPHP(schedule.total_limit_cents) } : limits;
+    const endingUnchanged = schedule && endCondition === initialEndCondition && (endCondition === "date" ? end === schedule.end_date : endCondition === "payments" ? Number(payments) === schedule.max_occurrences : endCondition === "total" ? schedule.total_limit_cents !== null && total === decimalPHPInput(schedule.total_limit_cents) : true);
+    const preservedLimits = endingUnchanged ? { end_date: schedule.end_date, max_occurrences: schedule.max_occurrences, total_limit: schedule.total_limit_cents === null ? null : decimalPHPInput(schedule.total_limit_cents) } : limits;
     const fields = recurring ? { ...common, ...preservedLimits, handling, obligation_id: association || null,
       ...(recurrenceChanged ? { interval_count: Number(count), interval_unit: unit, start_date: start } : {}) } : { ...common, due_date: loggedDate };
     const input = schedule ? { ...fields, version: schedule.version, from_plan_id: occurrence?.id, from_plan_version: occurrence?.version } : fields;

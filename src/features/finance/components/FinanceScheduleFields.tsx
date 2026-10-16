@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/field";
 import { FinanceDateInput } from "./FinanceDateInputs";
 import { FinancePlanToggle } from "./FinancePlanToggle";
+import { MoneyInput } from "./MoneyInput";
 
 export function FinanceScheduleFields({
   form,
@@ -268,11 +269,11 @@ export function FinanceScheduleFields({
           <FieldLabel htmlFor="schedule-total_limit">
             Planned total (PHP)
           </FieldLabel>
-          <Input
+          <MoneyInput
             id="schedule-total_limit"
             inputMode="decimal"
             value={total}
-            onChange={(event) => setTotal(event.target.value)}
+            onValueChange={(value) => setTotal(value)}
             disabled={busy}
             {...invalid("total_limit")}
           />

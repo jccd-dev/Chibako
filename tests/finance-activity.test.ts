@@ -37,11 +37,11 @@ test("posted income and expenses derive exact balances and report by calendar da
 });
 
 test("post retries return the original balance after later activity and failures roll back effects and audit", () => {
-  const cash = account("1.00");
+  const cash = account("10.00");
   const payload = { ...entry(cash.id, "2.01"), text: "Private context" };
   const original = postTransaction(owner, payload);
-  assert.equal(original.balance_cents, -101);
-  assert.deepEqual(original.warnings, ["negative_balance"]);
+  assert.equal(original.balance_cents, 799);
+  assert.deepEqual(original.warnings, []);
   assert.equal(original.transaction.version, 1);
   assert.equal("text" in original.transaction, false);
   postTransaction(owner, entry(cash.id, "5.00", "2026-10-05", "income"));

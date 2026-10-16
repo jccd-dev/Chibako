@@ -31,7 +31,7 @@ async function rpc(key: string, name: string, args: object) {
   return envelope.result ?? { isError: true, content: [{ type: "text", text: envelope.error?.message }] };
 }
 function fixture() {
-  const account = createAccount({ kind: "owner" }, { request_id: "account", name: "Cash", kind: "money", currency: "PHP", opening_balance: "10.00" }).account;
+  const account = createAccount({ kind: "owner" }, { request_id: "account", name: "Cash", kind: "money", currency: "PHP", opening_balance: "20.00" }).account;
   return { request_id: "post", account_id: account.id, amount: "12.01", transaction_date: "2026-10-03", text: "Private transaction details" };
 }
 
@@ -56,8 +56,8 @@ test("REST and MCP share post retries, classification versions, details, bounded
   const payload = fixture();
   const { key, id } = createApiKey("Full finance", ["finance:read", "finance:write", "finance:manage"]);
   const posted = await (await post(rest(key, "activity", payload), context)).json();
-  assert.equal(posted.balance_cents, -201);
-  assert.deepEqual(posted.warnings, ["negative_balance"]);
+  assert.equal(posted.balance_cents, 799);
+  assert.deepEqual(posted.warnings, []);
   assert.equal("text" in posted.transaction, false);
   assert.deepEqual((await rpc(key, "post_finance_transaction", payload)).structuredContent, posted);
   const conflict = await rpc(key, "post_finance_transaction", { ...payload, amount: "1" });

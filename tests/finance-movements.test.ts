@@ -75,7 +75,7 @@ test("reconciliation and asset valuation append dated differences without report
 });
 
 test("linked effects, audit and retry outcome roll back together, then a retry posts once", () => {
-  const source = account("Source", "1"), target = account("Target", "0");
+  const source = account("Source", "30"), target = account("Target", "0");
   const category = createClassification(owner, { request_id: "fee-category", kind: "category", type: "expense", name: "Fees" }).classification;
   const payload = { ...transfer(source.id, target.id), fee: { amount: "1", category_id: category.id } };
   const db = getDb();
@@ -83,7 +83,7 @@ test("linked effects, audit and retry outcome roll back together, then a retry p
   db.exec("CREATE TEMP TRIGGER reject_movement BEFORE INSERT ON finance_movements BEGIN SELECT RAISE(ABORT, 'movement unavailable'); END;");
   try { assert.throws(() => postTransfer(owner, payload), /movement unavailable/); }
   finally { db.exec("DROP TRIGGER reject_movement"); }
-  assert.equal(getAccount(owner, source.id).balance_cents, 100);
+  assert.equal(getAccount(owner, source.id).balance_cents, 3000);
   assert.equal(getAccount(owner, target.id).balance_cents, 0);
   assert.equal(listTransactions(owner).total, 0);
   db.exec("CREATE TEMP TRIGGER reject_movement_audit BEFORE INSERT ON finance_audit BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END;");
@@ -91,11 +91,11 @@ test("linked effects, audit and retry outcome roll back together, then a retry p
   finally { db.exec("DROP TRIGGER reject_movement_audit"); }
   assert.equal(listTransactions(owner).total, 0);
   const original = postTransfer(owner, payload);
-  assert.deepEqual(original.warnings, ["negative_balance"]);
+  assert.deepEqual(original.warnings, []);
   postTransaction(owner, { request_id: "later", type: "income", amount: "10", account_id: target.id, transaction_date: "2026-10-04" });
   assert.deepEqual(postTransfer(owner, payload), original);
   assert.equal(listTransactions(owner).total, 3);
-  assert.equal(getAccount(owner, source.id).balance_cents, -2501);
+  assert.equal(getAccount(owner, source.id).balance_cents, 399);
   assert.equal(getAccount(owner, target.id).balance_cents, 3501);
   const audit = db.prepare("SELECT affected_ids, actor_id FROM finance_audit WHERE request_id = ?").get(payload.request_id) as { affected_ids: string; actor_id: string };
   assert.deepEqual(new Set(JSON.parse(audit.affected_ids)), new Set([source.id, target.id, original.transaction.id, original.fee!.id]));

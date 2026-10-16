@@ -5,7 +5,7 @@ import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
 import { financeMutation, parseFinance } from "./mutations";
 import { decimalCents, exactCents } from "./money";
-import { readAccountBalance } from "./accounts";
+import { readAccountBalance, requireSufficientFunds } from "./accounts";
 import { insertTransaction, readTransaction, validateTransactionClassifications } from "./activity";
 import { financeBalanceWarnings } from "./reservations";
 import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema,
@@ -135,6 +135,7 @@ export function postObligationMovement(actor: FinanceActor, input: unknown): Pos
   return financeMutation(actor, request_id, "obligation.post", payload, () => {
     const account = readAccountBalance(payload.account_id);
     if (account.archived || account.kind !== "money") throw new FinanceError("Choose an active money account", 400, "invalid_account");
+    if (payload.type === "lending") requireSufficientFunds(account.balance_cents, amount);
     validateTransactionClassifications({ type: "expense", category_id: null, subcategory_id: null, tag_ids: payload.tag_ids });
     const kind = payload.type === "borrowing" ? "debt" : "receivable";
     const before = payload.obligation_id ? readObligation(payload.obligation_id) : null;
@@ -174,6 +175,9 @@ export function insertObligationPayment(payload: z.output<typeof postObligationP
   const account = readAccountBalance(payload.account_id);
   if (account.archived || account.kind !== "money") throw new FinanceError("Choose an active money account", 400, "invalid_account");
   const type = before.kind === "debt" ? "expense" : "income";
+  const feeAmount = payload.fee ? decimalCents(payload.fee.amount) : 0;
+  if (!payload.cash_activity_id && type === "expense") requireSufficientFunds(account.balance_cents, BigInt(amount) + BigInt(payload.fee?.type === "expense" ? feeAmount : 0));
+  else if (!payload.cash_activity_id && payload.fee?.type === "expense") requireSufficientFunds(BigInt(account.balance_cents) + BigInt(amount), feeAmount);
   let activityId: string, cashActivityBefore: ReturnType<typeof readTransaction> | null = null;
   if (payload.cash_activity_id) {
     const cash = getDb().prepare(`SELECT t.id,t.type,t.account_id,t.amount_cents,t.transaction_date,t.version,t.hidden,t.reverted,
@@ -197,7 +201,6 @@ export function insertObligationPayment(payload: z.output<typeof postObligationP
   }
   let feeId: string | null = null;
   if (payload.fee) {
-    const feeAmount = decimalCents(payload.fee.amount);
     if (feeAmount <= 0) throw new FinanceError("Interest/fee amount must be positive", 400, "invalid_input");
     validateTransactionClassifications({ ...payload.fee, tag_ids: [] });
     feeId = insertTransaction({ ...payload.fee, account_id: account.id, amount_cents: feeAmount,

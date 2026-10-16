@@ -28,9 +28,10 @@ import type { FinanceAccount } from "../types";
 import type { FinanceAccountsController } from "../use-finance-accounts";
 import type { FinanceActivityController } from "../use-finance-activity";
 import { useFinanceAccountEditor } from "../use-finance-account-editor";
-import { decimalPHP, financeSheet, formatPHP } from "../presentation";
+import { decimalPHP, financeDrawerFooter, financeSheet, formatPHP } from "../presentation";
 import { FinanceDateInput } from "./FinanceDateInputs";
 import { FinanceAccountHistory } from "./FinanceAccountHistory";
+import { MoneyInput } from "./MoneyInput";
 
 export function FinanceAccountPanel({
   selected,
@@ -79,7 +80,7 @@ export function FinanceAccountPanel({
           </SheetDescription>
         </SheetHeader>
         {!editor.editing && account ? (
-          <div className="flex flex-1 flex-col gap-6 p-4">
+          <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
             <dl className="grid grid-cols-2 gap-4 text-sm">
               <div className="col-span-2">
                 <dt className="text-muted-foreground">
@@ -149,15 +150,15 @@ export function FinanceAccountPanel({
               onHistory={() => onHistory(account.id)}
               onInspect={onInspectTransaction}
             />
-            <div className="mt-auto flex justify-end">
+            <div className={financeDrawerFooter}>
               <Button variant="outline" onClick={onClose}>
                 Close
               </Button>
             </div>
           </div>
         ) : (
-          <form onSubmit={submit} className="flex flex-1 flex-col gap-4 p-4">
-            <FieldGroup>
+          <form onSubmit={submit} className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
+            <FieldGroup className="gap-6">
               <Field>
                 <FieldLabel htmlFor="finance-name">Account name</FieldLabel>
                 <Input
@@ -237,14 +238,14 @@ export function FinanceAccountPanel({
               {!asset && (
                 <Field>
                   <FieldLabel htmlFor="finance-maintaining">Maintaining balance (PHP)</FieldLabel>
-                  <Input
+                  <MoneyInput
                     id="finance-maintaining"
                     inputMode="decimal"
                     required
-                    pattern="\d+(\.\d{1,2})?"
+                    pattern="\d{1,3}(,\d{3})*(\.\d{1,2})?"
                     value={editor.maintaining}
                     disabled={busy}
-                    onChange={(event) => editor.setMaintaining(event.target.value)}
+                    onValueChange={(value) => editor.setMaintaining(value)}
                   />
                   <FieldDescription>
                     Reserved money, separate from opening balance. Both portions make up the net balance.
@@ -257,14 +258,15 @@ export function FinanceAccountPanel({
                   <FieldLabel htmlFor="finance-opening">
                     Opening balance (PHP)
                   </FieldLabel>
-                  <Input
+                  <MoneyInput
                     id="finance-opening"
                     inputMode="decimal"
+                    signed
                     required
-                    pattern="-?\d+(\.\d{1,2})?"
+                    pattern="-?\d{1,3}(,\d{3})*(\.\d{1,2})?"
                     value={editor.opening}
                     disabled={busy}
-                    onChange={(event) => editor.setOpening(event.target.value)}
+                    onValueChange={(value) => editor.setOpening(value)}
                   />
                   <FieldDescription>
                     {asset ? "The value before recorded activity." : "The available portion before recorded activity, excluding maintaining balance."}
@@ -307,9 +309,10 @@ export function FinanceAccountPanel({
                           <FieldLabel htmlFor="finance-current">
                             Current {asset ? "value" : "balance"} (PHP)
                           </FieldLabel>
-                          <Input
+                          <MoneyInput
                             id="finance-current"
                             inputMode="decimal"
+                            signed
                             value={adjustment.actual}
                             placeholder={
                               adjustment.account
@@ -317,8 +320,8 @@ export function FinanceAccountPanel({
                                 : "Loading balance…"
                             }
                             disabled={busy || !adjustment.account}
-                            onChange={(event) =>
-                              adjustment.setActual(event.target.value)
+                            onValueChange={(value) =>
+                              adjustment.setActual(value)
                             }
                             aria-invalid={!!errors.actual_balance}
                             aria-describedby="finance-current-help finance-current-error"
@@ -403,7 +406,7 @@ export function FinanceAccountPanel({
                 </AlertDescription>
               </Alert>
             )}
-            <div className="mt-auto flex flex-wrap justify-end gap-2 pt-4">
+            <div className={account ? "mt-auto flex flex-wrap justify-end gap-2 border-t border-border pt-5" : financeDrawerFooter}>
               <Button
                 type="button"
                 variant="outline"
@@ -417,7 +420,7 @@ export function FinanceAccountPanel({
               </Button>
             </div>
             {account && (
-              <section className="flex flex-col gap-3 border-t border-border pt-4">
+              <section className="mb-4 flex flex-col gap-3 border-t border-border pt-4 sm:mb-6">
                 <p className="text-xs text-muted-foreground">
                   Archiving hides the account from active lists. Its balance and
                   history are retained; use the summary option above to exclude

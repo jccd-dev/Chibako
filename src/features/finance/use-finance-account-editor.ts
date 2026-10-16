@@ -6,7 +6,7 @@ import { accountGroupSchema, createAccountSchema } from "./types";
 import type { FinanceAccountsController } from "./use-finance-accounts";
 import type { FinanceActivityController } from "./use-finance-activity";
 import { useFinanceAdjustment } from "./use-finance-adjustment";
-import { decimalPHP } from "./presentation";
+import { decimalPHPInput } from "./presentation";
 import { decimalCents } from "./money";
 
 export function useFinanceAccountEditor(
@@ -19,8 +19,8 @@ export function useFinanceAccountEditor(
   const [editing, setEditing] = useState(!initial);
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState(initial?.kind ?? "money");
-  const [opening, setOpening] = useState("0.00");
-  const [maintaining, setMaintaining] = useState(decimalPHP(initial?.maintaining_balance_cents ?? 0));
+  const [opening, setOpening] = useState("0");
+  const [maintaining, setMaintaining] = useState(decimalPHPInput(initial?.maintaining_balance_cents ?? 0));
   const [group, setGroup] = useState(initial?.account_group ?? "");
   const [included, setIncluded] = useState(initial?.include_in_summary ?? true);
   const [error, setError] = useState("");
@@ -35,7 +35,7 @@ export function useFinanceAccountEditor(
       setName(adjustment.account.name);
       setGroup(adjustment.account.account_group);
       setIncluded(adjustment.account.include_in_summary);
-      setMaintaining(decimalPHP(adjustment.account.maintaining_balance_cents));
+      setMaintaining(decimalPHPInput(adjustment.account.maintaining_balance_cents));
     }
   }
   const busy = saving || finance.busy || activity.busy;

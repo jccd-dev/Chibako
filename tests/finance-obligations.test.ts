@@ -93,7 +93,7 @@ test("borrowing and lending link cash to principal, excluding reports; correctio
 });
 
 test("posting rejects stale/wrong/archived definitions and invalid accounts; overflow and audit failure roll back both effects", () => {
-  const cash = createAccount(owner, { request_id: request(), name: "Boundary cash", kind: "money", opening_balance: "0", currency: "PHP" }).account;
+  const cash = createAccount(owner, { request_id: request(), name: "Boundary cash", kind: "money", opening_balance: "200", currency: "PHP" }).account;
   const asset = createAccount(owner, { request_id: request(), name: "Boundary asset", kind: "asset", opening_balance: "0", currency: "PHP" }).account;
   const debt = createObligation(owner, { request_id: request(), kind: "debt", name: "Boundary debt", principal: "90071992547409.91" }).obligation;
   const input = { request_id: request(), type: "borrowing", obligation_id: debt.id, version: 1, amount: "0.01", account_id: cash.id, transaction_date: "2026-10-02" };
@@ -117,11 +117,11 @@ test("posting rejects stale/wrong/archived definitions and invalid accounts; ove
   assert.deepEqual(getAccount(owner, cash.id), before);
   assert.equal(listObligations(owner, { archived: "all" }).total, definitions);
   const lent = postObligationMovement(owner, fresh);
-  assert.deepEqual(lent.warnings, ["negative_balance"]);
-  assert.equal(lent.balances[0].balance_cents, -20000);
+  assert.deepEqual(lent.warnings, []);
+  assert.equal(lent.balances[0].balance_cents, 0);
   updateObligation(owner, lent.obligation.id, { request_id: request(), version: lent.obligation.version, due_date: "2027-01-01" });
   assert.throws(() => correctActivity(owner, lent.transaction.id, { request_id: request(), version: 1, obligation_version: lent.obligation.version, amount: "1" }), { code: "version_conflict" });
-  assert.equal(getAccount(owner, cash.id).balance_cents, -20000);
+  assert.equal(getAccount(owner, cash.id).balance_cents, 0);
   assert.equal(getObligation(owner, lent.obligation.id).outstanding_cents, 20000);
   const full = createAccount(owner, { request_id: request(), name: "Full cash", kind: "money", opening_balance: "90071992547409.91", currency: "PHP" }).account;
   assert.throws(() => postObligationMovement(owner, { ...fresh, request_id: request(), type: "borrowing", account_id: full.id, amount: "0.01" }), { code: "amount_out_of_range" });

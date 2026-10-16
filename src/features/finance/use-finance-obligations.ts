@@ -5,7 +5,8 @@ import { createObligationSchema, updateObligationSchema, postObligationMovementS
 import type { ActivityPage, FinanceTransaction } from "./activity-types";
 import { financeJson } from "./client-json";
 import { decimalCents } from "./money";
-import { decimalPHP, localCalendarDate, formatPHP } from "./presentation";
+import { financeBalanceShortfall } from "./balance-gate";
+import { decimalPHPInput, localCalendarDate, formatPHP } from "./presentation";
 import type { FinanceActivityController } from "./use-finance-activity";
 
 export function useFinanceObligations(activity: FinanceActivityController) {
@@ -119,7 +120,7 @@ export function useFinanceObligations(activity: FinanceActivityController) {
   }
   function selectCandidate(record: FinanceTransaction) {
     setPSelected(record); setErrors({});
-    setAmount(decimalPHP(record.amount_cents)); setAccountId(record.account_id); setDate(record.transaction_date);
+    setAmount(decimalPHPInput(record.amount_cents)); setAccountId(record.account_id); setDate(record.transaction_date);
   }
   function clearCandidate() { setPSelected(null); setErrors({}); void loadCandidates(0); }
 
@@ -138,7 +139,7 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     const fields: Record<string, string> = {};
     if (!parsed.success) for (const issue of parsed.error.issues) fields[String(issue.path[0] ?? "form")] = issue.message;
     if (!fields.amount && Number((input as { amount: string }).amount) <= 0) fields.amount = "Use a positive PHP amount with at most two decimal places.";
-    if (matched && !fields.amount && (input as { amount: string }).amount !== decimalPHP(matched.amount_cents)) fields.amount = "The amount must equal the selected activity exactly.";
+    if (matched && !fields.amount && (input as { amount: string }).amount !== decimalPHPInput(matched.amount_cents)) fields.amount = "The amount must equal the selected activity exactly.";
     if (matched && !fields.account_id && (input as { account_id: string }).account_id !== matched.account_id) fields.account_id = "The account must be the one on the selected activity.";
     if (matched && !fields.transaction_date && (input as { transaction_date: string }).transaction_date !== matched.transaction_date) fields.transaction_date = "The date must be the one on the selected activity.";
     if (Object.keys(fields).length) { setErrors(fields); return null; }
@@ -172,6 +173,7 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     finally { saving.current = false; setBusy(false); }
   }
   async function pay(): Promise<PostedObligationPayment | null> {
+    if (paymentShortfall) return null;
     if (saving.current || activity.busy || inspecting || inspectError || !editing) return null;
     if (pSource === "existing" && !pSelected) {
       setErrors({ cash_activity_id: "Select the existing cash activity to link, or choose a new cash transaction." });
@@ -186,7 +188,7 @@ export function useFinanceObligations(activity: FinanceActivityController) {
   function startClose() {
     if (!editing) return;
     activity.resetSave(); setSaveError(""); setErrors({}); setNotice("");
-    setAmount(decimalPHP(editing.outstanding_cents)); setCloseReason(""); setClosureReview(null);
+    setAmount(decimalPHPInput(editing.outstanding_cents)); setCloseReason(""); setClosureReview(null);
     setPanel("closure");
   }
   function reviewClose() {
@@ -225,6 +227,9 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     if (!editing) return;
     void loadHistory(editing.id, next);
   }
+  const paymentShortfall = editing && panel === "payment" && editing.kind === "debt" && pSource === "new"
+    ? financeBalanceShortfall({ accounts: activity.accounts, account_id: accountId, amount, subject: "payment" })
+    : null;
   async function mutate(input: object) {
     if (saving.current || inspecting || inspectError) return null;
     const path = editing ? `/${editing.id}` : "", method = editing ? "PATCH" : "POST";
@@ -268,7 +273,7 @@ export function useFinanceObligations(activity: FinanceActivityController) {
   return { page, archived, overdue, offset, setOffset, setArchived: (v: boolean) => { setArchived(v); setOffset(0); }, setOverdue: (v: boolean) => { setOverdue(v); setOffset(0); }, loading, loadError, refresh,
     panel, setPanel, editing, inspecting, inspectError, openCreate, openEdit, openById, close, kind, setKind, name, setName, principal, setPrincipal, dueDate, setDueDate, amount, setAmount, accountId, setAccountId, date, setDate, text, setText,
     busy: busy || activity.busy, saveError: saveError || activity.saveError, notice, errors, save, archive, startMovement,
-    pSource, choosePaymentSource, pSelected, selectCandidate, clearCandidate, pCandidates, pTotal, pOffset, pLoading, pError, loadCandidates, startPayment, pay, payConfirmed, setPaymentReview, paymentReview,
+    pSource, choosePaymentSource, pSelected, selectCandidate, clearCandidate, pCandidates, pTotal, pOffset, pLoading, pError, loadCandidates, startPayment, pay, payConfirmed, setPaymentReview, paymentReview, paymentShortfall,
     closeReason, setCloseReason, startClose, reviewClose, closureReview, setClosureReview, executeClose,
     history, historyOffset, historyLoading, historyError, changeHistoryOffset };
 }

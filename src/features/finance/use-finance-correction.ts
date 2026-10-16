@@ -3,10 +3,9 @@
 import { useEffect, useState } from "react";
 import { postTransactionSchema, type FinanceTransaction } from "./activity-types";
 import { activityActionSchema, correctActivitySchema, recordRefundSchema } from "./correction-types";
-import { localCalendarDate } from "./presentation";
+import { decimalPHPInput as financeDecimal, localCalendarDate } from "./presentation";
 import type { FinanceActivityController } from "./use-finance-activity";
 
-export const financeDecimal = (cents: number) => `${cents < 0 ? "-" : ""}${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
 type Action = "edit" | "hide" | "revert" | "refund";
 export function useFinanceCorrection(record: FinanceTransaction, activity: FinanceActivityController, onSaved: (id: string) => void) {
   const [mode, setMode] = useState<"edit" | "refund">("edit");

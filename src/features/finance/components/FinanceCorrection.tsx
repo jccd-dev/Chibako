@@ -4,12 +4,12 @@ import type { FormEvent } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FinanceDateInput } from "./FinanceDateInputs";
+import { MoneyInput } from "./MoneyInput";
 import type { FinanceTransaction } from "@/features/finance/activity-types";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import { useFinanceCorrection } from "@/features/finance/use-finance-correction";
@@ -41,7 +41,7 @@ export function FinanceCorrection({ record, activity, onSaved }: { record: Finan
     </div>
     {!record.reverted && !record.cashback_expense_id && <form onSubmit={submit} className="flex flex-col gap-5">
       <FieldGroup>
-        <Field data-invalid={!!edit.errors.amount}><FieldLabel htmlFor="correction-amount">{adjustment && !refund ? "Signed adjustment difference (PHP)" : "Amount (PHP)"}</FieldLabel><Input id="correction-amount" inputMode="decimal" value={edit.amount} onChange={event => edit.setAmount(event.target.value)} disabled={blocked} {...errorProps("amount")} />
+        <Field data-invalid={!!edit.errors.amount}><FieldLabel htmlFor="correction-amount">{adjustment && !refund ? "Signed adjustment difference (PHP)" : "Amount (PHP)"}</FieldLabel><MoneyInput id="correction-amount" inputMode="decimal" signed={adjustment && !refund} value={edit.amount} onValueChange={value => edit.setAmount(value)} disabled={blocked} {...errorProps("amount")} />
           <FieldDescription>{adjustment && !refund ? "Correct the difference posted, not the account's current total. Positive adds value; negative removes it." : refund ? "Full or partial, up to the expense amount less active refunds." : "Positive PHP amount with at most two decimal places."}</FieldDescription><FieldError id="correction-error-amount">{edit.errors.amount}</FieldError></Field>
         <Field data-invalid={!!edit.errors.account_id}><FieldLabel htmlFor="correction-account">{refund ? "Receiving account" : record.type === "transfer" ? "Source account" : "Account"}</FieldLabel><NativeSelect id="correction-account" className="w-full" value={edit.accountId} onChange={event => edit.setAccountId(event.target.value)} disabled={blocked || linked && !refund} {...errorProps("account_id")}>{accounts.map(account => <NativeSelectOption key={account.id} value={account.id}>{account.name}{account.archived ? " (archived)" : ""}</NativeSelectOption>)}</NativeSelect><FieldError id="correction-error-account_id">{edit.errors.account_id}</FieldError></Field>
         {record.type === "transfer" && !refund && <Field><FieldLabel htmlFor="correction-destination">Destination account</FieldLabel><NativeSelect id="correction-destination" className="w-full" value={edit.destinationId} disabled={blocked} onChange={event => edit.setDestinationId(event.target.value)}>{activity.accounts.filter(account => account.id === edit.destinationId || !account.archived && account.kind === "money").map(account => <NativeSelectOption key={account.id} value={account.id}>{account.name}</NativeSelectOption>)}</NativeSelect></Field>}
@@ -51,7 +51,7 @@ export function FinanceCorrection({ record, activity, onSaved }: { record: Finan
           <Field><FieldLabel htmlFor="correction-subcategory">Subcategory</FieldLabel><NativeSelect id="correction-subcategory" value={edit.subcategoryId} className="w-full" disabled={blocked} onChange={event => edit.setSubcategoryId(event.target.value)}><NativeSelectOption value="">No subcategory</NativeSelectOption>{activity.classifications.filter(item => item.parent_id === edit.categoryId && (!item.archived || item.id === edit.subcategoryId)).map(item => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></Field>
         </>}
         {edit.fee && !refund && <FieldSet><FieldLegend>{record.obligation_payment ? "Linked payment fee" : "Linked transfer fee"}</FieldLegend><FieldDescription>{record.obligation_payment ? `Fee type stays as recorded (${edit.fee.type === "income" ? "income" : "expense"}). Amount and category count here; date and account move with the payment.` : "Moves with the source account and date. Only this fee counts as spending."}</FieldDescription>
-          <Field><FieldLabel htmlFor="correction-fee-amount">Fee amount (PHP)</FieldLabel><Input id="correction-fee-amount" inputMode="decimal" value={edit.feeAmount} disabled={blocked} onChange={event => edit.setFeeAmount(event.target.value)} /></Field>
+          <Field><FieldLabel htmlFor="correction-fee-amount">Fee amount (PHP)</FieldLabel><MoneyInput id="correction-fee-amount" inputMode="decimal" value={edit.feeAmount} disabled={blocked} onValueChange={value => edit.setFeeAmount(value)} /></Field>
           <Field><FieldLabel htmlFor="correction-fee-category">Fee category</FieldLabel><NativeSelect id="correction-fee-category" className="w-full" value={edit.feeCategoryId} disabled={blocked} onChange={event => { edit.setFeeCategoryId(event.target.value); edit.setFeeSubcategoryId(""); }}><NativeSelectOption value="">Uncategorized</NativeSelectOption>{fees.map(item => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></Field>
           <Field><FieldLabel htmlFor="correction-fee-subcategory">Fee subcategory</FieldLabel><NativeSelect id="correction-fee-subcategory" className="w-full" value={edit.feeSubcategoryId} disabled={blocked} onChange={event => edit.setFeeSubcategoryId(event.target.value)}><NativeSelectOption value="">No subcategory</NativeSelectOption>{activity.classifications.filter(item => item.parent_id === edit.feeCategoryId && (!item.archived || item.id === edit.feeSubcategoryId)).map(item => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></Field>
         </FieldSet>}

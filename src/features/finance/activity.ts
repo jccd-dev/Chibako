@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDb, now } from "../../lib/db";
 import { authorizeFinance, authorizeFinanceNotes } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
-import { readAccountBalance } from "./accounts";
+import { readAccountBalance, requireSufficientFunds } from "./accounts";
 import { financeBalanceWarnings } from "./reservations";
 import { parseFinance, financeMutation } from "./mutations";
 import { decimalCents, exactCents } from "./money";
@@ -69,6 +69,7 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
   return financeMutation(actor, request_id, "transaction.post", note_ids.length ? { ...payload, note_ids } : payload, () => {
     const account = readAccountBalance(payload.account_id);
     if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
+    if (payload.type === "expense") requireSufficientFunds(account.balance_cents, amount);
     validateTransactionClassifications(payload);
     const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)) + BigInt(cashbackAmount));
     const id = insertTransaction({ ...payload, amount_cents: amount });

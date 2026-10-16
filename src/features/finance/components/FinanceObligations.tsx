@@ -14,10 +14,11 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FinanceDateInput } from "./FinanceDateInputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
+import { MoneyInput } from "./MoneyInput";
 import { useFinanceObligations, type FinanceObligationsController } from "@/features/finance/use-finance-obligations";
 import type { FinanceObligation, FinanceObligationHistoryEntry } from "@/features/finance/obligation-types";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
-import { financeSheet, formatPHP } from "@/features/finance/presentation";
+import { financeDrawerFooter, financeSheet, formatPHP, formatHistoryDate } from "@/features/finance/presentation";
 
 const obligationStatus = (status: FinanceObligation["status"]) => ({ open: "Open", paid: "Paid in full", written_off: "Written off", settled: "Settled" })[status];
 
@@ -78,7 +79,7 @@ function ObligationPanel({ obligations: o, activity, onInspectActivity }: { obli
     const another = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("name") === "another";
     if (await o.save(another) && another) document.getElementById("obligation-name")?.focus();
   }
-  return <div className="flex flex-1 flex-col gap-4 p-4">
+  return <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
     {o.inspecting && <p role="status">Loading obligation…</p>}
     {o.inspectError && <Alert><AlertDescription>{o.inspectError}<Button variant="outline" onClick={() => { if (editing) void o.openEdit(editing); }}>Retry obligation inspection</Button></AlertDescription></Alert>}
     {editing && <dl className="grid gap-3 text-sm">
@@ -90,16 +91,16 @@ function ObligationPanel({ obligations: o, activity, onInspectActivity }: { obli
       <div><dt className="text-muted-foreground">Due date</dt><dd>{editing.due_date ?? "No due date"}{editing.overdue ? " · Overdue" : ""}</dd></div>
     </dl>}
     {editing && editing.status !== "open" && <p className="text-sm text-muted-foreground">This obligation is closed: {obligationStatus(editing.status)}. Paid and written-off amounts stay distinct; no further payments or write-offs are taken.</p>}
-    <form onSubmit={submit} noValidate className="flex flex-col gap-5">
-      <FieldGroup>
+    <form onSubmit={submit} noValidate className="flex flex-1 flex-col gap-6">
+      <FieldGroup className="gap-6">
         {!editing && <Field><FieldLabel htmlFor="obligation-kind">{movement ? "Actual movement" : "Obligation kind"}</FieldLabel><NativeSelect id="obligation-kind" className="w-full" value={o.kind} disabled={disabled} onChange={e => o.setKind(e.target.value === "debt" ? "debt" : "receivable")}><NativeSelectOption value="debt">{movement ? "Borrowing (adds cash and debt)" : "Debt (you owe)"}</NativeSelectOption><NativeSelectOption value="receivable">{movement ? "Lending (removes cash, owed to you)" : "Receivable (owed to you)"}</NativeSelectOption></NativeSelect></Field>}
         {(!movement || !editing) && <>
           <Field data-invalid={!!o.errors.name}><FieldLabel htmlFor="obligation-name">Obligation name</FieldLabel><Input id="obligation-name" maxLength={120} value={o.name} disabled={disabled} onChange={e => o.setName(e.target.value)} {...invalid("name")} /><FieldError id="obligation-error-name">{o.errors.name}</FieldError></Field>
           <Field data-invalid={!!o.errors.due_date}><FieldLabel htmlFor="obligation-due-date">Due date (optional)</FieldLabel><FinanceDateInput id="obligation-due-date" min="1000-01-01" max="9999-12-31" value={o.dueDate} disabled={disabled} onChange={o.setDueDate} {...invalid("due_date")} /><FieldError id="obligation-error-due_date">{o.errors.due_date}</FieldError></Field>
         </>}
-        {!movement && !editing && <Field data-invalid={!!o.errors.principal}><FieldLabel htmlFor="obligation-principal">Already outstanding principal (PHP)</FieldLabel><Input id="obligation-principal" inputMode="decimal" value={o.principal} disabled={disabled} onChange={e => o.setPrincipal(e.target.value)} {...invalid("principal")} /><FieldDescription>Zero or a positive amount. Records an existing obligation only; your account balances will not change. Use Record borrowing / lending for money moving now.</FieldDescription><FieldError id="obligation-error-principal">{o.errors.principal}</FieldError></Field>}
+        {!movement && !editing && <Field data-invalid={!!o.errors.principal}><FieldLabel htmlFor="obligation-principal">Already outstanding principal (PHP)</FieldLabel><MoneyInput id="obligation-principal" inputMode="decimal" className="tabular-nums" value={o.principal} disabled={disabled} onValueChange={value => o.setPrincipal(value)} {...invalid("principal")} /><FieldDescription>Zero or a positive amount. Records an existing obligation only; your account balances will not change. Use Record borrowing / lending for money moving now.</FieldDescription><FieldError id="obligation-error-principal">{o.errors.principal}</FieldError></Field>}
         {movement && <>
-          <Field data-invalid={!!o.errors.amount}><FieldLabel htmlFor="obligation-amount">Actual principal amount (PHP)</FieldLabel><Input id="obligation-amount" inputMode="decimal" value={o.amount} disabled={disabled} onChange={e => o.setAmount(e.target.value)} {...invalid("amount")} /><FieldDescription>{o.kind === "debt" ? "Adds this amount to cash and debt." : "Removes this amount from cash and adds a receivable."} Positive amount with up to two decimals. Interest and fees are separate income/expense activity.</FieldDescription><FieldError id="obligation-error-amount">{o.errors.amount}</FieldError></Field>
+          <Field data-invalid={!!o.errors.amount}><FieldLabel htmlFor="obligation-amount">Actual principal amount (PHP)</FieldLabel><MoneyInput id="obligation-amount" inputMode="decimal" className="tabular-nums" value={o.amount} disabled={disabled} onValueChange={value => o.setAmount(value)} {...invalid("amount")} /><FieldDescription>{o.kind === "debt" ? "Adds this amount to cash and debt." : "Removes this amount from cash and adds a receivable."} Positive amount with up to two decimals. Interest and fees are separate income/expense activity.</FieldDescription><FieldError id="obligation-error-amount">{o.errors.amount}</FieldError></Field>
           <Field data-invalid={!!o.errors.account_id}><FieldLabel htmlFor="obligation-account">Money account</FieldLabel><NativeSelect id="obligation-account" className="w-full" value={o.accountId} disabled={disabled} onChange={e => o.setAccountId(e.target.value)} {...invalid("account_id")}><NativeSelectOption value="">Choose a money account</NativeSelectOption>{activity.accounts.filter(row => row.kind === "money" && !row.archived).map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect><FieldError id="obligation-error-account_id">{o.errors.account_id}</FieldError></Field>
           <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="obligation-date">Actual transaction date</FieldLabel><FinanceDateInput id="obligation-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="obligation-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
           <Field><FieldLabel htmlFor="obligation-text">Transaction text (optional)</FieldLabel><Textarea id="obligation-text" maxLength={2000} value={o.text} disabled={disabled} onChange={e => o.setText(e.target.value)} /></Field>
@@ -116,7 +117,7 @@ function ObligationPanel({ obligations: o, activity, onInspectActivity }: { obli
       <p className="text-sm text-muted-foreground">Payments and collections reduce outstanding principal without touching income or spending reports. Archiving retains cash, paid and written-off amounts.</p>
       <ObligationHistory o={o} />
     </>}
-    <Button variant="outline" className="mt-auto self-end" disabled={o.busy} onClick={o.close}>Close obligation</Button>
+    <div className={financeDrawerFooter}><Button variant="outline" disabled={o.busy} onClick={o.close}>Close obligation</Button></div>
   </div>;
 }
 
@@ -130,18 +131,19 @@ function PaymentPanel({ o, activity }: { o: FinanceObligationsController; activi
     event.preventDefault();
     await o.pay();
   }
-  return <div className="flex flex-1 flex-col gap-4 p-4">
-    <form onSubmit={submit} noValidate className="flex flex-col gap-5">
-      <FieldGroup>
-        <Field data-invalid={!!o.errors.amount}><FieldLabel htmlFor="payment-amount">Payment amount (PHP)</FieldLabel><Input id="payment-amount" inputMode="decimal" className="tabular-nums" value={o.amount} disabled={disabled || !!selected} onChange={e => o.setAmount(e.target.value)} {...invalid("amount")} /><FieldDescription>{selected ? "Taken from the linked activity." : editing?.kind === "debt" ? "Reduces cash and outstanding debt. Partial payments are supported; principal is excluded from spending reports." : "Increases cash and reduces the receivable. Partial collections are supported; principal is excluded from income reports."}</FieldDescription><FieldError id="payment-error-amount">{o.errors.amount}</FieldError></Field>
+  return <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
+    <form onSubmit={submit} noValidate className="flex flex-1 flex-col gap-6">
+      <FieldGroup className="gap-6">
+        <Field data-invalid={!!o.errors.amount}><FieldLabel htmlFor="payment-amount">Payment amount (PHP)</FieldLabel><MoneyInput id="payment-amount" inputMode="decimal" className="tabular-nums" value={o.amount} disabled={disabled || !!selected} onValueChange={value => o.setAmount(value)} {...invalid("amount")} /><FieldDescription>{selected ? "Taken from the linked activity." : editing?.kind === "debt" ? "Reduces cash and outstanding debt. Partial payments are supported; principal is excluded from spending reports." : "Increases cash and reduces the receivable. Partial collections are supported; principal is excluded from income reports."}</FieldDescription><FieldError id="payment-error-amount">{o.errors.amount}</FieldError></Field>
         <Field data-invalid={!!o.errors.account_id}><FieldLabel htmlFor="payment-account">Money account</FieldLabel><NativeSelect id="payment-account" className="w-full" value={o.accountId} disabled={disabled || !!selected} onChange={e => o.setAccountId(e.target.value)} {...invalid("account_id")}><NativeSelectOption value="">Choose a money account</NativeSelectOption>{activity.accounts.filter(row => row.kind === "money" && !row.archived).map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect><FieldDescription>{selected ? "Taken from the linked activity." : "The account the cash actually moved in."}</FieldDescription><FieldError id="payment-error-account_id">{o.errors.account_id}</FieldError></Field>
+        {o.paymentShortfall && <p role="alert" className="text-sm text-destructive">{o.paymentShortfall.message}</p>}
         <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="payment-date">Transaction date</FieldLabel><FinanceDateInput id="payment-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled || !!selected} onChange={o.setDate} {...invalid("transaction_date")} /><FieldDescription>{selected ? "Taken from the linked activity." : "The calendar day the cash moved."}</FieldDescription><FieldError id="payment-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
         <Field data-invalid={!!o.errors.cash_activity_id || !!o.errors.cash_activity_version}><FieldLabel htmlFor="payment-source">Cash source</FieldLabel><NativeSelect id="payment-source" className="w-full" value={o.pSource} disabled={disabled} onChange={e => o.choosePaymentSource(e.target.value === "existing" ? "existing" : "new")} {...invalid("cash_activity_id")}><NativeSelectOption value="new">New cash transaction — record cash with this payment</NativeSelectOption><NativeSelectOption value="existing">Link existing activity — no second cash effect</NativeSelectOption></NativeSelect><FieldDescription>{o.pSource === "new" ? "Records a matching cash transaction with the payment. Its category is excluded from income and spending reports." : "Choose an expense (for a debt payment) or income (for a collection) from bounded history. Its account, date and amount are used exactly as recorded."}</FieldDescription><FieldError id="payment-error-cash_activity_id">{o.errors.cash_activity_id}</FieldError><FieldError id="payment-error-cash_activity_version">{o.errors.cash_activity_version}</FieldError></Field>
         {o.pSource === "existing" && (selected ? <div className="flex flex-col gap-3">
-          <dl className="grid gap-3 rounded-md border border-border p-4 text-sm">
+          <dl className="grid gap-3 rounded-xl bg-muted/50 p-4 text-sm">
             <div><dt className="text-muted-foreground">Linked activity</dt><dd className="font-medium">{linkedLabel} · <span className="tabular-nums">{formatPHP(selected.amount_cents)}</span></dd></div>
             <div><dt className="text-muted-foreground">Account</dt><dd>{selected.account_name}</dd></div>
-            <div><dt className="text-muted-foreground">Transaction date</dt><dd>{selected.transaction_date}</dd></div>
+            <div><dt className="text-muted-foreground">Transaction date</dt><dd>{formatHistoryDate(selected.transaction_date)}</dd></div>
             <div><dt className="text-muted-foreground">Activity version</dt><dd className="tabular-nums">{selected.version}</dd></div>
             {selected.text && <div><dt className="text-muted-foreground">Activity text</dt><dd className="whitespace-pre-wrap break-words">{selected.text}</dd></div>}
           </dl>
@@ -154,7 +156,7 @@ function PaymentPanel({ o, activity }: { o: FinanceObligationsController; activi
       <FinanceOptionStatus activity={activity} />
       {o.saveError && <Alert><AlertDescription>{o.saveError} Your entries are kept. Retry safely, or close and reopen to refresh a stale version.</AlertDescription></Alert>}
       {o.errors.form && <Alert><AlertDescription>{o.errors.form}</AlertDescription></Alert>}
-      <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back to obligation</Button><Button type="submit" disabled={disabled}>{o.busy ? "Saving…" : o.pSource === "existing" ? "Review payment" : "Record payment"}</Button></div>
+      <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back to obligation</Button><Button type="submit" disabled={disabled || !!o.paymentShortfall}>{o.busy ? "Saving…" : o.pSource === "existing" ? "Review payment" : "Record payment"}</Button></div>
     </form>
     <ConfirmDialog open={o.paymentReview !== null} onOpenChange={open => { if (!open) o.setPaymentReview(null); }}
       title="Link this existing activity?"
@@ -168,9 +170,11 @@ function PaymentCandidates({ o }: { o: FinanceObligationsController }) {
   return <div className="flex flex-col gap-3">
     {o.pError ? <Alert><AlertDescription>{o.pError}<Button variant="outline" onClick={() => void o.loadCandidates(o.pOffset)}>Retry matching history</Button></AlertDescription></Alert> : o.pLoading ? <p role="status" className="text-sm text-muted-foreground">Loading matching history…</p> : o.pCandidates.length ? <>
       <p className="text-sm text-muted-foreground">{o.pTotal} eligible record{o.pTotal === 1 ? "" : "s"}. Selecting fills account, date and amount exactly as recorded.</p>
-      <ul className="divide-y divide-border border-y border-border">{o.pCandidates.map(row => <li key={row.id}><button type="button" className="flex w-full flex-wrap items-center justify-between gap-3 rounded-md px-1 py-4 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted" onClick={() => o.selectCandidate(row)} aria-label={`Select ${row.type === "expense" ? "expense" : "income"} ${formatPHP(row.amount_cents)} on ${row.transaction_date}`}>
-        <span className="min-w-0 flex-1 basis-40"><span className="block break-words text-sm font-medium">{row.category_name ?? (row.type === "expense" ? "Expense" : "Income")}</span><span className="mt-1 block break-words text-sm text-muted-foreground">{row.transaction_date} · {row.account_name}</span></span>
-        <strong className="break-words text-sm tabular-nums">{formatPHP(row.amount_cents)}</strong>
+      <ul className="divide-y divide-border border-y border-border">{o.pCandidates.map(row => <li key={row.id}><button type="button" className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted" onClick={() => o.selectCandidate(row)} aria-label={`Select ${row.type === "expense" ? "expense" : "income"} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}>
+        <span className="min-w-0 truncate text-sm font-medium">{row.category_name ?? (row.type === "expense" ? "Expense" : "Income")}</span>
+        <strong className="justify-self-end text-sm tabular-nums">{formatPHP(row.amount_cents)}</strong>
+        <span className="min-w-0 truncate text-xs text-muted-foreground">{formatHistoryDate(row.transaction_date)} · {row.account_name}</span>
+        <span aria-hidden="true" />
       </button></li>)}</ul>
       {o.pTotal > 25 && <nav aria-label="Matching history pages" className="flex flex-wrap items-center gap-3"><Button type="button" variant="outline" disabled={o.pOffset === 0 || o.pLoading} onClick={() => void o.loadCandidates(Math.max(0, o.pOffset - 25))}>Previous records</Button><span className="text-sm">{o.pOffset + 1}-{Math.min(o.pOffset + 25, o.pTotal)} of {o.pTotal}</span><Button type="button" variant="outline" disabled={o.pOffset + 25 >= o.pTotal || o.pLoading} onClick={() => void o.loadCandidates(o.pOffset + 25)}>Next records</Button></nav>}
     </> : <p className="text-sm text-muted-foreground">No eligible {o.editing?.kind === "debt" ? "expense" : "income"} history to link. Record the payment as a new cash transaction, or add the transaction with Add transaction and load this list again.</p>}
@@ -185,16 +189,16 @@ function ClosurePanel({ o }: { o: FinanceObligationsController }) {
     event.preventDefault();
     o.reviewClose();
   }
-  return <div className="flex flex-1 flex-col gap-4 p-4">
-    <form onSubmit={submit} noValidate className="flex flex-col gap-5">
-      <FieldGroup>
-        <Field data-invalid={!!o.errors.amount}><FieldLabel htmlFor="closure-amount">Amount to write off (PHP)</FieldLabel><Input id="closure-amount" inputMode="decimal" className="tabular-nums" value={o.amount} disabled={disabled} onChange={e => o.setAmount(e.target.value)} {...invalid("amount")} /><FieldDescription>Must equal the current remaining principal, <span className="tabular-nums">{formatPHP(editing?.outstanding_cents ?? 0)}</span>. A write-off is not a payment.</FieldDescription><FieldError id="closure-error-amount">{o.errors.amount}</FieldError></Field>
+  return <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
+    <form onSubmit={submit} noValidate className="flex flex-1 flex-col gap-6">
+      <FieldGroup className="gap-6">
+        <Field data-invalid={!!o.errors.amount}><FieldLabel htmlFor="closure-amount">Amount to write off (PHP)</FieldLabel><MoneyInput id="closure-amount" inputMode="decimal" className="tabular-nums" value={o.amount} disabled={disabled} onValueChange={value => o.setAmount(value)} {...invalid("amount")} /><FieldDescription>Must equal the current remaining principal, <span className="tabular-nums">{formatPHP(editing?.outstanding_cents ?? 0)}</span>. A write-off is not a payment.</FieldDescription><FieldError id="closure-error-amount">{o.errors.amount}</FieldError></Field>
         <Field data-invalid={!!o.errors.reason}><FieldLabel htmlFor="closure-reason">Reason</FieldLabel><Textarea id="closure-reason" maxLength={2000} value={o.closeReason} disabled={disabled} onChange={e => o.setCloseReason(e.target.value)} {...invalid("reason")} /><FieldDescription>Required. For example: forgiven by lender, or uncollectible.</FieldDescription><FieldError id="closure-error-reason">{o.errors.reason}</FieldError></Field>
       </FieldGroup>
       <p className="text-sm text-muted-foreground">Closing affects no cash balance and no income or spending reports. Amounts already paid and already written off stay distinct from each other. Use Record payment for money that actually moves.</p>
       {o.saveError && <Alert><AlertDescription>{o.saveError} Your entries are kept. Retry safely, or close and reopen to refresh a stale version.</AlertDescription></Alert>}
       {o.errors.form && <Alert><AlertDescription>{o.errors.form}</AlertDescription></Alert>}
-      <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back to obligation</Button><Button type="submit" disabled={disabled}>{o.busy ? "Saving…" : "Review write-off"}</Button></div>
+      <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back to obligation</Button><Button type="submit" disabled={disabled}>{o.busy ? "Saving…" : "Review write-off"}</Button></div>
     </form>
     <ConfirmDialog open={o.closureReview !== null} onOpenChange={open => { if (!open) o.setClosureReview(null); }}
       title="Write off this remaining principal?"
@@ -211,11 +215,14 @@ function ObligationHistory({ o }: { o: FinanceObligationsController }) {
     <p className="mt-1 text-sm text-muted-foreground">Newest first. Principal payments stay outside income and spending reports.</p>
     {o.historyError ? <Alert className="mt-4"><AlertDescription>{o.historyError}<Button variant="outline" onClick={() => o.changeHistoryOffset(o.historyOffset)}>Retry history</Button></AlertDescription></Alert> : o.historyLoading && !o.history ? <p role="status" className="py-4 text-sm text-muted-foreground">Loading history…</p> : o.history?.entries.length ? <>
       <ul className="divide-y divide-border">{o.history.entries.map(entry => <li key={entry.id}>
-        <div className="flex flex-wrap items-center justify-between gap-3 py-4">
-          <div className="min-w-0 flex-1 basis-40"><p className="break-words text-sm font-medium">{entryLabel(entry)}</p><p className="mt-1 break-words text-sm text-muted-foreground">{entry.transaction_date ?? "No date"}{entry.hidden ? " · Hidden" : ""}{entry.reverted ? " · Reverted" : ""}</p></div>
-          <strong className="break-words text-sm tabular-nums">{formatPHP(entry.amount_cents)}</strong>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 py-2.5">
+          <p className="min-w-0 truncate text-sm font-medium">{entryLabel(entry)}</p>
+          <strong className="justify-self-end text-sm tabular-nums">{formatPHP(entry.amount_cents)}</strong>
+          <p className="min-w-0 truncate text-xs text-muted-foreground">{entry.transaction_date ? formatHistoryDate(entry.transaction_date) : "No date"}</p>
+          <span aria-hidden="true" />
         </div>
-        {entry.cash_activity && <p className="pb-4 text-sm text-muted-foreground">Cash activity: {entry.cash_activity.type === "expense" ? "Expense" : "Income"} · {entry.cash_activity.account_name} · {entry.cash_activity.transaction_date} · <span className="tabular-nums">{formatPHP(entry.cash_activity.amount_cents)}</span></p>}
+        {(entry.hidden || entry.reverted) && <p className="pb-3 text-xs">{entry.hidden ? "Hidden" : ""}{entry.hidden && entry.reverted ? " · " : ""}{entry.reverted ? "Reverted" : ""}</p>}
+        {entry.cash_activity && <p className="pb-4 text-sm text-muted-foreground">Cash activity: {entry.cash_activity.type === "expense" ? "Expense" : "Income"} · {entry.cash_activity.account_name} · {formatHistoryDate(entry.cash_activity.transaction_date)} · <span className="tabular-nums">{formatPHP(entry.cash_activity.amount_cents)}</span></p>}
         {entry.text && entry.kind === "payment" && <p className="-mt-2 pb-4 break-words text-sm text-muted-foreground">{entry.text}</p>}
         {entry.reason && entry.kind === "write_off" && <p className="-mt-2 pb-4 break-words text-sm text-muted-foreground">{entry.reason}</p>}
       </li>)}</ul>

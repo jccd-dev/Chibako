@@ -27,6 +27,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "./MoneyInput";
 import {
   Sheet,
   SheetContent,
@@ -40,6 +41,7 @@ import {
   type FinanceGoalsController,
 } from "@/features/finance/use-finance-goals";
 import {
+  financeDrawerFooter,
   financeSheet,
   formatPHP,
   localCalendarDate,
@@ -273,7 +275,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
     void goals.save();
   }
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4">
+    <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
       {goals.inspecting && <p role="status">Loading goal…</p>}
       {goals.saveError && (
         <Alert>
@@ -284,8 +286,8 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
         </Alert>
       )}
       {goals.notice && <p role="status">{goals.notice}</p>}
-      <form onSubmit={submit} noValidate>
-        <FieldGroup>
+      <form onSubmit={submit} noValidate className="flex flex-col gap-6">
+        <FieldGroup className="gap-6">
           <Field>
             <FieldLabel htmlFor="goal-name">Name</FieldLabel>
             <Input
@@ -298,12 +300,14 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           </Field>
           <Field>
             <FieldLabel htmlFor="goal-target">Target (PHP)</FieldLabel>
-            <Input
+            <MoneyInput
               id="goal-target"
               inputMode="decimal"
+              className="tabular-nums"
+              placeholder="0.00"
               value={goals.target}
               disabled={disabled || readOnly}
-              onChange={(event) => goals.setTarget(event.target.value)}
+              onValueChange={(value) => goals.setTarget(value)}
             />
             <FieldDescription>
               A positive amount with up to two decimal places.
@@ -408,12 +412,14 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
                 <FieldLabel htmlFor="goal-allocation">
                   Reserved total (PHP)
                 </FieldLabel>
-                <Input
+                <MoneyInput
                   id="goal-allocation"
                   inputMode="decimal"
+                  className="tabular-nums"
+                  placeholder="0.00"
                   disabled={disabled || !selected}
                   value={goals.amount}
-                  onChange={(event) => goals.setAmount(event.target.value)}
+                  onValueChange={(value) => goals.setAmount(value)}
                 />
                 <FieldDescription>
                   This goal currently reserves {formatPHP(existing)} on the
@@ -439,7 +445,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           )}
         </section>
       )}
-      <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-border pt-5">
+      <div className={financeDrawerFooter}>
         {goal && !readOnly && <ArchiveButton goals={goals} />}
         <Button
           variant="outline"

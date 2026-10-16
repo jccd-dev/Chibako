@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FinanceGoal, FinanceGoalList, FinanceReservationAccount } from "./goal-types";
 import { createGoalSchema, updateGoalSchema, setGoalAllocationSchema } from "./goal-types";
 import { financeJson } from "./client-json";
-import { decimalPHP } from "./presentation";
+import { decimalPHPInput } from "./presentation";
 
 type ReservationAccount = FinanceReservationAccount & { archived: boolean };
 
@@ -16,7 +16,7 @@ export function useFinanceGoals() {
   const [busy, setBusy] = useState(false), [inspecting, setInspecting] = useState(false);
   const [panel, setPanel] = useState<string | null>(null), [editing, setEditing] = useState<FinanceGoal | null>(null);
   const [name, setName] = useState(""), [target, setTarget] = useState(""), [dueDate, setDueDate] = useState("");
-  const [accountId, setAccountId] = useState(""), [amount, setAmount] = useState("0.00");
+  const [accountId, setAccountId] = useState(""), [amount, setAmount] = useState("0");
   const [saveError, setSaveError] = useState(""), [notice, setNotice] = useState("");
   const saving = useRef(false), sequence = useRef(0), inspection = useRef(0);
   const pending = useRef<{ fingerprint: string; requestId: string } | null>(null);
@@ -50,15 +50,15 @@ export function useFinanceGoals() {
   }, [refresh]);
 
   const populate = useCallback((goal: FinanceGoal) => {
-    setEditing(goal); setName(goal.name); setTarget(decimalPHP(goal.target_cents)); setDueDate(goal.due_date ?? "");
+    setEditing(goal); setName(goal.name); setTarget(decimalPHPInput(goal.target_cents)); setDueDate(goal.due_date ?? "");
   }, []);
   function openCreate() {
     inspection.current++; pending.current = null; setInspecting(false); setEditing(null);
-    setName(""); setTarget(""); setDueDate(""); setAccountId(""); setAmount("0.00"); setSaveError(""); setNotice(""); setPanel("create");
+    setName(""); setTarget(""); setDueDate(""); setAccountId(""); setAmount("0"); setSaveError(""); setNotice(""); setPanel("create");
   }
   const openEdit = useCallback(async (goal: FinanceGoal) => {
     const run = ++inspection.current;
-    pending.current = null; populate(goal); setAccountId(""); setAmount("0.00"); setSaveError(""); setNotice(""); setPanel(goal.id); setInspecting(true);
+    pending.current = null; populate(goal); setAccountId(""); setAmount("0"); setSaveError(""); setNotice(""); setPanel(goal.id); setInspecting(true);
     try {
       const result = await fetch(`/api/finance/goals/${goal.id}`).then(financeJson<{ goal: FinanceGoal }>);
       if (run === inspection.current) populate(result.goal);
@@ -86,7 +86,7 @@ export function useFinanceGoals() {
     }
   }, [openEdit]);
   function closePanel() { inspection.current++; setPanel(null); setEditing(null); setSaveError(""); setNotice(""); pending.current = null; }
-  function selectAccount(id: string) { setAccountId(id); setAmount(decimalPHP(editing?.allocations.find(row => row.account_id === id)?.amount_cents ?? 0)); }
+  function selectAccount(id: string) { setAccountId(id); setAmount(decimalPHPInput(editing?.allocations.find(row => row.account_id === id)?.amount_cents ?? 0)); }
 
   async function mutate(path: string, method: string, input: object) {
     if (saving.current || inspecting) return null;
@@ -115,7 +115,7 @@ export function useFinanceGoals() {
     const validation = setGoalAllocationSchema.safeParse({ ...input, request_id: "validate" });
     if (!validation.success) { setSaveError(validation.error.issues[0]?.message ?? "Check the allocation."); return; }
     const goal = await mutate(`/${editing.id}/allocations`, "PUT", input);
-    if (goal) { setEditing(goal); setAmount(decimalPHP(goal.allocations.find(row => row.account_id === accountId)?.amount_cents ?? 0)); setNotice("Reservation saved. Account cash balances unchanged."); }
+    if (goal) { setEditing(goal); setAmount(decimalPHPInput(goal.allocations.find(row => row.account_id === accountId)?.amount_cents ?? 0)); setNotice("Reservation saved. Account cash balances unchanged."); }
   }
   async function archive() {
     if (!editing) return;

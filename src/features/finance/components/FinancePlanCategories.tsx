@@ -33,8 +33,8 @@ export function FinancePlanCategories({ activity, type, value, onChange, disable
       {categories.length > 9 && <Button type="button" variant="ghost" size="sm" disabled={disabled} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "View all"}</Button>}
     </div>
     <ToggleGroup id={id} aria-labelledby={`${id}-label`} value={[value]} disabled={disabled || activity.busy} onValueChange={values => onChange(values[0] ?? "")} variant="outline" className="w-full flex-wrap justify-start">
-      <ToggleGroupItem value="" className="min-h-11 px-3">Uncategorized</ToggleGroupItem>
-      {visible.map(row => <ToggleGroupItem key={row.id} value={row.id} className="min-h-11 max-w-full gap-2 px-3 whitespace-normal text-left"><IconCategory aria-hidden="true" />{row.name}{row.archived ? " (archived)" : ""}</ToggleGroupItem>)}
+      <ToggleGroupItem value="" className="min-h-9 px-2.5">Uncategorized</ToggleGroupItem>
+      {visible.map(row => <ToggleGroupItem key={row.id} value={row.id} className="min-h-9 max-w-full gap-2 px-2.5 whitespace-normal text-left"><IconCategory aria-hidden="true" />{row.name}{row.archived ? " (archived)" : ""}</ToggleGroupItem>)}
     </ToggleGroup>
     {!adding ? <Button type="button" variant="outline" className="self-start" disabled={disabled || activity.busy} onClick={() => { setAdding(true); activity.resetSave(); }}><IconPlus aria-hidden="true" />Add category</Button> : <Field>
       <FieldLabel htmlFor={`${id}-new`}>New {type} category</FieldLabel>
