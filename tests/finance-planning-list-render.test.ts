@@ -13,6 +13,7 @@ import { FinancePlanningForm } from "../src/features/finance/components/FinanceP
 import { useFinanceActivity } from "../src/features/finance/use-finance-activity";
 import { useFinancePlanning } from "../src/features/finance/use-finance-planning";
 import { useFinanceRecurrence } from "../src/features/finance/use-finance-recurrence";
+import { FinancePlanCategories } from "../src/features/finance/components/FinancePlanCategories";
 
 const item: PlanningItem = {
   kind: "schedule", id: "subscription", title: "TEST subscription", type: "expense", amount_cents: 112200,
@@ -63,6 +64,17 @@ test("new plan form starts recurring, monthly and manual while keeping the one-t
   assert.match(html, /aria-pressed="true"[^>]*>Manual mark</);
   assert.match(html, /Set as recurring expense/);
   assert.doesNotMatch(html, /Auto deduct<[^]*aria-checked="true"/);
+});
+
+function UncategorizedCategoryPicker() {
+  const activity = useFinanceActivity(async () => undefined);
+  return createElement(FinancePlanCategories, { activity, type: "expense", value: "", onChange: () => undefined, disabled: false, id: "test-category" });
+}
+
+test("uncategorized remains the selected category when no classifications exist", () => {
+  const html = renderToStaticMarkup(createElement(UncategorizedCategoryPicker));
+  assert.match(html, /<button(?=[^>]*aria-pressed="true")[^>]*>Uncategorized<\/button>/);
+  assert.equal((html.match(/aria-pressed="true"/g) ?? []).length, 1);
 });
 
 

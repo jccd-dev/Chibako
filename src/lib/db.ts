@@ -261,7 +261,7 @@ const MIGRATIONS: string[] = [
   );
   `,
   `
-  -- Goal progress comes from account reservations, separate from cash effects.
+  -- Goal holdings are attributed to their funding accounts; cash effects are recorded separately.
   CREATE TABLE IF NOT EXISTS finance_goals (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -282,6 +282,19 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (goal_id, account_id)
   );
   CREATE INDEX IF NOT EXISTS idx_finance_goal_allocations_account ON finance_goal_allocations(account_id);
+  CREATE TABLE IF NOT EXISTS finance_goal_movements (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL REFERENCES finance_goals(id),
+    type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal', 'relocation')),
+    source_account_id TEXT REFERENCES finance_accounts(id),
+    destination_account_id TEXT REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL,
+    CHECK (source_account_id IS NOT NULL OR destination_account_id IS NOT NULL)
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_movements_goal ON finance_goal_movements(goal_id, created_at, id);
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_movements_source ON finance_goal_movements(source_account_id);
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_movements_destination ON finance_goal_movements(destination_account_id);
    `,
   `
   CREATE TABLE IF NOT EXISTS finance_obligations (
@@ -383,6 +396,13 @@ export function getDb(): Database.Database {
     if (!accountNames.has("account_group")) db.exec("ALTER TABLE finance_accounts ADD COLUMN account_group TEXT NOT NULL DEFAULT ''");
     if (!accountNames.has("include_in_summary")) db.exec("ALTER TABLE finance_accounts ADD COLUMN include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1))");
     if (!accountNames.has("maintaining_balance_cents")) db.exec("ALTER TABLE finance_accounts ADD COLUMN maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991)");
+    const goalColumns = db.prepare("PRAGMA table_info(finance_goals)").all() as Array<{ name: string }>;
+    if (!goalColumns.some(column => column.name === "linked_account_id")) {
+      db.exec(`ALTER TABLE finance_goals ADD COLUMN linked_account_id TEXT REFERENCES finance_accounts(id);
+        INSERT INTO finance_goal_movements (id, goal_id, type, source_account_id, amount_cents, created_at)
+          SELECT 'goal-migration:' || a.goal_id || ':' || a.account_id, a.goal_id, 'deposit', a.account_id, a.amount_cents, g.updated_at
+          FROM finance_goal_allocations a JOIN finance_goals g ON g.id = a.goal_id WHERE g.archived = 0;`);
+    }
     for (const table of ["finance_transactions", "finance_movements"]) {
       const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
       const existing = new Set(columns.map(column => column.name));

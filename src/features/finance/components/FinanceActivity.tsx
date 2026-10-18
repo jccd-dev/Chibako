@@ -324,9 +324,7 @@ export function FinanceTransactionDetails({
         <DialogHeader className="shrink-0 border-b border-border p-4">
           <DialogTitle>Transaction details</DialogTitle>
           <DialogDescription>
-            Dated financial activity. Correct mistakes together. Delete hides
-            without cancelling effects; Revert cancels once. Refunds reduce
-            spending on the date money returns.
+            Dated financial activity. Correct mistakes together.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
@@ -345,155 +343,208 @@ export function FinanceTransactionDetails({
               </AlertDescription>
             </Alert>
           ) : selected ? (
-            <dl className="grid gap-4 text-sm">
-              <div>
-                <dt className="text-muted-foreground">Type</dt>
-                <dd>
-                  {selected.obligation_payment
-                    ? principalPaymentLabel(selected)
-                    : activityLabel(selected.type)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Amount</dt>
-                <dd className="text-xl font-semibold tabular-nums">
-                  {formatPHP(selected.amount_cents)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Account</dt>
-                <dd className="break-words">{selected.account_name}</dd>
-              </div>
-              {selected.obligation_id && (
+            <>
+              <section aria-label="Transaction summary">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <dt className="text-muted-foreground">Amount</dt>
+                  <dd className="mt-2 break-words text-2xl font-semibold tabular-nums">
+                    {formatPHP(selected.amount_cents)}
+                  </dd>
+                  {(selected.hidden || selected.reverted) && (
+                    <p className="mt-1 text-sm">
+                      {selected.hidden ? "Hidden" : ""}
+                      {selected.hidden && selected.reverted ? " · " : ""}
+                      {selected.reverted ? "Reverted" : ""}
+                    </p>
+                  )}
+                </div>
                 <div>
-                  <dt className="text-muted-foreground">Linked obligation</dt>
-                  <dd>
+                  <dt className="text-muted-foreground">Type</dt>
+                  <dd className="mt-1 break-words">
                     {selected.obligation_payment
-                      ? "This activity backs principal. Corrections, hiding and reverting update cash and outstanding principal together here and reopen settlement when the obligation was closed. Its category is excluded from income and spending reports."
-                      : "Cash and principal change together. Inspect outstanding principal, payments and write-offs in Planning. Neither borrowing nor lending counts as income or spending."}
+                      ? principalPaymentLabel(selected)
+                      : activityLabel(selected.type)}
                   </dd>
                 </div>
-              )}
-              {selected.destination_account_name && (
                 <div>
-                  <dt className="text-muted-foreground">Destination account</dt>
-                  <dd className="break-words">
-                    {selected.destination_account_name}
+                  <dt className="text-muted-foreground">Transaction date</dt>
+                  <dd className="mt-1">
+                    {formatHistoryDate(selected.transaction_date)}
                   </dd>
                 </div>
-              )}
-              {selected.fee_transaction_id && (
                 <div>
-                  <dt className="text-muted-foreground">
-                    Separate transfer fee
-                  </dt>
-                  <dd>
-                    <Button
-                      variant="outline"
-                      disabled={activity.busy}
-                      onClick={() => void inspect(selected.fee_transaction_id!)}
-                    >
-                      Inspect fee
-                    </Button>
+                  <dt className="text-muted-foreground">Account</dt>
+                  <dd className="mt-1 break-words">{selected.account_name}</dd>
+                </div>
+                {selected.destination_account_name && (
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Destination account
+                    </dt>
+                    <dd className="mt-1 break-words">
+                      {selected.destination_account_name}
+                    </dd>
+                  </div>
+                )}
+                {selected.compared_balance_cents != null && (
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Derived balance before adjustment
+                    </dt>
+                    <dd className="mt-1 tabular-nums">
+                      {formatPHP(selected.compared_balance_cents)}
+                    </dd>
+                  </div>
+                )}
+                {selected.actual_balance_cents != null && (
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Actual balance / value
+                    </dt>
+                    <dd className="mt-1 tabular-nums">
+                      {formatPHP(selected.actual_balance_cents)}
+                    </dd>
+                  </div>
+                )}
+                {selected.obligation_id && (
+                  <div className="sm:col-span-2">
+                    <dt className="text-muted-foreground">Linked obligation</dt>
+                    <dd className="mt-1 break-words">
+                      {selected.obligation_payment
+                        ? "This activity backs principal. Corrections, hiding and reverting update cash and outstanding principal together here and reopen settlement when the obligation was closed. Its category is excluded from income and spending reports."
+                        : "Cash and principal change together. Inspect outstanding principal, payments and write-offs in Planning. Neither borrowing nor lending counts as income or spending."}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </section>
+            <section aria-label="Supporting details">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+                {(selected.type === "income" || selected.type === "expense") && (
+                  <div>
+                    <dt className="text-muted-foreground">Category</dt>
+                    <dd className="mt-1 break-words">
+                      {selected.category_name ?? "Uncategorized"}
+                      {selected.subcategory_name
+                        ? ` / ${selected.subcategory_name}`
+                        : ""}
+                    </dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-muted-foreground">Tags</dt>
+                  <dd className="mt-1 break-words">
+                    {selected.tag_ids
+                      ?.map(
+                        (id) =>
+                          activity.classifications.find(
+                            (tag) => tag.id === id,
+                          )?.name ?? "Saved tag",
+                      )
+                      .join(", ") || "No tags."}
                   </dd>
                 </div>
-              )}
-              {selected.cashback_transaction_id && (
-                <div>
-                  <dt className="text-muted-foreground">Cashback income</dt>
-                  <dd>
-                    <Button variant="outline" disabled={activity.busy} onClick={() => void inspect(selected.cashback_transaction_id!)}>
-                      Inspect cashback
-                    </Button>
+                <div className="sm:col-span-2">
+                  <dt className="text-muted-foreground">Transaction text</dt>
+                  <dd className="mt-1 whitespace-pre-wrap break-words">
+                    {selected.text || "No additional text."}
                   </dd>
                 </div>
-              )}
-              {selected.expense_id && (
-                <div>
-                  <dt className="text-muted-foreground">Original expense</dt>
-                  <dd>
-                    <Button
-                      variant="outline"
-                      disabled={activity.busy}
-                      onClick={() => void inspect(selected.expense_id!)}
-                    >
-                      Inspect original expense
-                    </Button>
+                <div className="text-xs text-muted-foreground sm:col-span-2">
+                  <dt>Recorded at</dt>
+                  <dd className="mt-1">
+                    {selected.created_at
+                      ? new Date(selected.created_at * 1000).toLocaleString()
+                      : "Unavailable"}
                   </dd>
                 </div>
-              )}
-              {selected.linked_record_id && (
-                <div>
-                  <dt className="text-muted-foreground">{selected.cashback_expense_id ? "Original expense" : "Linked transfer"}</dt>
-                  <dd>
-                    <Button
-                      variant="outline"
-                      disabled={activity.busy}
-                      onClick={() => void inspect(selected.linked_record_id!)}
-                    >
-                      {selected.cashback_expense_id ? "Inspect original expense" : "Inspect transfer"}
-                    </Button>
-                  </dd>
-                </div>
-              )}
-              {selected.compared_balance_cents != null && (
-                <div>
-                  <dt className="text-muted-foreground">
-                    Derived balance before adjustment
-                  </dt>
-                  <dd>{formatPHP(selected.compared_balance_cents)}</dd>
-                </div>
-              )}
-              {selected.actual_balance_cents != null && (
-                <div>
-                  <dt className="text-muted-foreground">
-                    Actual balance / value
-                  </dt>
-                  <dd>{formatPHP(selected.actual_balance_cents)}</dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-muted-foreground">Transaction date</dt>
-                <dd>{formatHistoryDate(selected.transaction_date)}</dd>
-              </div>
-              {(selected.type === "income" || selected.type === "expense") && (
-                <div>
-                  <dt className="text-muted-foreground">Category</dt>
-                  <dd className="break-words">
-                    {selected.category_name ?? "Uncategorized"}
-                    {selected.subcategory_name
-                      ? ` / ${selected.subcategory_name}`
-                      : ""}
-                  </dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-muted-foreground">Transaction text</dt>
-                <dd className="whitespace-pre-wrap break-words">
-                  {selected.text || "No additional text."}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Tags</dt>
-                <dd className="break-words">
-                  {selected.tag_ids
-                    ?.map(
-                      (id) =>
-                        activity.classifications.find((tag) => tag.id === id)
-                          ?.name ?? "Saved tag",
-                    )
-                    .join(", ") || "No tags."}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Recorded at</dt>
-                <dd>
-                  {selected.created_at
-                    ? new Date(selected.created_at * 1000).toLocaleString()
-                    : "Unavailable"}
-                </dd>
-              </div>
-            </dl>
+              </dl>
+            </section>
+            {(selected.fee_transaction_id ||
+              selected.cashback_transaction_id ||
+              selected.expense_id ||
+              selected.linked_record_id) && (
+              <section aria-label="Related records">
+                <dl className="flex flex-col gap-3 text-sm">
+                  {selected.fee_transaction_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        Separate transfer fee
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() =>
+                            void inspect(selected.fee_transaction_id!)
+                          }
+                        >
+                          Inspect fee
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                  {selected.cashback_transaction_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        Cashback income
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() =>
+                            void inspect(selected.cashback_transaction_id!)
+                          }
+                        >
+                          Inspect cashback
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                  {selected.expense_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        Original expense
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() => void inspect(selected.expense_id!)}
+                        >
+                          Inspect original expense
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                  {selected.linked_record_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        {selected.cashback_expense_id
+                          ? "Original expense"
+                          : "Linked transfer"}
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() =>
+                            void inspect(selected.linked_record_id!)
+                          }
+                        >
+                          {selected.cashback_expense_id
+                            ? "Inspect original expense"
+                            : "Inspect transfer"}
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </section>
+            )}
+            </>
           ) : (
             <p role="status">Loading transaction…</p>
           )}

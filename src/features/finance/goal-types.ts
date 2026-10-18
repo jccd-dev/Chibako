@@ -18,6 +18,7 @@ export const createGoalSchema = z.object({
   name,
   target: z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a positive PHP target with up to two decimals"),
   due_date: calendarDateSchema.optional(),
+  linked_account_id: id.nullable().optional(),
 }).strict();
 
 export const updateGoalSchema = z.object({
@@ -27,8 +28,9 @@ export const updateGoalSchema = z.object({
   target: createGoalSchema.shape.target.optional(),
   due_date: calendarDateSchema.nullable().optional(),
   archived: z.boolean().optional(),
+  linked_account_id: id.nullable().optional(),
 }).strict().refine(patch => patch.name !== undefined || patch.target !== undefined
-  || patch.due_date !== undefined || patch.archived !== undefined, "Provide a goal change");
+  || patch.due_date !== undefined || patch.archived !== undefined || patch.linked_account_id !== undefined, "Provide a goal change");
 
 export interface FinanceGoal {
   id: string;
@@ -36,6 +38,8 @@ export interface FinanceGoal {
   currency: "PHP";
   target_cents: number;
   saved_cents: number;
+  linked_account_id: string | null;
+  linked_account_name: string | null;
   achieved: boolean;
   allocations: FinanceGoalAllocation[];
   due_date: string | null;
@@ -53,6 +57,14 @@ export const setGoalAllocationSchema = z.object({
 }).strict();
 
 export const listGoalAccountsSchema = listGoalsSchema;
+
+export const moveGoalMoneySchema = z.object({
+  request_id: requestId,
+  version: updateAccountSchema.shape.version,
+  direction: z.enum(["deposit", "withdrawal"]),
+  account_id: id,
+  amount: createGoalSchema.shape.target,
+}).strict();
 
 export interface FinanceReservationAccount {
   account_id: string;

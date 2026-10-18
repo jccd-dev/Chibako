@@ -8,7 +8,7 @@ import { sourceFields, requiredSourceFields, referenceCollections, isSourceObjec
 
 const financeTables = [
   "finance_accounts", "finance_classifications", "finance_transactions", "finance_movements", "finance_plans",
-  "finance_budget_plans", "finance_budget_limits", "finance_schedules", "finance_goals", "finance_goal_allocations",
+  "finance_budget_plans", "finance_budget_limits", "finance_schedules", "finance_goals", "finance_goal_allocations", "finance_goal_movements",
   "finance_obligations", "finance_obligation_movements", "finance_refunds", "finance_note_links",
   "finance_obligation_payments", "finance_obligation_writeoffs", "finance_requests", "finance_audit",
   "finance_import_migrations", "finance_import_records",

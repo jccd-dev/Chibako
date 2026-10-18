@@ -47,8 +47,8 @@ import { getBudget, setBudget, getFinanceReport } from "../features/finance/budg
 import { getFinanceAttention, getFinanceOverview } from "../features/finance/overview";
 import { createObligation, updateObligation, getObligation, listObligations, postObligationMovement, postObligationPayment, closeObligation, getObligationPaymentHistory } from "../features/finance/obligations";
 import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema, postObligationPaymentSchema, closeObligationSchema, obligationHistorySchema } from "../features/finance/obligation-types";
-import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts } from "../features/finance/goals";
-import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema } from "../features/finance/goal-types";
+import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts, moveGoalMoney } from "../features/finance/goals";
+import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema, moveGoalMoneySchema } from "../features/finance/goal-types";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
 import { financeAttentionSchema } from "../features/finance/overview-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
@@ -442,11 +442,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: obligationHistorySchema, annotations: READ_ONLY,
     }, ({ id, ...args }) => financeResult("finance:read", actor => getObligationPaymentHistory(actor, id, args)));
     server.registerTool("list_finance_goals", {
-      title: "List savings goals", description: "Paginated PHP savings goals with account reservations and achievement, active by default. Goal progress is already included in cash totals. Archived goals preserve released allocation history.",
+      title: "List savings goals", description: "Paginated PHP savings goals with held money, optional linked account and achievement, active by default. Unlinked savings are held in the goal and included once in money totals. Funding allocations identify remaining contributions, not source reservations.",
       inputSchema: listGoalsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listGoals(actor, args) })));
     server.registerTool("get_finance_goal", {
-      title: "Inspect savings goal", description: "Read one goal's target, account allocations, achievement and account-level shortfalls. Shortfalls are shared across goals on the same account; do not sum duplicates.",
+      title: "Inspect savings goal", description: "Read a goal's held money, linked account, target and remaining funding contributions. Account shortfalls describe linked account holdings, not missing cash at original funding sources.",
       inputSchema: getGoalSchema, annotations: READ_ONLY,
     }, ({ id }) => financeResult("finance:read", actor => ({ goal: getGoal(actor, id) })));
     server.registerTool("list_finance_goal_accounts", {
@@ -600,17 +600,21 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:manage", actor => closeObligation(actor, id, args)));
     const annotations = { ...MUTATING, idempotentHint: true };
     server.registerTool("create_finance_goal", {
-      title: "Create savings goal", description: "Create a positive PHP target and optional due date. Requires request_id. Starts without reservations and never moves cash.",
+      title: "Create savings goal", description: "Create a positive PHP target, optional due date and optional linked_account_id. Starts empty. Deposits debit a source and credit the linked account, or stay held in the goal if unlinked.",
       inputSchema: createGoalSchema, annotations,
     }, args => financeResult("finance:manage", actor => createGoal(actor, args)));
     server.registerTool("update_finance_goal", {
-      title: "Edit or archive savings goal", description: "Update name, target or due date, or archive with archived:true. Requires request_id and current version. Archive retains history and releases reservations; archived goals are read-only.",
+      title: "Edit or archive savings goal", description: "Update name, target, due date or linked_account_id, or archive an empty goal. Changing linked_account_id requires finance:write too and moves the saved balance between backing locations; null holds money in the goal. Withdraw all money before archiving. Requires request_id and current version.",
       inputSchema: updateGoalSchema.safeExtend({ id: getGoalSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateGoal(actor, id, args)));
-    server.registerTool("set_finance_goal_allocation", {
-      title: "Reserve or release goal money", description: "Set the absolute PHP amount reserved on one account for a goal; amount:0 releases it. Requires request_id and goal version. Increases require active money accounts and enough unreserved cash across every goal. Releases remain allowed during shortfalls or account archival. No cash movement. At most 100 accounts per goal.",
+    if (financeAuthorized("finance:write")) server.registerTool("set_finance_goal_allocation", {
+      title: "Set goal funding from an account", description: "Compatibility absolute per-source PHP holding. Increasing moves the difference out of the source into the goal's linked account or goal-held money. Decreasing returns the difference to that account. Requires finance:manage, finance:write, request_id and goal version. Prefer move_finance_goal_money for new deposits or withdrawals. Never income or spending.",
       inputSchema: setGoalAllocationSchema.extend({ id: getGoalSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => setGoalAllocation(actor, id, args)));
+    if (financeAuthorized("finance:write")) server.registerTool("move_finance_goal_money", {
+      title: "Add or withdraw goal money", description: "Move a positive PHP amount into or out of a goal. direction is deposit or withdrawal; account_id is the source for deposits or destination for withdrawals. Deposits debit the source and credit the linked account, or stay held in an unlinked goal. Withdrawals debit goal holdings and credit the chosen account. Neither is income or spending. Requires finance:manage, finance:write, request_id and current goal version.",
+      inputSchema: moveGoalMoneySchema.extend({ id: getGoalSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => moveGoalMoney(actor, id, args)));
     server.registerTool("create_finance_schedule", {
       title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. handling defaults to manual. Automatic handling also requires finance:write and posts at logged_time in the IANA timezone while the Next server runs, including missed dates after restart. Obligation reminders require manual handling. Optional max_occurrences or total_limit (PHP decimal) cap scheduled slots including skips; no partial final payment. Imported schedules remain manual and may start paused. Requires finance:manage and request_id.",
       inputSchema: createScheduleSchema, annotations,

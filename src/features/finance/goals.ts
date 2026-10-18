@@ -3,19 +3,22 @@ import { getDb, now } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { parseFinance, financeMutation } from "./mutations";
 import { decimalCents, exactCents } from "./money";
-import { readAccountBalance, listAccounts } from "./accounts";
+import { readAccountBalance, listAccounts, requireSufficientFunds } from "./accounts";
 import { reservedAccountCents, reservationAmounts } from "./reservations";
 import { FinanceError, type FinanceActor } from "./types";
-import { createGoalSchema, updateGoalSchema, listGoalsSchema, getGoalSchema, listGoalAccountsSchema, setGoalAllocationSchema, type FinanceGoal, type FinanceGoalList, type FinanceReservationAccount } from "./goal-types";
+import { createGoalSchema, updateGoalSchema, listGoalsSchema, getGoalSchema, listGoalAccountsSchema, setGoalAllocationSchema, moveGoalMoneySchema, type FinanceGoal, type FinanceGoalList, type FinanceReservationAccount } from "./goal-types";
 
-type GoalRow = Omit<FinanceGoal, "archived" | "allocations" | "achieved"> & { archived: number };
+type GoalRow = Omit<FinanceGoal, "archived" | "allocations" | "achieved" | "linked_account_name"> & { archived: number };
 
 function goalFromRow(row: GoalRow): FinanceGoal {
   const rows = getDb().prepare("SELECT account_id, amount_cents FROM finance_goal_allocations WHERE goal_id = ? ORDER BY account_id")
     .all(row.id) as { account_id: string; amount_cents: number }[];
   const allocations = rows.map(allocation => ({ ...readReservationAccount(allocation.account_id), amount_cents: allocation.amount_cents }));
   const saved_cents = exactCents(allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount_cents), 0n));
-  return { ...row, saved_cents, achieved: saved_cents >= row.target_cents, allocations, due_date: row.due_date ?? null, archived: row.archived === 1, currency: "PHP" };
+  return { ...row, saved_cents, achieved: saved_cents >= row.target_cents, allocations,
+    linked_account_id: row.linked_account_id ?? null,
+    linked_account_name: row.linked_account_id ? readAccountBalance(row.linked_account_id).name : null,
+    due_date: row.due_date ?? null, archived: row.archived === 1, currency: "PHP" };
 }
 
 function readReservationAccount(id: string): FinanceReservationAccount {
@@ -39,7 +42,7 @@ export function getGoal(actor: FinanceActor, id: string): FinanceGoal {
 export function listGoalAllocationShortfalls(actor: FinanceActor, input: { limit: number }) {
   authorizeFinance(actor, "finance:read");
   const balanceSql = `(
-    a.opening_balance_cents
+    a.opening_balance_cents + a.maintaining_balance_cents
     + COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount_cents ELSE -t.amount_cents END)
       FROM finance_transactions t WHERE t.account_id = a.id AND t.reverted = 0), 0)
     + COALESCE((SELECT SUM(CASE WHEN m.type = 'transfer' AND m.account_id = a.id THEN -m.amount_cents ELSE m.amount_cents END)
@@ -47,9 +50,11 @@ export function listGoalAllocationShortfalls(actor: FinanceActor, input: { limit
     + COALESCE((SELECT SUM(r.amount_cents) FROM finance_refunds r WHERE r.account_id = a.id AND r.reverted = 0), 0)
     + COALESCE((SELECT SUM(CASE WHEN m.type = 'borrowing' THEN m.amount_cents ELSE -m.amount_cents END)
       FROM finance_obligation_movements m WHERE m.account_id = a.id AND m.reverted = 0), 0)
+    + COALESCE((SELECT SUM(m.amount_cents) FROM finance_goal_movements m WHERE m.destination_account_id = a.id), 0)
+    - COALESCE((SELECT SUM(m.amount_cents) FROM finance_goal_movements m WHERE m.source_account_id = a.id), 0)
   )`;
   const reservedSql = `(SELECT COALESCE(SUM(ga.amount_cents), 0) FROM finance_goal_allocations ga
-    JOIN finance_goals g ON g.id = ga.goal_id AND g.archived = 0 WHERE ga.account_id = a.id)`;
+    JOIN finance_goals g ON g.id = ga.goal_id AND g.archived = 0 WHERE g.linked_account_id = a.id)`;
   const cte = `WITH account_reservations AS (
     SELECT a.id AS account_id, a.created_at, ${balanceSql} AS balance_cents, ${reservedSql} AS reserved_cents
     FROM finance_accounts a WHERE a.kind = 'money'
@@ -102,10 +107,11 @@ export function listGoals(actor: FinanceActor, input: unknown = {}): FinanceGoal
   })();
 }
 
-function mutateGoal(actor: FinanceActor, requestId: string, operation: string, payload: object, change: () => { before: FinanceGoal | null; after: FinanceGoal }): { goal: FinanceGoal } {
+function mutateGoal(actor: FinanceActor, requestId: string, operation: string, payload: object, change: () => { before: FinanceGoal | null; after: FinanceGoal }, accounts: string[] = []): { goal: FinanceGoal } {
   return financeMutation(actor, requestId, operation, payload, () => {
     const { before, after } = change();
-    return { result: { goal: after }, affectedIds: [after.id, ...after.allocations.map(row => row.account_id)], before, after };
+    return { result: { goal: after }, affectedIds: [...new Set([after.id, ...accounts, ...after.allocations.map(row => row.account_id),
+      ...(before?.linked_account_id ? [before.linked_account_id] : []), ...(after.linked_account_id ? [after.linked_account_id] : [])])], before, after };
   });
 }
 
@@ -115,10 +121,11 @@ export function createGoal(actor: FinanceActor, input: unknown): { goal: Finance
   const targetCents = decimalCents(payload.target);
   if (targetCents <= 0) throw new FinanceError("Use a target above PHP 0.00", 400, "invalid_input");
   return mutateGoal(actor, request_id, "goal.create", payload, () => {
+    if (payload.linked_account_id) activeMoneyAccount(payload.linked_account_id);
     const id = randomUUID();
     const timestamp = now();
-    getDb().prepare("INSERT INTO finance_goals (id, name, target_cents, saved_cents, due_date, archived, version, created_at, updated_at) VALUES (?,?,?,?,?,0,1,?,?)")
-      .run(id, payload.name, targetCents, 0, payload.due_date ?? null, timestamp, timestamp);
+    getDb().prepare("INSERT INTO finance_goals (id, name, target_cents, saved_cents, due_date, linked_account_id, archived, version, created_at, updated_at) VALUES (?,?,?,?,?,?,0,1,?,?)")
+      .run(id, payload.name, targetCents, 0, payload.due_date ?? null, payload.linked_account_id ?? null, timestamp, timestamp);
     return { before: null, after: readGoal(id) };
   });
 }
@@ -127,42 +134,117 @@ export function updateGoal(actor: FinanceActor, id: string, input: unknown): { g
   authorizeFinance(actor, "finance:manage");
   parseFinance(getGoalSchema, { id });
   const { request_id, ...patch } = parseFinance(updateGoalSchema, input);
+  if (patch.linked_account_id !== undefined) authorizeFinance(actor, "finance:write");
   const targetCents = patch.target === undefined ? null : decimalCents(patch.target);
   if (targetCents !== null && targetCents <= 0) throw new FinanceError("Use a target above PHP 0.00", 400, "invalid_input");
   return mutateGoal(actor, request_id, "goal.update", { id, ...patch }, () => {
     const before = editableGoal(id, patch.version);
+    if (patch.archived && before.saved_cents > 0) throw new FinanceError("Withdraw all goal money before archiving", 409, "goal_has_money");
     const assignments: string[] = [], values: (string | number | null)[] = [];
     if (patch.name !== undefined) { assignments.push("name = ?"); values.push(patch.name); }
     if (targetCents !== null) { assignments.push("target_cents = ?"); values.push(targetCents); }
     if (patch.due_date !== undefined) { assignments.push("due_date = ?"); values.push(patch.due_date ?? null); }
     if (patch.archived !== undefined) { assignments.push("archived = ?"); values.push(patch.archived ? 1 : 0); }
+    if (patch.linked_account_id !== undefined) {
+      const linked = patch.linked_account_id;
+      if (linked !== before.linked_account_id) {
+        if (linked) activeMoneyAccount(linked);
+        if (before.saved_cents > 0) {
+          recordGoalMovement(before, "relocation", before.linked_account_id, linked, before.saved_cents);
+        }
+      }
+      assignments.push("linked_account_id = ?"); values.push(linked);
+    }
     getDb().prepare(`UPDATE finance_goals SET ${assignments.join(", ")}, version = version + 1, updated_at = ? WHERE id = ?`)
       .run(...values, now(), id);
     return { before, after: readGoal(id) };
   });
 }
 
+function activeMoneyAccount(id: string) {
+  const account = readAccountBalance(id);
+  if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
+  return account;
+}
+
+function recordGoalMovement(goal: FinanceGoal, type: "deposit" | "withdrawal" | "relocation", sourceId: string | null, destinationId: string | null, amount: number) {
+  if (sourceId !== destinationId) {
+    if (sourceId) {
+      const source = readAccountBalance(sourceId);
+      const ownHolding = sourceId === goal.linked_account_id ? goal.saved_cents : 0;
+      requireSufficientFunds(BigInt(source.balance_cents) - BigInt(reservedAccountCents(sourceId)) + BigInt(ownHolding), amount);
+      exactCents(BigInt(source.balance_cents) - BigInt(amount));
+    }
+    if (destinationId) exactCents(BigInt(activeMoneyAccount(destinationId).balance_cents) + BigInt(amount));
+  }
+  getDb().prepare(`INSERT INTO finance_goal_movements (id, goal_id, type, source_account_id, destination_account_id, amount_cents, created_at)
+    VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), goal.id, type, sourceId, destinationId, amount, now());
+}
+
+function writeAllocation(goalId: string, accountId: string, amount: number) {
+  const db = getDb();
+  if (amount === 0) db.prepare("DELETE FROM finance_goal_allocations WHERE goal_id = ? AND account_id = ?").run(goalId, accountId);
+  else db.prepare(`INSERT INTO finance_goal_allocations (goal_id, account_id, amount_cents) VALUES (?,?,?)
+    ON CONFLICT(goal_id, account_id) DO UPDATE SET amount_cents = excluded.amount_cents`).run(goalId, accountId, amount);
+}
+
+function depositGoalMoney(goal: FinanceGoal, accountId: string, amount: number) {
+  activeMoneyAccount(accountId);
+  if (accountId === goal.linked_account_id) throw new FinanceError("Choose a source different from the goal's linked account", 400, "invalid_account");
+  const existing = goal.allocations.find(row => row.account_id === accountId)?.amount_cents ?? 0;
+  if (!existing && goal.allocations.length >= 100) throw new FinanceError("A goal supports at most 100 funding accounts", 400, "allocation_limit");
+  exactCents(BigInt(goal.saved_cents) + BigInt(amount));
+  recordGoalMovement(goal, "deposit", accountId, goal.linked_account_id, amount);
+  writeAllocation(goal.id, accountId, exactCents(BigInt(existing) + BigInt(amount)));
+}
+
+export function moveGoalMoney(actor: FinanceActor, id: string, input: unknown): { goal: FinanceGoal } {
+  authorizeFinance(actor, "finance:manage");
+  authorizeFinance(actor, "finance:write");
+  parseFinance(getGoalSchema, { id });
+  const { request_id, ...payload } = parseFinance(moveGoalMoneySchema, input);
+  const amount = decimalCents(payload.amount);
+  if (amount <= 0) throw new FinanceError("Use an amount above PHP 0.00", 400, "invalid_input");
+  return mutateGoal(actor, request_id, "goal.move", { id, ...payload }, () => {
+    const before = editableGoal(id, payload.version);
+    if (payload.direction === "deposit") depositGoalMoney(before, payload.account_id, amount);
+    else {
+      activeMoneyAccount(payload.account_id);
+      if (amount > before.saved_cents) throw new FinanceError("Amount exceeds the money in this goal", 409, "insufficient_funds");
+      recordGoalMovement(before, "withdrawal", before.linked_account_id, payload.account_id, amount);
+      let remaining = amount;
+      for (const allocation of before.allocations) {
+        const released = Math.min(remaining, allocation.amount_cents);
+        writeAllocation(id, allocation.account_id, allocation.amount_cents - released);
+        remaining -= released;
+        if (remaining === 0) break;
+      }
+    }
+    getDb().prepare("UPDATE finance_goals SET version = version + 1, updated_at = ? WHERE id = ?").run(now(), id);
+    return { before, after: readGoal(id) };
+  }, [payload.account_id]);
+}
+
+// Keep the absolute per-source contract for existing REST and MCP callers.
 export function setGoalAllocation(actor: FinanceActor, id: string, input: unknown) {
   authorizeFinance(actor, "finance:manage");
+  authorizeFinance(actor, "finance:write");
   parseFinance(getGoalSchema, { id });
   const { request_id, ...payload } = parseFinance(setGoalAllocationSchema, input);
   const amount = decimalCents(payload.amount);
   return financeMutation(actor, request_id, "goal.allocate", { id, ...payload }, () => {
     const before = editableGoal(id, payload.version);
-    const account = readAccountBalance(payload.account_id);
-    const existing = before.allocations.find(row => row.account_id === account.id)?.amount_cents ?? 0;
-    if (account.kind !== "money" || (account.archived && amount > existing)) throw new FinanceError("Choose an active money account; archived accounts only allow releases", 400, "invalid_account");
-    if (amount > existing && BigInt(reservedAccountCents(account.id)) - BigInt(existing) + BigInt(amount) > BigInt(account.balance_cents)) {
-      throw new FinanceError("Amount exceeds this account's unreserved money", 409, "allocation_limit");
+    const existing = before.allocations.find(row => row.account_id === payload.account_id)?.amount_cents ?? 0;
+    const difference = amount - existing;
+    if (difference > 0) depositGoalMoney(before, payload.account_id, difference);
+    if (difference < 0) {
+      activeMoneyAccount(payload.account_id);
+      recordGoalMovement(before, "withdrawal", before.linked_account_id, payload.account_id, -difference);
+      writeAllocation(id, payload.account_id, amount);
     }
-    if (!existing && amount > 0 && before.allocations.length >= 100) throw new FinanceError("A goal supports at most 100 account allocations", 400, "allocation_limit");
-    exactCents(BigInt(before.saved_cents) - BigInt(existing) + BigInt(amount));
-    const db = getDb();
-    if (amount === 0) db.prepare("DELETE FROM finance_goal_allocations WHERE goal_id = ? AND account_id = ?").run(id, account.id);
-    else db.prepare("INSERT INTO finance_goal_allocations (goal_id, account_id, amount_cents) VALUES (?,?,?) ON CONFLICT(goal_id, account_id) DO UPDATE SET amount_cents = excluded.amount_cents").run(id, account.id, amount);
-    db.prepare("UPDATE finance_goals SET version = version + 1, updated_at = ? WHERE id = ?").run(now(), id);
-    const after = readGoal(id), reservation = readReservationAccount(account.id);
-    return { result: { goal: after, account: reservation, warnings: reservation.shortfall_cents > 0 ? ["allocation_shortfall"] : [] },
-      affectedIds: [id, account.id], before, after };
+    getDb().prepare("UPDATE finance_goals SET version = version + 1, updated_at = ? WHERE id = ?").run(now(), id);
+    const after = readGoal(id), account = readReservationAccount(payload.account_id);
+    return { result: { goal: after, account, warnings: [] },
+      affectedIds: [...new Set([id, payload.account_id, ...(before.linked_account_id ? [before.linked_account_id] : [])])], before, after };
   });
 }

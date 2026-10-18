@@ -35,7 +35,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import type { FinanceGoal } from "@/features/finance/goal-types";
+import type { FinanceGoal, FinanceGoalAllocation } from "@/features/finance/goal-types";
 import {
   useFinanceGoals,
   type FinanceGoalsController,
@@ -59,7 +59,8 @@ export function FinanceGoals({
   useEffect(() => {
     if (!focusAccountId || !page) return;
     const goal = page.goals.find((row) =>
-      row.allocations.some((allocation) => allocation.account_id === focusAccountId),
+      row.linked_account_id === focusAccountId
+      || row.allocations.some((allocation) => allocation.account_id === focusAccountId),
     );
     if (goal) {
       void openEdit(goal);
@@ -73,8 +74,8 @@ export function FinanceGoals({
       <CardHeader>
         <CardTitle>Savings goals</CardTitle>
         <CardDescription>
-          Reserve money already held in your accounts. Progress stays separate
-          from cash totals.
+          Save by moving real cash into your goals. Goal money movements do not
+          appear as expenses in history.
         </CardDescription>
         <CardAction>
           <Button
@@ -118,7 +119,7 @@ export function FinanceGoals({
                 No {goals.archived ? "archived " : ""}goals
               </EmptyTitle>
               <EmptyDescription>
-                Create a target, then reserve existing account money for it.
+                Create a goal, then use Add money to move cash into it.
               </EmptyDescription>
             </EmptyHeader>
             {!goals.archived && (
@@ -173,7 +174,7 @@ export function FinanceGoals({
           if (!open && !goals.busy) goals.closePanel();
         }}
       >
-        <SheetContent className={financeSheet} showCloseButton={false}>
+        <SheetContent className={`${financeSheet} overscroll-contain`} showCloseButton={false}>
           <SheetHeader className="border-b border-border p-4">
             <SheetTitle>
               {goals.panel === "create"
@@ -183,8 +184,8 @@ export function FinanceGoals({
                   : "Edit goal"}
             </SheetTitle>
             <SheetDescription>
-              Allocations reserve existing money. Transfers and spending are
-              separate activity.
+              Deposits and withdrawals move real cash in or out of the goal.
+              Goal movements do not appear as expenses in history.
             </SheetDescription>
           </SheetHeader>
           <GoalPanel key={goals.panel ?? "closed"} goals={goals} />
@@ -223,25 +224,16 @@ function GoalRow({ goal, onOpen }: { goal: FinanceGoal; onOpen: () => void }) {
         </span>
         <span className="mt-1 block text-xs text-muted-foreground">
           {goal.archived
-            ? "Archived · reservations released"
+            ? "Archived"
             : goal.achieved
               ? "Achieved"
               : "Saving"}
+          {goal.linked_account_name
+            ? ` · Held in ${goal.linked_account_name}`
+            : " · Held in the goal"}
           {goal.due_date && ` · Due ${goal.due_date}`}
           {overdue && " · overdue"}
         </span>
-        {!goal.archived &&
-          goal.allocations
-            .filter((row) => row.shortfall_cents > 0)
-            .map((row) => (
-              <span
-                key={row.account_id}
-                className="mt-1 block text-sm font-medium text-foreground"
-              >
-                {row.account_name}: account allocation shortfall{" "}
-                {formatPHP(row.shortfall_cents)}
-              </span>
-            ))}
         <span
           role="progressbar"
           aria-label={`${goal.name} progress`}
@@ -264,12 +256,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
   const goal = goals.editing,
     readOnly = !!goal?.archived,
     disabled = goals.busy || goals.inspecting;
-  const selected = goals.accounts.find(
-    (row) => row.account_id === goals.accountId,
-  );
-  const existing =
-    goal?.allocations.find((row) => row.account_id === goals.accountId)
-      ?.amount_cents ?? 0;
+  const funding = goal?.allocations ?? [];
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void goals.save();
@@ -325,6 +312,35 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
               onChange={(event) => goals.setDueDate(event.target.value)}
             />
           </Field>
+          {!readOnly && (
+            <Field>
+              <FieldLabel htmlFor="goal-linked-account">
+                Linked account (optional)
+              </FieldLabel>
+              <NativeSelect
+                id="goal-linked-account"
+                className="w-full"
+                disabled={disabled}
+                value={goals.linkedAccount}
+                onChange={(event) => goals.selectLinkedAccount(event.target.value)}
+              >
+                <NativeSelectOption value="">None (held in the goal)</NativeSelectOption>
+                {goals.accounts
+                  .filter((row) => !row.archived || row.account_id === goal?.linked_account_id)
+                  .map((row) => (
+                    <NativeSelectOption key={row.account_id} value={row.account_id}>
+                      {row.account_name}
+                      {row.archived ? " (archived)" : ""}
+                    </NativeSelectOption>
+                  ))}
+              </NativeSelect>
+              <FieldDescription>
+                {goal && goal.saved_cents > 0
+                  ? `Changing this link moves the current ${formatPHP(goal.saved_cents)} saved balance to the new backing account. It does not add money.`
+                  : "Money added to the goal is kept in this account. Without a link, the goal holds its own money."}
+              </FieldDescription>
+            </Field>
+          )}
         </FieldGroup>
         {!readOnly && (
           <div className="mt-4 flex justify-end">
@@ -334,119 +350,38 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           </div>
         )}
       </form>
+      {goal && !readOnly && (
+        <MovementPanel goals={goals} disabled={disabled} />
+      )}
       {goal && (
         <section
-          aria-label="Goal allocations"
-          className="space-y-4 border-t border-border pt-5"
+          aria-label="Goal funding breakdown"
+          className="flex flex-col gap-3 border-t border-border pt-5"
         >
           <p className="font-medium">
             {formatPHP(goal.saved_cents)} of {formatPHP(goal.target_cents)}
             {goal.achieved && " · Achieved"}
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {readOnly
-              ? "Historical allocations below have been released. They no longer reserve account money."
-              : "Set each account's reserved total. Use zero to release it. These amounts already belong to your cash totals."}
+              ? "This goal is archived."
+              : "Remaining contributions by funding account. Withdrawals reduce these amounts."}
           </p>
-          <ul className="space-y-3">
-            {goal.allocations.map((row) => (
-              <li key={row.account_id} className="text-sm">
-                <div className="flex flex-wrap justify-between gap-2">
-                  <span className="break-words">{row.account_name}</span>
-                  <strong className="tabular-nums">
-                    {formatPHP(row.amount_cents)}
-                  </strong>
-                </div>
-                {!readOnly && row.shortfall_cents > 0 && (
-                  <p className="font-medium text-foreground">
-                    Account allocation shortfall:{" "}
-                    {formatPHP(row.shortfall_cents)} across all goals.
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-          {!readOnly && (
-            <>
-              <Field>
-                <FieldLabel htmlFor="goal-account">Money account</FieldLabel>
-                <NativeSelect
-                  id="goal-account"
-                  className="w-full"
-                  disabled={disabled}
-                  value={goals.accountId}
-                  onChange={(event) => goals.selectAccount(event.target.value)}
-                >
-                  <NativeSelectOption value="">Choose an account</NativeSelectOption>
-                  {goals.accounts
-                    .filter(
-                      (row) =>
-                        !row.archived ||
-                        goal.allocations.some(
-                          (allocation) =>
-                            allocation.account_id === row.account_id,
-                        ),
-                    )
-                    .map((row) => (
-                      <NativeSelectOption key={row.account_id} value={row.account_id}>
-                        {row.account_name}
-                        {row.archived ? " (archived; releases only)" : ""}
-                      </NativeSelectOption>
-                    ))}
-                </NativeSelect>
-              </Field>
-              {selected && (
-                <p className="text-sm">
-                  Cash: {formatPHP(selected.balance_cents)} · Reserved across
-                  goals: {formatPHP(selected.reserved_cents)} · Available:{" "}
-                  {formatPHP(selected.available_cents)}
-                  {selected.shortfall_cents > 0 && (
-                    <span className="block font-medium text-foreground">
-                      Account allocation shortfall:{" "}
-                      {formatPHP(selected.shortfall_cents)}
-                    </span>
-                  )}
-                </p>
-              )}
-              <Field>
-                <FieldLabel htmlFor="goal-allocation">
-                  Reserved total (PHP)
-                </FieldLabel>
-                <MoneyInput
-                  id="goal-allocation"
-                  inputMode="decimal"
-                  className="tabular-nums"
-                  placeholder="0.00"
-                  disabled={disabled || !selected}
-                  value={goals.amount}
-                  onValueChange={(value) => goals.setAmount(value)}
-                />
-                <FieldDescription>
-                  This goal currently reserves {formatPHP(existing)} on the
-                  selected account. Cash never moves.
-                </FieldDescription>
-              </Field>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  variant="outline"
-                  disabled={disabled || !existing}
-                  onClick={() => void goals.allocate("0")}
-                >
-                  Release allocation
-                </Button>
-                <Button
-                  disabled={disabled || !selected}
-                  onClick={() => void goals.allocate()}
-                >
-                  Set reservation
-                </Button>
-              </div>
-            </>
+          {funding.length ? (
+            <ul className="flex flex-col gap-3">
+              {funding.map((row) => (
+                <GoalAllocationRow key={row.account_id} row={row} />
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No money held in this goal.
+            </p>
           )}
         </section>
       )}
       <div className={financeDrawerFooter}>
-        {goal && !readOnly && <ArchiveButton goals={goals} />}
+        {goal && !readOnly && <ArchiveButton goal={goal} goals={goals} />}
         <Button
           variant="outline"
           disabled={goals.busy}
@@ -459,18 +394,139 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
   );
 }
 
-function ArchiveButton({ goals }: { goals: FinanceGoalsController }) {
-  const [confirming, setConfirming] = useState(false);
+function MovementPanel({ goals, disabled }: { goals: FinanceGoalsController; disabled: boolean }) {
+  const goal = goals.editing;
+  if (!goal) return null;
+  const deposit = goals.direction === "deposit";
+  const linked = goal.linked_account_id;
+  const linkedName = goal.linked_account_name ?? "the linked account";
+  const selected = goals.accounts.find(
+    (row) => row.account_id === goals.accountId,
+  );
+  const destinationName = selected?.account_name ?? "the chosen account";
+  const toLinked = !deposit && !!linked && goals.accountId === linked;
+  const options = goals.accounts
+    .filter((row) => !row.archived)
+    .filter((row) => deposit ? row.account_id !== linked : true);
+  const note = !goals.accountId
+    ? deposit
+      ? "Choose the account to move money out of."
+      : "Choose the account the money moves into."
+    : deposit
+      ? linked
+        ? `Move money out of ${destinationName} and into this goal. It will not appear as expenses in history. The money is added to ${linkedName}.`
+        : `Move money out of ${destinationName} and into this goal. It will not appear as expenses in history. The goal holds the money.`
+      : toLinked
+        ? `Money moves within the linked account ${linkedName}, so account balances stay unchanged and this amount is freed from the goal.`
+        : linked
+          ? `Money is sent from the linked account ${linkedName} into ${destinationName}. It will not appear as expenses in history.`
+          : `Money held in this goal moves into ${destinationName}. It will not appear as expenses in history.`;
   return (
-    <div className="space-y-2">
+    <section aria-label="Goal money" className="flex flex-col gap-4 border-t border-border pt-5">
+      <p className="text-sm text-muted-foreground">
+        {linked
+          ? `This goal is held in the linked account ${linkedName}.`
+          : "This goal holds its own money."}{" "}
+        Use the movement below to move cash in or out.
+      </p>
+      <Field>
+        <FieldLabel htmlFor="goal-direction">Action</FieldLabel>
+        <NativeSelect
+          id="goal-direction"
+          className="w-full"
+          disabled={disabled}
+          value={goals.direction}
+          onChange={(event) => goals.selectDirection(event.target.value as "deposit" | "withdrawal")}
+        >
+          <NativeSelectOption value="deposit">Add money</NativeSelectOption>
+          <NativeSelectOption value="withdrawal">Withdraw</NativeSelectOption>
+        </NativeSelect>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="goal-movement-account">
+          {deposit ? "Source account" : "Destination account"}
+        </FieldLabel>
+        <NativeSelect
+          id="goal-movement-account"
+          className="w-full"
+          disabled={disabled}
+          value={goals.accountId}
+          onChange={(event) => goals.selectAccount(event.target.value)}
+        >
+          <NativeSelectOption value="">Choose an account</NativeSelectOption>
+          {options.map((row) => (
+            <NativeSelectOption key={row.account_id} value={row.account_id}>
+              {row.account_name}
+              {!deposit && row.account_id === linked ? " (linked account)" : ""}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {selected && deposit && (
+          <FieldDescription>
+            {selected.account_name} holds {formatPHP(selected.balance_cents)}.
+          </FieldDescription>
+        )}
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="goal-movement-amount">Amount (PHP)</FieldLabel>
+        <MoneyInput
+          id="goal-movement-amount"
+          inputMode="decimal"
+          className="tabular-nums"
+          placeholder="0.00"
+          disabled={disabled || !goals.accountId}
+          value={goals.amount}
+          onValueChange={(value) => goals.setAmount(value)}
+        />
+        <FieldDescription>{note}</FieldDescription>
+      </Field>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button
+          disabled={disabled || !goals.accountId}
+          onClick={() => void goals.moveMoney()}
+        >
+          {goals.busy
+            ? "Moving…"
+            : deposit
+              ? "Add money"
+              : "Withdraw"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function GoalAllocationRow({ row }: { row: FinanceGoalAllocation }) {
+  return (
+    <li className="text-sm">
+      <div className="flex flex-wrap justify-between gap-2">
+        <span className="break-words">{row.account_name}</span>
+        <strong className="tabular-nums">
+          {formatPHP(row.amount_cents)}
+        </strong>
+      </div>
+    </li>
+  );
+}
+
+function ArchiveButton({ goal, goals }: { goal: FinanceGoal; goals: FinanceGoalsController }) {
+  const [confirming, setConfirming] = useState(false);
+  const funded = goal.saved_cents > 0;
+  return (
+    <div className="flex flex-col gap-2">
       {confirming && (
         <p className="text-sm">
-          Archive this goal and release every reservation? History is kept.
+          Archive this goal? History is kept.
+        </p>
+      )}
+      {funded && (
+        <p className="text-xs text-muted-foreground">
+          Withdraw the money first; nothing may remain saved when archiving ({formatPHP(goal.saved_cents)} still held).
         </p>
       )}
       <Button
         variant="outline"
-        disabled={goals.busy || goals.inspecting}
+        disabled={goals.busy || goals.inspecting || funded}
         onClick={() => {
           if (confirming) void goals.archive();
           else setConfirming(true);

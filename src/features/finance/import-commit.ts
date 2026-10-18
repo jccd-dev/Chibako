@@ -359,6 +359,8 @@ function importRecord(record: TarsiProposalRecord, records: TarsiProposalRecord[
         const row = allocation as Record<string, unknown>;
         if (typeof row.account_id !== "string" || typeof row.amount_cents !== "number") throw new FinanceError("Approved goal mapping is invalid", 409, "proposal_changed");
         db.prepare("INSERT INTO finance_goal_allocations (goal_id,account_id,amount_cents) VALUES (?,?,?)").run(id, targetId("accounts", row.account_id), row.amount_cents);
+        db.prepare(`INSERT INTO finance_goal_movements (id,goal_id,type,source_account_id,amount_cents,created_at)
+          VALUES (?,?,'deposit',?,?,?)`).run(randomUUID(), id, targetId("accounts", row.account_id), row.amount_cents, timestamp);
       }
       return { status: "imported", reason: null };
     }

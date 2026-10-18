@@ -25,6 +25,13 @@ function accountFromRow(row: AccountRow): FinanceAccount {
   const principal = getDb().prepare("SELECT type, amount_cents FROM finance_obligation_movements WHERE account_id = ? AND reverted = 0").safeIntegers()
     .iterate(row.id) as Iterable<{ type: string; amount_cents: bigint }>;
   for (const effect of principal) balance += effect.type === "borrowing" ? effect.amount_cents : -effect.amount_cents;
+  const goalMovements = getDb().prepare(`SELECT source_account_id, destination_account_id, amount_cents FROM finance_goal_movements
+    WHERE source_account_id = ? OR destination_account_id = ?`).safeIntegers()
+    .iterate(row.id, row.id) as Iterable<{ source_account_id: string | null; destination_account_id: string | null; amount_cents: bigint }>;
+  for (const effect of goalMovements) {
+    if (effect.source_account_id === row.id) balance -= effect.amount_cents;
+    if (effect.destination_account_id === row.id) balance += effect.amount_cents;
+  }
   const month = localCalendarDate().slice(0, 7);
   const plans = getDb().prepare("SELECT amount_cents FROM finance_plans WHERE account_id = ? AND type = 'expense' AND status = 'pending' AND due_date >= ? AND due_date <= ?")
     .safeIntegers().iterate(row.id, `${month}-01`, `${month}-31`) as Iterable<{ amount_cents: bigint }>;
@@ -103,6 +110,17 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
     const principal = db.prepare("SELECT m.type, m.amount_cents FROM finance_obligation_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.reverted = 0 AND a.include_in_summary = 1").safeIntegers()
       .iterate() as Iterable<{ type: string; amount_cents: bigint }>;
     for (const effect of principal) totals.money += effect.type === "borrowing" ? effect.amount_cents : -effect.amount_cents;
+    const goalMovements = db.prepare(`SELECT m.amount_cents, COALESCE(source.include_in_summary, 0) AS source_included,
+      COALESCE(destination.include_in_summary, 0) AS destination_included FROM finance_goal_movements m
+      LEFT JOIN finance_accounts source ON source.id = m.source_account_id
+      LEFT JOIN finance_accounts destination ON destination.id = m.destination_account_id`).safeIntegers()
+      .iterate() as Iterable<{ amount_cents: bigint; source_included: bigint; destination_included: bigint }>;
+    for (const effect of goalMovements) totals.money += effect.amount_cents * (effect.destination_included - effect.source_included);
+    // Unlinked savings remain money owned by the vault, outside account balances.
+    const goalHoldings = db.prepare(`SELECT a.amount_cents FROM finance_goal_allocations a
+      JOIN finance_goals g ON g.id = a.goal_id WHERE g.archived = 0 AND g.linked_account_id IS NULL`).safeIntegers()
+      .iterate() as Iterable<{ amount_cents: bigint }>;
+    for (const holding of goalHoldings) totals.money += holding.amount_cents;
     if (Object.values(totals).some((total) => total > BigInt(Number.MAX_SAFE_INTEGER) || total < -BigInt(Number.MAX_SAFE_INTEGER))) {
       throw new FinanceError("Combined balances exceed the supported exact-cent range", 422, "balance_out_of_range");
     }
