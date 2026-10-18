@@ -100,7 +100,7 @@ export function CalendarView({ initialNotes, requestedDate }: {
             )}
           </div>
         </section>
-        <section className="order-1 flex items-start justify-center p-3 sm:p-6 lg:order-2 lg:overflow-y-auto">
+        <section className="order-1 flex min-h-0 p-3 sm:p-6 lg:order-2 lg:overflow-y-auto">
           {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} />}
         </section>
       </div>

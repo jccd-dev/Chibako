@@ -32,6 +32,7 @@ beforeEach(() => getDb().exec(`
   DELETE FROM finance_obligation_writeoffs;
   DELETE FROM finance_obligation_movements;
   DELETE FROM finance_obligations;
+  DELETE FROM finance_goal_movements;
   DELETE FROM finance_goal_allocations;
   DELETE FROM finance_goals;
   DELETE FROM finance_plans;
@@ -70,7 +71,14 @@ test("overview keeps reserved money and obligations separate while attention agg
     name: "Overview cash",
     kind: "money",
     currency: "PHP",
-    opening_balance: "100",
+    opening_balance: "20",
+  }).account;
+  const goalFundingAccount = createAccount(owner, {
+    request_id: request(),
+    name: "Goal funding cash",
+    kind: "money",
+    currency: "PHP",
+    opening_balance: "80",
   }).account;
   const food = createClassification(owner, {
     request_id: request(),
@@ -97,11 +105,12 @@ test("overview keeps reserved money and obligations separate while attention agg
     request_id: request(),
     name: "Emergency fund",
     target: "100",
+    linked_account_id: account.id,
   }).goal;
   setGoalAllocation(owner, goal.id, {
     request_id: request(),
     version: goal.version,
-    account_id: account.id,
+    account_id: goalFundingAccount.id,
     amount: "80",
   });
   postTransaction(owner, {

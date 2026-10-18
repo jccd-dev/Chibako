@@ -3,6 +3,7 @@
 import { Pie, PieChart } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { formatPHP as money } from "@/features/finance/presentation";
 import type { FinanceReportsController } from "@/features/finance/use-finance-reports";
 
@@ -29,7 +30,7 @@ export function FinanceCostAnalysis({
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>Cost analysis</CardTitle>
+        <CardTitle>Expenses</CardTitle>
         <CardDescription>Spending by category</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -47,21 +48,33 @@ export function FinanceCostAnalysis({
                 <Pie data={data} dataKey="value" nameKey="name" outerRadius="90%" stroke="var(--card)" strokeWidth={2} isAnimationActive={false} />
               </PieChart>
             </ChartContainer>
-            <div className="flex flex-col divide-y divide-border/60">
-              {data.map(item => (
-                <button key={item.categoryId ?? item.name} type="button" disabled={!item.categoryId}
-                  onClick={() => { if (item.categoryId) onCategoryFilter(item.categoryId); }}
-                  className="flex min-h-11 w-full items-center justify-between gap-3 rounded-sm px-1 py-2 text-left enabled:hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
-                  <span className="flex min-w-0 items-center gap-2 text-xs">
-                    <span className="size-2 shrink-0 rounded-sm" style={{ backgroundColor: item.fill }} />
-                    <span className="break-words font-medium">{item.name}</span>
-                  </span>
-                  <span className="shrink-0 text-right text-xs tabular-nums">
-                    <span className="block">{money(item.value)}</span>
-                    <span className="text-muted-foreground">{Math.round(item.value / total * 100)}%</span>
-                  </span>
-                </button>
-              ))}
+            <div className="flex flex-wrap gap-1.5" aria-label="Category spending breakdown">
+              {data.map(item => {
+                const share = total > 0 ? `${Math.round(item.value / total * 100)}%` : "";
+                const title = item.categoryId ? `${item.name}: ${money(item.value)} (${share})` : item.name;
+                if (!item.categoryId) {
+                  return (
+                    <Badge key={item.name} variant="outline" className="max-w-full" title={title}>
+                      <span className="size-2 shrink-0 rounded-sm" style={{ backgroundColor: item.fill }} aria-hidden="true" />
+                      <span className="truncate">{item.name}</span>
+                      <span className="shrink-0 tabular-nums text-muted-foreground">{share}</span>
+                    </Badge>
+                  );
+                }
+                return (
+                  <Badge
+                    key={item.categoryId}
+                    variant="secondary"
+                    className="max-w-full"
+                    title={title}
+                    render={<button type="button" className="enabled:cursor-pointer" onClick={() => onCategoryFilter(item.categoryId!)} />}
+                  >
+                    <span className="size-2 shrink-0 rounded-sm" style={{ backgroundColor: item.fill }} aria-hidden="true" />
+                    <span className="truncate">{item.name}</span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{share}</span>
+                  </Badge>
+                );
+              })}
             </div>
             {report?.categories.some(category => category.spending_cents < 0) && (
               <p className="text-xs text-muted-foreground">Shares use categories with positive net spending. Refunds reduce the total above.</p>

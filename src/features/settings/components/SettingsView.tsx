@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { FONT_OPTIONS, type FontChoice } from "@/lib/appearance";
 import type { PropertyDef, PropertyType } from "@/lib/property-types";
 import { PROPERTY_TYPES } from "@/lib/property-types";
+import { getNewPasswordError, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from "@/lib/password-policy";
 
 const FONT_ITEMS = Object.fromEntries(FONT_OPTIONS.map((option) => [option.value, option.label]));
 
@@ -213,6 +214,8 @@ export function SettingsView() {
   async function changePassword(e: React.FormEvent) {
     e.preventDefault();
     setPwMsg(null);
+    const error = getNewPasswordError(pw.next);
+    if (error) return setPwMsg({ ok: false, text: error });
     const res = await fetch("/api/password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -511,7 +514,7 @@ export function SettingsView() {
               </Field>
               <Field>
                 <FieldLabel htmlFor="pw-next">New password</FieldLabel>
-                <Input id="pw-next" type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} placeholder="At least 8 characters" required />
+                <Input id="pw-next" type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} placeholder="At least 15 characters" minLength={MIN_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} autoComplete="new-password" required />
               </Field>
             </FieldGroup>
             <div><Button type="submit">Update password</Button></div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { IconArrowDownLeft, IconArrowUpRight } from "@tabler/icons-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FinanceDateInput } from "./FinanceDateInputs";
@@ -55,13 +57,58 @@ export function FinanceObligations({
     activity.applyFilters({ q: "", account_id: "", category_id: "", date_from: "", date_to: "", type: "", hidden: "all", reverted: "all", obligation_id: obligations.editing.id });
     obligations.close(); router.replace("/app/finance?tab=activity", { scroll: false });
   }
-  return <section id="finance-obligations" aria-label="Debts and receivables" className="mt-8 border-t border-border pt-6">
-    <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-lg font-semibold">Debts and receivables</h2><p className="mt-2 max-w-prose text-sm text-muted-foreground">Money you owe and money owed to you. Outstanding principal is separate from cash and assets.</p></div><div className="flex flex-wrap gap-3"><Button variant="outline" onClick={() => obligations.openCreate("definition")}>Add obligation</Button><Button onClick={() => obligations.openCreate("movement")}>Record borrowing / lending</Button></div></div>
-    {obligations.page && <dl className="my-5 grid gap-4 sm:grid-cols-2"><div><dt className="text-sm text-muted-foreground">Outstanding debt (you owe)</dt><dd className="mt-1 break-words text-xl font-semibold tabular-nums">{formatPHP(obligations.page.debt_cents)}</dd></div><div><dt className="text-sm text-muted-foreground">Outstanding receivables (owed to you)</dt><dd className="mt-1 break-words text-xl font-semibold tabular-nums">{formatPHP(obligations.page.receivable_cents)}</dd></div></dl>}
-    <p className="my-3 text-sm text-muted-foreground">Totals include archived obligations. Borrowing, lending, principal payments and collections never count as income or spending.</p>
-    <div className="my-4 flex flex-wrap gap-5"><label className="flex min-h-7 items-center gap-2 text-xs"><Checkbox checked={obligations.overdue} onCheckedChange={checked => obligations.setOverdue(checked)} />Overdue outstanding only</label><label className="flex min-h-7 items-center gap-2 text-xs"><Checkbox checked={obligations.archived} onCheckedChange={checked => obligations.setArchived(checked)} />View archived obligations</label></div>
-    {obligations.loadError ? <Alert><AlertDescription>{obligations.loadError}<Button variant="outline" onClick={() => void obligations.refresh()}>Retry obligations</Button></AlertDescription></Alert> : obligations.loading ? <p role="status" className="py-5 text-sm text-muted-foreground">Loading obligations…</p> : obligations.page?.obligations.length ? <ul className="divide-y divide-border">{obligations.page.obligations.map(row => <li key={row.id}><button className="flex min-h-11 w-full flex-wrap items-center justify-between gap-3 rounded-md px-1 py-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" aria-label={`Inspect obligation ${row.name}`} onClick={() => void obligations.openEdit(row)}><span className="min-w-0 flex-1 basis-40"><span className="block break-words text-sm font-medium">{row.name}</span><span className="mt-1 block text-sm text-muted-foreground">{row.kind === "debt" ? "You owe" : "Owed to you"}{row.due_date ? ` · Due ${row.due_date}` : " · No due date"}{row.overdue ? " · Overdue" : ""}{row.status !== "open" ? ` · ${obligationStatus(row.status)}` : ""}{row.archived ? " · Archived" : ""}</span></span><strong className="break-words text-sm tabular-nums">{formatPHP(row.outstanding_cents)}</strong></button></li>)}</ul> : <Empty><EmptyHeader><EmptyTitle>No matching obligations</EmptyTitle><EmptyDescription>Add an existing debt or receivable without moving cash, or record actual borrowing or lending.</EmptyDescription></EmptyHeader></Empty>}
-    {obligations.page && obligations.page.total > 25 && <nav aria-label="Obligation pages" className="mt-4 flex flex-wrap items-center gap-3"><Button variant="outline" disabled={!obligations.offset || obligations.loading} onClick={() => obligations.setOffset(Math.max(0, obligations.offset - 25))}>Previous obligations</Button><span className="text-sm">{obligations.offset + 1}-{Math.min(obligations.offset + 25, obligations.page.total)} of {obligations.page.total}</span><Button variant="outline" disabled={obligations.offset + 25 >= obligations.page.total || obligations.loading} onClick={() => obligations.setOffset(obligations.offset + 25)}>Next obligations</Button></nav>}
+  return <section id="finance-obligations" aria-label="Debts and receivables">
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>Debts and receivables</CardTitle>
+        <CardDescription className="max-sm:col-start-1 max-sm:row-start-2">Money you owe and owed to you, separate from cash and assets.</CardDescription>
+        <CardAction className="flex flex-wrap items-center justify-end gap-1 max-sm:col-start-1 max-sm:row-start-3">
+          <Button size="sm" variant="outline" onClick={() => obligations.openCreate("definition")}>Add obligation</Button>
+          <Button size="sm" onClick={() => obligations.openCreate("movement")}>Record borrowing / lending</Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {obligations.page && <dl className="grid grid-cols-2 gap-3">
+          <div>
+            <dt className="text-xs text-muted-foreground">You owe</dt>
+            <dd className="mt-1 break-words text-lg font-semibold tabular-nums">{formatPHP(obligations.page.debt_cents)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Owed to you</dt>
+            <dd className="mt-1 break-words text-lg font-semibold tabular-nums">{formatPHP(obligations.page.receivable_cents)}</dd>
+          </div>
+        </dl>}
+        {obligations.page && obligations.archived && <p className="text-xs text-muted-foreground">Totals include archived obligations.</p>}
+        <div className="flex flex-wrap gap-5">
+          <label className="flex min-h-7 items-center gap-2 text-xs"><Checkbox checked={obligations.overdue} onCheckedChange={checked => obligations.setOverdue(checked)} />Overdue outstanding only</label>
+          <label className="flex min-h-7 items-center gap-2 text-xs"><Checkbox checked={obligations.archived} onCheckedChange={checked => obligations.setArchived(checked)} />View archived obligations</label>
+        </div>
+        {obligations.loadError ? <Alert><AlertDescription>{obligations.loadError}<Button variant="outline" onClick={() => void obligations.refresh()}>Retry obligations</Button></AlertDescription></Alert>
+          : obligations.loading ? <p role="status" className="py-3 text-sm text-muted-foreground">Loading obligations…</p>
+            : obligations.page?.obligations.length ? <ul className="flex flex-col divide-y divide-border/60">{obligations.page.obligations.map(row => <li key={row.id}>
+              <button className="flex w-full items-start gap-3 rounded-sm px-1 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" aria-label={`Inspect obligation ${row.name}`} onClick={() => void obligations.openEdit(row)}>
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                  {row.kind === "debt"
+                    ? <IconArrowUpRight className="size-4 text-muted-foreground" aria-hidden="true" />
+                    : <IconArrowDownLeft className="size-4 text-muted-foreground" aria-hidden="true" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words text-xs font-medium">{row.name}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{row.kind === "debt" ? "You owe" : "Owed to you"}{row.due_date ? ` · Due ${row.due_date}` : " · No due date"}{row.overdue && <span className="text-destructive"> · Overdue</span>}{row.status !== "open" ? ` · ${obligationStatus(row.status)}` : ""}{row.archived ? " · Archived" : ""}</span>
+                </span>
+                <strong className="shrink-0 break-words text-xs font-semibold tabular-nums">{formatPHP(row.outstanding_cents)}</strong>
+              </button>
+            </li>)}</ul>
+              : <Empty className="px-0 py-2">
+                <EmptyHeader>
+                  <EmptyTitle>No matching obligations</EmptyTitle>
+                  <EmptyDescription>Add an existing debt or receivable without moving cash, or record actual borrowing or lending.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>}
+        {obligations.page && obligations.page.total > 25 && <nav aria-label="Obligation pages" className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={!obligations.offset || obligations.loading} onClick={() => obligations.setOffset(Math.max(0, obligations.offset - 25))}>Previous obligations</Button><span className="text-sm">{obligations.offset + 1}-{Math.min(obligations.offset + 25, obligations.page.total)} of {obligations.page.total}</span><Button variant="outline" disabled={obligations.offset + 25 >= obligations.page.total || obligations.loading} onClick={() => obligations.setOffset(obligations.offset + 25)}>Next obligations</Button></nav>}
+        <p className="text-xs text-muted-foreground">Borrowing, lending, principal payments and collections never count as income or spending.</p>
+      </CardContent>
+    </Card>
     <Sheet open={obligations.panel !== null} onOpenChange={open => { if (!open && !obligations.busy) obligations.close(); }}><SheetContent className={financeSheet} showCloseButton={false}>
       <SheetHeader className="border-b border-border p-4"><SheetTitle>{obligations.panel === "payment" ? (obligations.editing?.kind === "debt" ? "Record principal payment" : "Record collection") : obligations.panel === "closure" ? "Write off remaining principal" : obligations.panel === "movement" ? "Record borrowing or lending" : obligations.editing ? "Manage obligation" : "Add debt or receivable"}</SheetTitle><SheetDescription>{obligations.panel === "payment" ? "Dated partial payments against outstanding principal. Debt payments and receivable collections never count as spending or income. Interest and fees are separate ordinary transactions." : obligations.panel === "closure" ? "Explicit closure for principal you will not collect or repay. A write-off is recorded here, never as a payment." : obligations.panel === "movement" ? "Confirm the money that actually moved. Cash and principal are recorded together, outside income and spending." : "Definitions alone never move cash. Do not enter existing principal again as new borrowing or lending."}</SheetDescription></SheetHeader>
       {obligations.panel === "payment" && obligations.editing ? <PaymentPanel o={obligations} activity={activity} /> : obligations.panel === "closure" && obligations.editing ? <ClosurePanel o={obligations} /> : <ObligationPanel obligations={obligations} activity={activity} onInspectActivity={inspectActivity} />}

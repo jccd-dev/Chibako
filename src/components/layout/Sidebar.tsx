@@ -192,6 +192,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     if (mobile && !mobileOpen) {
       onMobileOpenChange(true);
     }
+    // Finance swaps the panel for its own nav, so recovery lands on Notes.
+    if (onFinance) router.push("/app");
   }
 
   function handleSearchKeyDown(e: React.KeyboardEvent) {
@@ -741,13 +743,14 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Files"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          !searchMode && fileView === "files" && !collapsed && "bg-accent text-foreground"
+          !onFinance && !searchMode && fileView === "files" && !collapsed && "bg-accent text-foreground"
         )}
         onClick={() => {
           if (searchMode) { setSearchMode(false); setSearchQuery(""); }
           setFileView("files");
           clearSelection();
           if (collapsed) onExpand();
+          if (onFinance) router.push("/app");
         }}
       >
         <IconFile size={16} />
@@ -758,7 +761,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Search notes"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          searchMode && (!collapsed || mobileOpen) && "bg-accent text-foreground"
+          !onFinance && searchMode && (!collapsed || mobileOpen) && "bg-accent text-foreground"
         )}
         onClick={activateSearch}
       >
@@ -770,7 +773,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Trash"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          !searchMode && fileView === "trash" && !collapsed && "bg-accent text-foreground"
+          !onFinance && !searchMode && fileView === "trash" && !collapsed && "bg-accent text-foreground"
         )}
         onClick={() => {
           setSearchMode(false);
@@ -778,6 +781,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           setFileView("trash");
           clearSelection();
           if (collapsed) onExpand();
+          if (onFinance) router.push("/app");
         }}
       >
         <IconTrash size={16} />

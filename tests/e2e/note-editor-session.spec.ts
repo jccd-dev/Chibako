@@ -9,6 +9,7 @@ async function authenticate(page: import("@playwright/test").Page): Promise<void
   }));
   await page.goto("/app/note/new");
   if (/\/setup$/.test(page.url())) {
+    await page.locator("#setup-token").fill(process.env.CHIBAKO_SETUP_TOKEN ?? "");
     await page.locator("#setup-password").fill("correct horse battery staple");
     await page.locator("#setup-confirm").fill("correct horse battery staple");
     await page.getByRole("button", { name: "Create account" }).click();

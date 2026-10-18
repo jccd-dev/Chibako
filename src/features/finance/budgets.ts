@@ -107,6 +107,7 @@ export function getFinanceReport(actor: FinanceActor, input: unknown = {}): Fina
   const query = reportDates(input), db = getDb();
   return db.transaction((): FinanceReport => {
     const months = new Map(query.months.map(month => [month, { income: 0n, spending: 0n }]));
+    const days = new Map<string, { income: bigint; spending: bigint }>();
     const spending = new Map<string | null, Map<string, bigint>>();
     const rows = db.prepare(`SELECT t.type, CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END AS category_id, t.amount_cents, t.transaction_date
       FROM finance_transactions t LEFT JOIN finance_classifications c ON c.id = t.category_id
@@ -118,13 +119,25 @@ export function getFinanceReport(actor: FinanceActor, input: unknown = {}): Fina
       .safeIntegers().iterate(query.from, query.to, query.from, query.to) as Iterable<{ type: string; category_id: string | null; amount_cents: bigint; transaction_date: string }>;
     for (const row of rows) {
       const month = row.transaction_date.slice(0, 7), totals = months.get(month)!;
-      if (row.type === "income") totals.income += row.amount_cents;
+      const day = days.get(row.transaction_date) ?? { income: 0n, spending: 0n };
+      days.set(row.transaction_date, day);
+      if (row.type === "income") {
+        totals.income += row.amount_cents;
+        day.income += row.amount_cents;
+      }
       else {
         totals.spending += row.amount_cents;
+        day.spending += row.amount_cents;
         let category = spending.get(row.category_id);
         if (!category) { category = new Map(); spending.set(row.category_id, category); }
         category.set(month, (category.get(month) ?? 0n) + row.amount_cents);
       }
+    }
+    const daily: FinanceReport["daily"] = [];
+    for (const cursor = new Date(`${query.from}T00:00:00Z`); cursor.toISOString().slice(0, 10) <= query.to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      const date = cursor.toISOString().slice(0, 10);
+      const day = days.get(date);
+      daily.push({ date, income_cents: exactCents(day?.income ?? 0n), spending_cents: exactCents(day?.spending ?? 0n) });
     }
     const categories = db.prepare("SELECT id, name FROM finance_classifications WHERE kind = 'category' AND type = 'expense' AND parent_id IS NULL ORDER BY name, id").all() as { id: string; name: string }[];
     const categoryRows: CategoryReport[] = [];
@@ -151,6 +164,7 @@ export function getFinanceReport(actor: FinanceActor, input: unknown = {}): Fina
     const totals = [...months.values()].reduce((sum, value) => ({ income: sum.income + value.income, spending: sum.spending + value.spending }), { income: 0n, spending: 0n });
     return { currency: "PHP", date_from: query.from, date_to: query.to, categories: categoryRows.slice(query.offset, query.offset + query.limit), total: categoryRows.length, limit: query.limit, offset: query.offset,
       income_cents: exactCents(totals.income), spending_cents: exactCents(totals.spending), unbudgeted_cents: exactCents(unbudgeted),
+      daily,
       months: [...months].map(([month, value]) => ({ month, income_cents: exactCents(value.income), spending_cents: exactCents(value.spending) })), forecast: { available: true, spending_cents: exactCents(forecast.spending), income_cents: exactCents(forecast.income) } };
   })();
 }

@@ -10,6 +10,7 @@ import { createApiKey } from "../src/server/auth/api-key-authorization";
 const vault = mkdtempSync(join(tmpdir(), "chibako-mcp-http-test-"));
 process.env.CHIBAKO_DATA_DIR = vault;
 let readKey = "";
+const previousTrust = process.env.CHIBAKO_TRUST_PROXY;
 
 function request(body: unknown, key = readKey, headers: HeadersInit = {}) {
   return new Request("https://chibako.test/mcp", {
@@ -20,11 +21,14 @@ function request(body: unknown, key = readKey, headers: HeadersInit = {}) {
 }
 
 before(() => {
+  process.env.CHIBAKO_TRUST_PROXY = "true";
   getDb();
   readKey = createApiKey("Remote reader", ["notes:read", "search:read", "schema:read"]).key;
 });
 
 after(() => {
+  if (previousTrust === undefined) delete process.env.CHIBAKO_TRUST_PROXY;
+  else process.env.CHIBAKO_TRUST_PROXY = previousTrust;
   getDb().close();
   rmSync(vault, { recursive: true, force: true });
 });

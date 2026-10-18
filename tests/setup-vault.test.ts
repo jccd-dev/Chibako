@@ -7,19 +7,35 @@ import { test } from "node:test";
 test("setup vault initializes settings and bootstrap notes once", async () => {
   const vault = mkdtempSync(join(tmpdir(), "chibako-setup-vault-test-"));
   process.env.CHIBAKO_DATA_DIR = vault;
-  const { setupVault, VaultAlreadySetupError } = await import("../src/server/setup-vault");
+  const { setupVault, VaultAlreadySetupError, VaultSetupTokenError } = await import("../src/server/setup-vault");
   const password = await import("../src/server/auth/password-authentication");
   const notes = await import("../src/lib/notes");
   const { getDb } = await import("../src/lib/db");
+  const setupToken = "test-only-setup-token-at-least-32-characters";
+  const previousToken = process.env.CHIBAKO_SETUP_TOKEN;
   try {
-    setupVault("correct horse battery staple");
+    delete process.env.CHIBAKO_SETUP_TOKEN;
+    assert.throws(() => setupVault("correct horse battery staple", setupToken), VaultSetupTokenError);
+    process.env.CHIBAKO_SETUP_TOKEN = "too-short";
+    assert.throws(() => setupVault("correct horse battery staple", "too-short"), VaultSetupTokenError);
+    process.env.CHIBAKO_SETUP_TOKEN = setupToken;
+    for (const token of [undefined, "", "wrong-token"]) {
+      assert.throws(() => setupVault("correct horse battery staple", token), VaultSetupTokenError);
+    }
+    assert.equal(password.isSetup(), false);
+    assert.equal((getDb().prepare("SELECT count(*) AS count FROM notes").get() as { count: number }).count, 0);
+    assert.equal((getDb().prepare("SELECT count(*) AS count FROM settings").get() as { count: number }).count, 0);
+    setupVault("correct horse battery staple", setupToken);
     const stored = password.getPasswordHash();
     assert.ok(stored);
     assert.equal(password.verifyPassword("correct horse battery staple", stored), true);
     assert.equal((getDb().prepare("SELECT value FROM settings WHERE key = 'site_name'").get() as { value: string }).value, "Chibako");
     assert.deepEqual(notes.listNotes().map((note) => note.title), ["Home", "How to organize notes", "Obsidian-style linking", "Setup & deployment"]);
-    assert.throws(() => setupVault("another password"), VaultAlreadySetupError);
+    delete process.env.CHIBAKO_SETUP_TOKEN;
+    assert.throws(() => setupVault("another password", undefined), VaultAlreadySetupError);
   } finally {
+    if (previousToken === undefined) delete process.env.CHIBAKO_SETUP_TOKEN;
+    else process.env.CHIBAKO_SETUP_TOKEN = previousToken;
     getDb().close();
     rmSync(vault, { recursive: true, force: true });
   }

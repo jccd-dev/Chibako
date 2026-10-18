@@ -77,13 +77,25 @@ test("REST and request-scoped remote MCP share results, retries, edits, and attr
   assert.match(conflict.result.content[0].text, /request_conflict/);
   const mcpSummary = await rpc(principal.key, "tools/call", { name: "get_finance_summary", arguments: {} });
   assert.deepEqual(mcpSummary.result.structuredContent, await (await summary(rest(principal.key), context)).json());
+  assert.equal(mcpSummary.result.content[0].text, JSON.stringify(mcpSummary.result.structuredContent));
   assert.equal(mcpSummary.result.structuredContent.money.balance_cents, 12345);
   assert.equal(getDb().prepare<[string], { count: number }>("SELECT COUNT(*) AS count FROM finance_audit WHERE actor_id = ?").get(`api-key:${principal.id}`)?.count, 2);
   const manager = createApiKey("Manage only", ["finance:manage"]);
   const reader = createApiKey("Read only", ["finance:read"]);
-  for (const [key, expected] of [[manager.key, ["create_finance_account", "update_finance_account", "create_finance_classification", "update_finance_classification", "set_finance_budget", "create_finance_schedule", "update_finance_schedule", "pause_finance_schedule", "resume_finance_schedule", "create_finance_goal", "update_finance_goal", "set_finance_goal_allocation", "create_finance_obligation", "update_finance_obligation", "close_finance_obligation"]], [reader.key, ["get_finance_account", "get_finance_summary", "get_finance_overview", "get_finance_attention", "list_finance_accounts", "list_finance_activity", "get_finance_transaction", "get_finance_activity_totals", "list_finance_classifications", "get_finance_report", "get_finance_budget", "list_finance_plans", "get_finance_plan", "list_finance_schedules", "get_finance_schedule", "list_finance_goals", "get_finance_goal", "list_finance_goal_accounts", "list_finance_obligations", "get_finance_obligation", "get_finance_obligation_history", "list_finance_imports"]]] as const) {
+  for (const [key, expected] of [[manager.key, ["create_finance_account", "update_finance_account", "create_finance_classification", "update_finance_classification", "set_finance_budget", "create_finance_schedule", "update_finance_schedule", "pause_finance_schedule", "resume_finance_schedule", "create_finance_goal", "update_finance_goal", "create_finance_obligation", "update_finance_obligation", "close_finance_obligation"]], [reader.key, ["get_finance_account", "get_finance_summary", "get_finance_overview", "get_finance_attention", "list_finance_accounts", "list_finance_activity", "get_finance_transaction", "get_finance_activity_totals", "list_finance_classifications", "get_finance_report", "get_finance_budget", "list_finance_plans", "get_finance_plan", "list_finance_schedules", "get_finance_schedule", "list_finance_goals", "get_finance_goal", "list_finance_goal_accounts", "list_finance_obligations", "get_finance_obligation", "get_finance_obligation_history"]]] as const) {
     const catalog = await rpc(key, "tools/list");
     assert.deepEqual(catalog.result.tools.map((tool: { name: string }) => tool.name).filter((name: string) => name.includes("finance")).sort(), [...expected].sort());
+  }
+  for (const scopes of [["finance:manage", "finance:write"], ["finance:manage", "finance:write", "finance:read"]]) {
+    const { key } = createApiKey("Goal money access", scopes);
+    const names = (await rpc(key, "tools/list")).result.tools.map((tool: { name: string }) => tool.name);
+    assert.ok(names.includes("set_finance_goal_allocation"));
+    assert.ok(names.includes("move_finance_goal_money"));
+  }
+  for (const key of [manager.key, createApiKey("Write only", ["finance:write"]).key]) {
+    const names = (await rpc(key, "tools/list")).result.tools.map((tool: { name: string }) => tool.name);
+    assert.ok(!names.includes("set_finance_goal_allocation"));
+    assert.ok(!names.includes("move_finance_goal_money"));
   }
   const forbidden = await rpc(reader.key, "tools/call", { name: "create_finance_account", arguments: opening });
   assert.equal(forbidden.result.isError, true);

@@ -11,11 +11,12 @@ import { createAccount } from "../src/features/finance/accounts";
 import { postTransaction } from "../src/features/finance/activity";
 import { hideActivity, revertActivity, recordRefund } from "../src/features/finance/corrections";
 import { postTransfer, reconcileAccount } from "../src/features/finance/movements";
+import { createObligation, postObligationPayment } from "../src/features/finance/obligations";
 import type { FinanceActor } from "../src/features/finance/types";
 const vault = mkdtempSync(join(tmpdir(), "chibako-budgets-"));
 process.env.CHIBAKO_DATA_DIR = vault;
 const owner: FinanceActor = { kind: "owner" };
-beforeEach(() => getDb().exec("DELETE FROM finance_audit; DELETE FROM finance_requests; DELETE FROM finance_budget_limits; DELETE FROM finance_budget_plans; DELETE FROM finance_refunds; DELETE FROM finance_movements; DELETE FROM finance_transactions; DELETE FROM finance_classifications; DELETE FROM finance_accounts;"));
+beforeEach(() => getDb().exec("DELETE FROM finance_audit; DELETE FROM finance_requests; DELETE FROM finance_budget_limits; DELETE FROM finance_budget_plans; DELETE FROM finance_obligation_payments; DELETE FROM finance_obligations; DELETE FROM finance_refunds; DELETE FROM finance_movements; DELETE FROM finance_transactions; DELETE FROM finance_classifications; DELETE FROM finance_accounts;"));
 after(() => { getDb().close(); rmSync(vault, { recursive: true, force: true }); });
 function category(name = "Food", extra: object = {}) { return createClassification(owner, { request_id: randomUUID(), kind: "category", type: "expense", name, ...extra }).classification; }
 function budget(category_id: string, month: string, amount: string, version = 0, mode = "forward") { return { request_id: randomUUID(), category_id, month, amount, version, mode }; }
@@ -85,4 +86,30 @@ test("reports aggregate subcategories across accounts, retain hidden spending an
   assert.throws(() => getFinanceReport(owner, { date_from: "2025-09-01", date_to: "2026-10-31" }), { code: "invalid_input" });
   assert.throws(() => getFinanceReport(owner, { date_from: "2026-02-30" }), { code: "invalid_input" });
   assert.throws(() => getFinanceReport({ kind: "api-key", id: "write", scopes: ["finance:write"] }), { code: "forbidden" });
+});
+
+
+test("daily reports zero-fill ascending calendar days and reconcile income, refunds and excluded obligation cash with months", () => {
+  const cash = createAccount(owner, { request_id: randomUUID(), name: "Daily cash", kind: "money", currency: "PHP", opening_balance: "100" }).account;
+  const expense = postTransaction(owner, { request_id: randomUUID(), account_id: cash.id, amount: "20", transaction_date: "2026-09-30" }).transaction;
+  postTransaction(owner, { request_id: randomUUID(), account_id: cash.id, type: "income", amount: "50", transaction_date: "2026-09-30" });
+  recordRefund(owner, expense.id, { request_id: randomUUID(), version: expense.version, account_id: cash.id, amount: "12.50", transaction_date: "2026-10-02" });
+  const debt = createObligation(owner, { request_id: randomUUID(), kind: "debt", name: "Daily debt", principal: "30" }).obligation;
+  const payment = postObligationPayment(owner, { request_id: randomUUID(), obligation_id: debt.id, obligation_version: debt.version, account_id: cash.id, amount: "10", transaction_date: "2026-10-03" });
+  assert.equal(payment.transaction.amount_cents, 1000);
+  const report = getFinanceReport(owner, { date_from: "2026-09-30", date_to: "2026-10-03" });
+  assert.deepEqual(report.daily, [
+    { date: "2026-09-30", income_cents: 5000, spending_cents: 2000 },
+    { date: "2026-10-01", income_cents: 0, spending_cents: 0 },
+    { date: "2026-10-02", income_cents: 0, spending_cents: -1250 },
+    { date: "2026-10-03", income_cents: 0, spending_cents: 0 },
+  ]);
+  assert.deepEqual(report.months, [
+    { month: "2026-09", income_cents: 5000, spending_cents: 2000 },
+    { month: "2026-10", income_cents: 0, spending_cents: -1250 },
+  ]);
+  assert.equal(report.daily.reduce((sum, day) => sum + day.income_cents, 0), 5000);
+  assert.equal(report.daily.reduce((sum, day) => sum + day.spending_cents, 0), 750);
+  assert.equal(report.daily.reduce((sum, day) => sum + day.income_cents, 0), report.months.reduce((sum, month) => sum + month.income_cents, 0));
+  assert.equal(report.daily.reduce((sum, day) => sum + day.spending_cents, 0), report.months.reduce((sum, month) => sum + month.spending_cents, 0));
 });

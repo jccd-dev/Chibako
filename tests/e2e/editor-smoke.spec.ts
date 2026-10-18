@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("a user can set up, edit a Note, and reload persisted content", async ({ page }) => {
   await page.goto("/setup");
+  await page.locator("#setup-token").fill(process.env.CHIBAKO_SETUP_TOKEN ?? "");
   await page.locator("#setup-password").fill("correct horse battery staple");
   await page.locator("#setup-confirm").fill("correct horse battery staple");
   await page.getByRole("button", { name: "Create account" }).click();

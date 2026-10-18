@@ -9,7 +9,10 @@ async function authenticate(page: Page): Promise<void> {
   if (/\/(setup|login)$/.test(page.url())) {
     const setup = /\/setup$/.test(page.url());
     await page.locator(setup ? "#setup-password" : "#login-password").fill("correct horse battery staple");
-    if (setup) await page.locator("#setup-confirm").fill("correct horse battery staple");
+    if (setup) {
+      await page.locator("#setup-token").fill(process.env.CHIBAKO_SETUP_TOKEN ?? "");
+      await page.locator("#setup-confirm").fill("correct horse battery staple");
+    }
     await page.getByRole("button", { name: setup ? "Create account" : "Sign in" }).click();
   }
   await expect(page).toHaveURL(/\/app(?:\/note\/[^/]+)?$/);

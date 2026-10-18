@@ -13,6 +13,11 @@ export function dataDir(): string {
 let _db: Database.Database | null = null;
 
 const MIGRATIONS: string[] = [
+  `CREATE TABLE IF NOT EXISTS auth_attempts (
+    bucket TEXT PRIMARY KEY,
+    window_started_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL
+  );`,
   `CREATE TABLE IF NOT EXISTS folders (path TEXT PRIMARY KEY);`,
   `
   CREATE TABLE IF NOT EXISTS notes (

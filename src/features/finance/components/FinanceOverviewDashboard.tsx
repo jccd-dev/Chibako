@@ -40,9 +40,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FinanceMonthInput } from "./FinanceDateInputs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FinanceGoals } from "./FinanceGoals";
 import { FinanceCostAnalysis } from "./FinanceCostAnalysis";
+import { useFinanceRecentActivity } from "@/features/finance/use-finance-recent-activity";
 import {
   Empty,
   EmptyDescription,
@@ -51,6 +52,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import {
+  formatHistoryDate,
   formatPHP as money,
   localCalendarDate,
 } from "@/features/finance/presentation";
@@ -77,6 +79,43 @@ const chartConfig = {
   expenses: { label: "Expenses", color: "var(--chart-2)" },
   net: { label: "Net cash flow", color: "var(--foreground)" },
 } satisfies ChartConfig;
+
+type OverviewPeriod = "today" | "week" | "month";
+const periodText: Record<OverviewPeriod, string> = {
+  today: "today",
+  week: "this week",
+  month: "this month",
+};
+
+function addDays(iso: string, days: number) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function endOfMonth(year: number, month: number) {
+  const date = new Date(Date.UTC(year, month, 0));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function periodRange(period: OverviewPeriod, today: string) {
+  if (period === "today") return { date_from: today, date_to: today };
+  if (period === "week") {
+    const [year, month, day] = today.split("-").map(Number);
+    const sinceMonday = (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
+    const monday = addDays(today, -sinceMonday);
+    return { date_from: monday, date_to: addDays(monday, 6) };
+  }
+  const [year, month] = today.split("-").map(Number);
+  return { date_from: `${today.slice(0, 7)}-01`, date_to: endOfMonth(year, month) };
+}
+
+function dayAxisLabel(iso: string) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-PH", {
+    weekday: "short",
+  });
+}
 
 function countLabel(count: number, noun: string) {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -121,9 +160,11 @@ export function FinanceOverviewDashboard({
   onCategoryFilter,
 }: FinanceOverviewDashboardProps) {
   const report = reports.report;
-  const income = report?.income_cents ?? activity.totals?.income_cents ?? 0;
-  const expenses =
-    report?.spending_cents ?? activity.totals?.expense_cents ?? 0;
+  const [period, setPeriod] = useState<OverviewPeriod>("month");
+  const income = report?.income_cents
+    ?? (period === "month" ? activity.totals?.income_cents ?? 0 : 0);
+  const expenses = report?.spending_cents
+    ?? (period === "month" ? activity.totals?.expense_cents ?? 0 : 0);
   const budgetCents = (report?.categories ?? []).reduce(
     (sum, category) => sum + (category.budget_cents ?? 0),
     0,
@@ -140,27 +181,38 @@ export function FinanceOverviewDashboard({
     report?.months.some(
       (month) => month.income_cents !== 0 || month.spending_cents !== 0,
     ) ?? false;
-  const chartData = (report?.months ?? []).map((item) => {
-    const [y, m] = item.month.split("-").map(Number);
-    const date = new Date(y, m - 1, 1);
-    return {
-      month: date.toLocaleDateString("en-PH", { month: "short" }),
-      label: date.toLocaleDateString("en-PH", {
-        month: "long",
-        year: "numeric",
-      }),
-      income: item.income_cents,
-      expenses: -item.spending_cents,
-      net: item.income_cents - item.spending_cents,
-    };
-  });
-  const transactions = activity.page?.transactions.slice(0, 7) ?? [];
+  const dailyBuckets = period === "month" ? [] : report?.daily ?? [];
+  const chartData = dailyBuckets.length
+    ? dailyBuckets.map((item) => ({
+        month: period === "today" ? "Today" : dayAxisLabel(item.date),
+        label: formatHistoryDate(item.date),
+        income: item.income_cents,
+        expenses: -item.spending_cents,
+        net: item.income_cents - item.spending_cents,
+      }))
+    : (report?.months ?? []).map((item) => {
+        const [y, m] = item.month.split("-").map(Number);
+        const date = new Date(y, m - 1, 1);
+        return {
+          month: date.toLocaleDateString("en-PH", { month: "short" }),
+          label: date.toLocaleDateString("en-PH", {
+            month: "long",
+            year: "numeric",
+          }),
+          income: item.income_cents,
+          expenses: -item.spending_cents,
+          net: item.income_cents - item.spending_cents,
+        };
+      });
+  const today = localCalendarDate();
+  const periodDates = periodRange(period, today);
+  const recent = useFinanceRecentActivity(periodDates.date_from, periodDates.date_to);
+  const transactions = recent.page?.transactions ?? [];
   const accounts = finance.allAccounts.filter(
     (account) => account.kind === "money" && !account.archived && account.include_in_summary,
   );
   const pending =
     planning.page?.plans.filter((plan) => plan.status === "pending") ?? [];
-  const today = localCalendarDate();
   const trackRef = useRef<HTMLDivElement>(null);
   const [bounds, setBounds] = useState({ atStart: true, atEnd: true });
   useEffect(() => {
@@ -206,22 +258,27 @@ export function FinanceOverviewDashboard({
               {countLabel(finance.summary?.money.account_count ?? 0, "account")}
             </CardDescription>
             <CardAction>
-              <FinanceMonthInput
-                aria-label="Overview report month"
-                value={reports.dates.date_from.slice(0, 7)}
-                onChange={(month) => {
-                  const days = new Date(
-                    Number(month.slice(0, 4)),
-                    Number(month.slice(5)),
-                    0,
-                  ).getDate();
-                  reports.applyDates({
-                    date_from: `${month}-01`,
-                    date_to: `${month}-${days}`,
-                  });
+              <ToggleGroup
+                aria-label="Overview report period"
+                value={[period]}
+                onValueChange={(values) => {
+                  if (!values[0]) return;
+                  const next = values[0] as OverviewPeriod;
+                  setPeriod(next);
+                  const range = periodRange(next, today);
+                  if (
+                    reports.dates.date_from !== range.date_from ||
+                    reports.dates.date_to !== range.date_to
+                  ) {
+                    reports.applyDates(range);
+                  }
                 }}
-                className="min-h-8 w-auto text-xs"
-              />
+                spacing={0}
+              >
+                <ToggleGroupItem value="today">Today</ToggleGroupItem>
+                <ToggleGroupItem value="week">Week</ToggleGroupItem>
+                <ToggleGroupItem value="month">Month</ToggleGroupItem>
+              </ToggleGroup>
             </CardAction>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem]">
@@ -347,7 +404,7 @@ export function FinanceOverviewDashboard({
                 </Empty>
               )}
             </div>
-            <dl className="grid grid-cols-3 gap-3 border-t border-border pt-3 sm:grid-cols-1 sm:border-t-0 sm:border-l sm:pl-4 sm:pt-0">
+            <dl className="grid grid-cols-2 gap-3 border-t border-border pt-3 sm:grid-cols-1 sm:border-t-0 sm:border-l sm:pl-4 sm:pt-0">
               <div>
                 <dt className="text-xs text-muted-foreground">Income</dt>
                 <dd
@@ -372,15 +429,23 @@ export function FinanceOverviewDashboard({
                   {money(income - expenses)}
                 </dd>
               </div>
+              <div>
+                <dt
+                  className="text-xs text-muted-foreground"
+                  title="Projected availability after maintaining balances and this month’s unpaid expenses, including overdue and recurring payments"
+                >
+                  Spendable this month
+                </dt>
+                <dd
+                  className="mt-1 break-words text-lg font-semibold tabular-nums"
+                  data-testid="finance-spendable-total"
+                >
+                  {money(finance.summary?.spendable_cents ?? 0)}
+                </dd>
+              </div>
             </dl>
           </CardContent>
         </Card>
-        <Tile
-          label="Spendable this month"
-          value={money(finance.summary?.spendable_cents ?? 0)}
-          description="Projected availability after maintaining balances and this month’s unpaid expenses, including overdue and recurring payments"
-          data-testid="finance-spendable-total"
-        />
         <div className="grid min-w-0 gap-3 sm:grid-cols-3">
           <Card size="sm">
             <CardHeader>
@@ -682,7 +747,7 @@ export function FinanceOverviewDashboard({
           <CardHeader>
             <CardTitle>Recent activity</CardTitle>
             <CardDescription>
-              Latest transactions from your current filters
+              Latest transactions within {periodText[period]}
             </CardDescription>
           </CardHeader>
           <CardContent>

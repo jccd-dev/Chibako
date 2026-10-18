@@ -30,6 +30,14 @@ async function rpc(key: string, name: string, args: object) {
   const body = await response.json();
   return body.result ?? { isError: true, content: [{ text: body.error?.message }] };
 }
+async function listTools(key: string) {
+  const response = await remote(new Request("https://chibako.test/mcp", {
+    method: "POST", headers: { authorization: `Bearer ${key}`, accept: "application/json, text/event-stream", "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+  }));
+  assert.equal(response.status, 200);
+  return (await response.json()).result.tools;
+}
 function fixture() {
   const note = createNote({ title: randomUUID(), content: "Private Note content" });
   const account = createAccount({ kind: "owner" }, { request_id: randomUUID(), name: randomUUID(), kind: "money", currency: "PHP", opening_balance: "100" }).account;
@@ -76,6 +84,13 @@ test("REST and remote MCP independently require finance scope AND notes:read; No
 test("protocol retries, stale edits, removal and bounded choices preserve contracts and keyed attribution", async () => {
   const { account, note, transaction, context } = fixture();
   const { key, id } = createApiKey("Both", ["finance:read", "finance:write", "notes:read"]);
+  const tools = await listTools(key);
+  const annotations = Object.fromEntries(tools.filter((tool: { name: string }) => ["get_finance_note_links", "list_finance_note_choices", "set_finance_note_links"].includes(tool.name)).map((tool: { name: string; annotations?: object }) => [tool.name, tool.annotations]));
+  assert.deepEqual(annotations, {
+    get_finance_note_links: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    list_finance_note_choices: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    set_finance_note_links: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  });
   const payload = { request_id: randomUUID(), version: 1, note_ids: [] };
   const response = await setLinks(rest(key, "PUT", payload), context);
   assert.equal(response.status, 200);

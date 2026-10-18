@@ -7,6 +7,7 @@ async function authenticate(page: Page) {
   await page.route("**/api/login", route => route.continue({ headers: { ...route.request().headers(), "x-chibako-client-ip": clientId } }));
   await page.goto("/");
   if (/\/setup/.test(page.url())) {
+    await page.locator("#setup-token").fill(process.env.CHIBAKO_SETUP_TOKEN ?? "");
     await page.locator("#setup-password").fill("correct horse battery staple");
     await page.locator("#setup-confirm").fill("correct horse battery staple");
     await page.getByRole("button", { name: "Create account" }).click();
@@ -26,6 +27,49 @@ async function addAccount(page: Page, name: string, balance: string, kind = "mon
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "View " + name, exact: true })).toBeVisible();
 }
+
+test("goal withdrawals validate available money and show progress", async ({ page }) => {
+  await authenticate(page);
+  const accountResponse = await page.request.post("/api/finance/accounts", { data: {
+    request_id: randomUUID(), name: "TEST GOAL withdrawal cash", kind: "money", currency: "PHP", opening_balance: "100",
+  } });
+  expect(accountResponse.ok()).toBe(true);
+  const { account } = await accountResponse.json();
+  const goalResponse = await page.request.post("/api/finance/goals", { data: {
+    request_id: randomUUID(), name: "TEST GOAL withdrawal validation", target: "100",
+  } });
+  expect(goalResponse.ok()).toBe(true);
+  const { goal } = await goalResponse.json();
+  const movement = { request_id: randomUUID(), version: goal.version, direction: "deposit", account_id: account.id, amount: "25" };
+  const deposit = await page.request.post(`/api/finance/goals/${goal.id}/movements`, { data: movement });
+  expect(deposit.ok()).toBe(true);
+  const { goal: funded } = await deposit.json();
+  const rejected = await page.request.post(`/api/finance/goals/${goal.id}/movements`, { data: {
+    ...movement, request_id: randomUUID(), version: funded.version, direction: "withdrawal", amount: "25.01",
+  } });
+  expect(rejected.status()).toBe(409);
+  await page.getByRole("link", { name: "Finance", exact: true }).click();
+  await page.getByRole("link", { name: "Planning", exact: true }).click();
+  const row = page.getByRole("button", { name: `Edit goal ${goal.name}`, exact: true });
+  await expect(row).toContainText("25%");
+  await row.click();
+  await page.getByLabel("Action", { exact: true }).selectOption("withdrawal");
+  await page.getByLabel("Destination account", { exact: true }).selectOption(account.id);
+  await expect(page.getByText(/Available to withdraw:/)).toBeVisible();
+  await page.locator("#goal-movement-amount").fill("25.01");
+  let submitted = 0;
+  page.on("request", request => {
+    if (request.method() === "POST" && request.url().endsWith(`/goals/${goal.id}/movements`)) submitted++;
+  });
+  await page.getByRole("button", { name: "Withdraw", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Amount exceeds the money in this goal. Available:");
+  expect(submitted).toBe(0);
+  await page.locator("#goal-movement-amount").fill("25");
+  await page.getByRole("button", { name: "Withdraw", exact: true }).click();
+  await expect(page.locator("#goal-movement-amount")).toHaveValue("");
+  const refreshed = await (await page.request.get(`/api/finance/goals/${goal.id}`)).json();
+  expect(refreshed.goal.saved_cents).toBe(0);
+});
 
 for (const device of ["desktop", "mobile"]) test(device + " finance account workflow, keyboard and both themes", async ({ page, request }) => {
   await page.setViewportSize(device === "mobile" ? { width: 390, height: 844 } : { width: 1440, height: 900 });

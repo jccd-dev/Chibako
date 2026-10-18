@@ -664,9 +664,6 @@ export function FinanceTransactionEntry({
   } = entry;
   const accountKey = type === "transfer" ? "source_account_id" : "account_id";
   const amountRef = useRef<HTMLInputElement>(null);
-  const subcategories = activity.classifications.filter(
-    (item) => item.parent_id === categoryId && !item.archived,
-  );
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const another =
@@ -815,6 +812,8 @@ export function FinanceTransactionEntry({
                 type={type}
                 value={categoryId}
                 onChange={changeCategory}
+                subcategoryId={subcategoryId}
+                onSubcategoryChange={setSubcategoryId}
                 disabled={activity.busy}
                 id="transaction-category"
               />
@@ -831,29 +830,6 @@ export function FinanceTransactionEntry({
                 Additional details
               </summary>
               <FieldGroup className="mt-4">
-                {type !== "transfer" && subcategories.length > 0 && (
-                  <Field>
-                    <FieldLabel htmlFor="transaction-subcategory">
-                      Subcategory
-                    </FieldLabel>
-                    <NativeSelect
-                      id="transaction-subcategory"
-                      className="w-full"
-                      value={subcategoryId}
-                      disabled={activity.busy}
-                      onChange={(event) => setSubcategoryId(event.target.value)}
-                    >
-                      <NativeSelectOption value="">
-                        No subcategory
-                      </NativeSelectOption>
-                      {subcategories.map((item) => (
-                        <NativeSelectOption key={item.id} value={item.id}>
-                          {item.name}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                )}
                 <Field>
                   <FieldLabel htmlFor="transaction-text">
                     Transaction text

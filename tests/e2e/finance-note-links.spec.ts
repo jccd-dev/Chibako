@@ -10,6 +10,7 @@ async function authenticate(page: Page) {
   await page.route("**/api/login", route => route.continue({ headers: { ...route.request().headers(), "x-chibako-client-ip": clientId } }));
   await page.goto("/");
   if (/\/setup/.test(page.url())) {
+    await page.locator("#setup-token").fill(process.env.CHIBAKO_SETUP_TOKEN ?? "");
     await page.locator("#setup-password").fill(PASSWORD);
     await page.locator("#setup-confirm").fill(PASSWORD);
     await page.getByRole("button", { name: "Create account" }).click();

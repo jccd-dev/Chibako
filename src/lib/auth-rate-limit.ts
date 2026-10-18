@@ -1,16 +1,17 @@
+import { createHash } from "node:crypto";
+import { getDb } from "./db";
+
 const MAX_ATTEMPTS = 5;
+const MAX_VAULT_ATTEMPTS = 50;
 const WINDOW_MS = 60_000;
-const MAX_CLIENT_BUCKETS = 1024;
 const DIRECT_CLIENT_ID = "direct";
 
 export const AUTH_CLIENT_HEADER = "X-Chibako-Client-IP";
 
 interface AttemptBucket {
-  windowStartedAt: number;
+  window_started_at: number;
   attempts: number;
 }
-
-const buckets = new Map<string, AttemptBucket>();
 
 export interface AuthAttemptResult {
   allowed: boolean;
@@ -22,55 +23,39 @@ function normalizeClientId(clientId: string | null | undefined): string {
   return normalized && normalized.length <= 64 ? normalized : DIRECT_CLIENT_ID;
 }
 
-/**
- * Read the identity owned by the provided nginx config. Direct/local calls
- * without that header share one fallback bucket; X-Forwarded-For is ignored.
- */
+/** Enable only behind a proxy that overwrites this header and blocks direct access. */
 export function getAuthClientId(request: Request): string {
-  return normalizeClientId(request.headers.get(AUTH_CLIENT_HEADER));
+  return process.env.CHIBAKO_TRUST_PROXY === "true"
+    ? normalizeClientId(request.headers.get(AUTH_CLIENT_HEADER))
+    : DIRECT_CLIENT_ID;
 }
 
-function removeExpiredBuckets(timestamp: number): void {
-  for (const [clientId, bucket] of buckets) {
-    if (timestamp - bucket.windowStartedAt >= WINDOW_MS) buckets.delete(clientId);
-  }
-}
-
-function getBucket(clientId: string, timestamp: number): AttemptBucket {
-  removeExpiredBuckets(timestamp);
-  const existing = buckets.get(clientId);
-  if (existing) return existing;
-
-  if (buckets.size >= MAX_CLIENT_BUCKETS) {
-    const oldestClientId = buckets.keys().next().value;
-    if (oldestClientId !== undefined) buckets.delete(oldestClientId);
-  }
-
-  const bucket = { windowStartedAt: timestamp, attempts: 0 };
-  buckets.set(clientId, bucket);
-  return bucket;
-}
-
-/**
- * Bound unauthenticated login/setup work per client in this process. The map
- * is capped and expired buckets are removed on access. A multi-process
- * deployment still needs a shared or trusted-proxy limiter.
- * ponytail: process-local map; use shared state when running multiple workers.
- */
+/** All password entry points share persistent client and vault-wide windows. */
 export function consumeAuthAttempt(clientId = DIRECT_CLIENT_ID, timestamp = Date.now()): AuthAttemptResult {
-  const bucket = getBucket(normalizeClientId(clientId), timestamp);
-  if (bucket.attempts < MAX_ATTEMPTS + 1) bucket.attempts += 1;
-  if (bucket.attempts <= MAX_ATTEMPTS) {
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
+  const db = getDb();
+  const clientBucket = `client:${createHash("sha256").update(normalizeClientId(clientId)).digest("hex")}`;
+  return db.transaction(() => {
+    db.prepare("DELETE FROM auth_attempts WHERE window_started_at <= ?").run(timestamp - WINDOW_MS);
+    const limits = [["vault", MAX_VAULT_ATTEMPTS], [clientBucket, MAX_ATTEMPTS]] as const;
+    let retryAfterSeconds = 0;
+    for (const [bucket, limit] of limits) {
+      const row = db.prepare("SELECT window_started_at, attempts FROM auth_attempts WHERE bucket = ?")
+        .get(bucket) as AttemptBucket | undefined;
+      if (row && row.attempts >= limit) {
+        retryAfterSeconds = Math.max(retryAfterSeconds, Math.ceil((row.window_started_at + WINDOW_MS - timestamp) / 1000));
+      }
+    }
+    if (retryAfterSeconds > 0) return { allowed: false, retryAfterSeconds };
 
-  return {
-    allowed: false,
-    retryAfterSeconds: Math.max(1, Math.ceil((bucket.windowStartedAt + WINDOW_MS - timestamp) / 1000)),
-  };
+    for (const [bucket] of limits) {
+      db.prepare(`INSERT INTO auth_attempts (bucket, window_started_at, attempts) VALUES (?, ?, 1)
+        ON CONFLICT(bucket) DO UPDATE SET attempts = attempts + 1`).run(bucket, timestamp);
+    }
+    return { allowed: true, retryAfterSeconds: 0 };
+  }).immediate();
 }
 
-/** Reset the in-memory buckets for isolated tests and local process restarts. */
+/** Test-only reset; restarting a process must not clear attempts. */
 export function resetAuthAttemptLimiter(): void {
-  buckets.clear();
+  getDb().prepare("DELETE FROM auth_attempts").run();
 }

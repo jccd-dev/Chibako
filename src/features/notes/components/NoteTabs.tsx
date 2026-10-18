@@ -116,6 +116,33 @@ export function NoteTabs() {
     if (next !== tabs) setTabs(next);
   }
 
+  // Drag-to-reorder lives in transient state; the dropped order persists through
+  // the normal saveTabs effect and comes back in that order on restore.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  function reorderTabs(from: number, to: number) {
+    setTabs((current) => {
+      if (from < 0 || from >= current.length || to < 0 || to > current.length) return current;
+      const insert = to > from ? to - 1 : to;
+      if (insert === from) return current;
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(insert, 0, moved);
+      return next;
+    });
+  }
+
+  function endDrag() {
+    setDragIndex(null);
+    setDropIndex(null);
+  }
+
+  function commitDrop() {
+    if (dragIndex !== null) reorderTabs(dragIndex, dropIndex ?? tabs.length);
+    endDrag();
+  }
+
   function closeTab(id: string) {
     if (tabs.length === 1) return;
     const index = tabs.findIndex((tab) => tab.id === id);
@@ -178,19 +205,58 @@ export function NoteTabs() {
       role="tablist"
       aria-label="Open notes"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-        {tabs.map((tab) => {
+      <div
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+        onDragOver={(event) => {
+          if (dragIndex === null || dragIndex >= tabs.length - 1) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDropIndex(tabs.length);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (dragIndex === null) return;
+          commitDrop();
+        }}
+      >
+        {tabs.map((tab, index) => {
           const active = tab.id === activeId;
           return (
             <div
               key={tab.id}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", tab.id);
+                setDragIndex(index);
+              }}
+              onDragOver={(event) => {
+                if (dragIndex === null) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = "move";
+                const rect = event.currentTarget.getBoundingClientRect();
+                const target = event.clientX - rect.left < rect.width / 2 ? index : index + 1;
+                setDropIndex(target === dragIndex || target === dragIndex + 1 ? null : target);
+              }}
+              onDragEnd={endDrag}
               className={cn(
-                "group flex h-8 min-w-0 max-w-48 flex-1 items-center rounded-md",
+                "group relative flex h-8 min-w-0 max-w-48 flex-1 items-center rounded-md",
                 active
                   ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:bg-muted/60",
+                dragIndex === index && "opacity-40",
               )}
             >
+              {dragIndex !== null && dropIndex === index && (
+                <span aria-hidden="true" className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary" />
+              )}
+              {dragIndex !== null && dropIndex === index + 1 && (
+                <span aria-hidden="true" className="absolute inset-y-1 right-0 w-0.5 rounded-full bg-primary" />
+              )}
+              {index > 0 && dragIndex === null && !active && tabs[index - 1].id !== activeId && (
+                <span aria-hidden="true" className="pointer-events-none absolute -left-0.5 top-1/2 h-4 w-px -translate-y-1/2 rounded-full bg-border" />
+              )}
               <button
                 type="button"
                 role="tab"

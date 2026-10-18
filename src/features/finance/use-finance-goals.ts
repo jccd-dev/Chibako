@@ -142,6 +142,9 @@ export function useFinanceGoals() {
     try { cents = decimalCents(amount); }
     catch (error) { setSaveError(error instanceof Error ? error.message : "Check the amount."); return; }
     if (cents <= 0) { setSaveError("Use an amount above PHP 0.00"); return; }
+    if (direction === "withdrawal" && cents > editing.saved_cents) {
+      setSaveError(`Amount exceeds the money in this goal. Available: ${formatPHP(editing.saved_cents)}.`); return;
+    }
     const goal = await mutate(`/${editing.id}/movements`, "POST", input);
     if (goal) {
       const amountText = formatPHP(cents);

@@ -20,7 +20,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { FinancePlanMatch } from "./FinancePlanMatch";
-import { FinanceObligations } from "./FinanceObligations";
 import { FinanceRecurrence } from "./FinanceRecurrence";
 import { FinancePlanCategories } from "./FinancePlanCategories";
 import { MoneyInput } from "./MoneyInput";
@@ -33,13 +32,11 @@ export function FinancePlans({
   planning,
   activity,
   focusPlanId,
-  focusObligationId,
   onFocusHandled,
 }: {
   planning: FinancePlanningController;
   activity: FinanceActivityController;
   focusPlanId?: string | null;
-  focusObligationId?: string | null;
   onFocusHandled?: () => void;
 }) {
   const [panel, setPanel] = useState<string | null>(focusPlanId ?? null);
@@ -101,11 +98,7 @@ export function FinancePlans({
       <SheetHeader className="border-b border-border p-4 pr-10"><SheetTitle>Review payment</SheetTitle><SheetDescription>Log what happened, match recorded activity, or delete the plan.</SheetDescription></SheetHeader>
       {detailError ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{detailError}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry plan inspection</Button><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div> : panel === "create" || detailValue ? <PlanPanel key={`${panel}:${detailValue?.version ?? "new"}:${reload}`} plan={detailValue} activity={activity} planning={planning} reminders={remindersOptions} onClose={() => setPanel(null)} onFuture={plan => { setPanel(null); setFutureOccurrence(plan); }} onRefresh={() => { planning.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><p role="status">Loading plan…</p><Button variant="outline" onClick={() => setPanel(null)}>Close plan</Button></div>}
     </SheetContent></Sheet>
-  <FinanceObligations
-    activity={activity}
-    focusObligationId={focusObligationId}
-    onFocusHandled={onFocusHandled}
-  /></>;
+  </>;
 }
 
 function humanDate(iso: string) {
@@ -129,7 +122,7 @@ export function PlanPanel({ plan, activity, planning, reminders, onClose, onFutu
     }).catch(e => { if (!abort.signal.aborted) setReviewError({ key: reviewKey, message: e instanceof Error ? e.message : "Could not inspect obligation." }); });
     return () => abort.abort();
   }, [plan?.obligation_id, reviewReload, reviewKey]);
-  const { mode, type, amount, setAmount, account, setAccount, dueDate, setDueDate, date, setDate, category, subcategory, setSubcategory, text, setText, association, setAssociation, feeType, changeFeeType, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory, feeSubcategoryId, setFeeSubcategoryId, feeCategories, feeSubcategories, cashSource, chooseCashSource, cashPick, selectCash, clearCash, cashPage, cashOffset, setCashOffset, cashLoading, cashError, retryCash, errors, editable, shortfall, subcategories, accounts, submit: save, changeMode, changeType, changeCategory, invalid } = useFinancePlanEntry(plan, activity, planning, reviewObligation, onClose);
+  const { mode, type, amount, setAmount, account, setAccount, dueDate, setDueDate, date, setDate, category, subcategory, setSubcategory, text, setText, association, setAssociation, feeType, changeFeeType, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory, feeSubcategoryId, setFeeSubcategoryId, feeCategories, feeSubcategories, cashSource, chooseCashSource, cashPick, selectCash, clearCash, cashPage, cashOffset, setCashOffset, cashLoading, cashError, retryCash, errors, editable, shortfall, accounts, submit: save, changeMode, changeType, changeCategory, invalid } = useFinancePlanEntry(plan, activity, planning, reviewObligation, onClose);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void save((event.nativeEvent as SubmitEvent).submitter?.getAttribute("name") === "another");
@@ -170,8 +163,7 @@ export function PlanPanel({ plan, activity, planning, reminders, onClose, onFutu
         {mode !== "post" && plan?.schedule_id && <Field><FieldLabel htmlFor="plan-association">Reminder association (this occurrence only)</FieldLabel><NativeSelect id="plan-association" className="w-full" value={association} disabled={planning.busy || reminders.loading} onChange={event => setAssociation(event.target.value)}><NativeSelectOption value="">Not associated</NativeSelectOption>{reminders.obligations.filter(row => row.kind === (type === "expense" ? "debt" : "receivable")).map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect>{reminders.hasMore && <Button type="button" variant="outline" disabled={reminders.loading || planning.busy} onClick={reminders.loadMore}>Load more obligations</Button>}<FieldDescription>Changing this applies only to this occurrence; the schedule keeps its own association for future occurrences.</FieldDescription></Field>}
         {mode === "post" ? <Field data-invalid={!!errors.transaction_date}><FieldLabel htmlFor="plan-transaction_date">{type === "income" ? "Date received" : "Date paid"}</FieldLabel><FinanceDateInput id="plan-transaction_date" min="1000-01-01" max="9999-12-31" value={date} disabled={planning.busy || cashSource === "existing" && !!cashPick} onChange={setDate} {...invalid("transaction_date")} /><FieldDescription>{linked ? "The day the principal moved. The obligation payment and plan update together." : "Defaults to today. The scheduled due date stays unchanged."}</FieldDescription><FieldError id="plan-error-transaction_date">{errors.transaction_date}</FieldError></Field> : <>
           <Field data-invalid={!!errors.due_date}><FieldLabel htmlFor="plan-due_date">Due date</FieldLabel><FinanceDateInput id="plan-due_date" min="1000-01-01" max="9999-12-31" value={dueDate} disabled={planning.busy} onChange={setDueDate} {...invalid("due_date")} /><FieldDescription>When you expect the activity, not a posting date.</FieldDescription><FieldError id="plan-error-due_date">{errors.due_date}</FieldError></Field>
-          <FinancePlanCategories activity={activity} type={type} value={category} onChange={changeCategory} disabled={planning.busy} id="plan-category" />
-          {subcategories.length > 0 && <Field><FieldLabel htmlFor="plan-subcategory">Subcategory</FieldLabel><NativeSelect id="plan-subcategory" className="w-full" value={subcategory} disabled={planning.busy} onChange={event => setSubcategory(event.target.value)}><NativeSelectOption value="">No subcategory</NativeSelectOption>{subcategories.map(row => <NativeSelectOption key={row.id} value={row.id}>{row.name}</NativeSelectOption>)}</NativeSelect></Field>}
+          <FinancePlanCategories activity={activity} type={type} value={category} onChange={changeCategory} subcategoryId={subcategory} onSubcategoryChange={setSubcategory} disabled={planning.busy} id="plan-category" />
           <Field><FieldLabel htmlFor="plan-text">Note (optional)</FieldLabel><Input id="plan-text" maxLength={2000} value={text} disabled={planning.busy} onChange={event => setText(event.target.value)} /></Field>
         </>}
         {mode === "post" && linked && <FieldGroup className="rounded-xl border border-border p-3">

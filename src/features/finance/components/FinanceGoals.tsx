@@ -5,6 +5,8 @@ import { IconPlus } from "@tabler/icons-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
+import { cn } from "cn";
+import { GoalProgressGauge } from "./GoalProgressGauge";
 import {
   Card,
   CardAction,
@@ -132,15 +134,43 @@ export function FinanceGoals({
             )}
           </Empty>
         ) : (
-          <ul className="divide-y divide-border">
-            {goals.page.goals.map((goal) => (
-              <GoalRow
-                key={goal.id}
-                goal={goal}
-                onOpen={() => void goals.openEdit(goal)}
-              />
-            ))}
-          </ul>
+          <>
+            {goals.page.goals.length > 1 && (
+              <dl className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                <div className="whitespace-nowrap">
+                  <dt className="inline text-muted-foreground">Total saved&nbsp;</dt>
+                  <dd className="inline font-semibold tabular-nums">
+                    {formatPHP(
+                      goals.page.goals.reduce(
+                        (sum, goal) => sum + goal.saved_cents,
+                        0,
+                      ),
+                    )}
+                  </dd>
+                </div>
+                <div className="whitespace-nowrap">
+                  <dt className="inline text-muted-foreground">Combined targets&nbsp;</dt>
+                  <dd className="inline font-semibold tabular-nums">
+                    {formatPHP(
+                      goals.page.goals.reduce(
+                        (sum, goal) => sum + goal.target_cents,
+                        0,
+                      ),
+                    )}
+                  </dd>
+                </div>
+              </dl>
+            )}
+            <ul className="flex flex-col divide-y divide-border/60">
+              {goals.page.goals.map((goal) => (
+                <GoalRow
+                  key={goal.id}
+                  goal={goal}
+                  onOpen={() => void goals.openEdit(goal)}
+                />
+              ))}
+            </ul>
+          </>
         )}
         {goals.page && goals.page.total > 25 && (
           <nav
@@ -205,47 +235,50 @@ function GoalRow({ goal, onOpen }: { goal: FinanceGoal; onOpen: () => void }) {
     !goal.archived &&
     !!goal.due_date &&
     goal.due_date < localCalendarDate();
+  const status = goal.archived
+    ? "Archived"
+    : goal.achieved
+      ? "Achieved"
+      : "Saving";
+  const holding = goal.linked_account_name
+    ? `Held in ${goal.linked_account_name}`
+    : "Held in the goal";
   return (
     <li>
       <button
-        className="w-full rounded-md px-1 py-3 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-        aria-label={`${goal.archived ? "View" : "Edit"} goal ${goal.name}`}
+        type="button"
+        title={`${goal.name}: ${formatPHP(goal.saved_cents)} of ${formatPHP(goal.target_cents)} (${percent}%) · ${status} · ${holding}${goal.due_date ? ` · Due ${goal.due_date}` : ""}${overdue ? " · Overdue" : ""}`}
+        className="flex min-h-11 w-full items-center gap-3 rounded-md px-1 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+        aria-label={`${goal.archived ? "View" : "Edit"} goal ${goal.name}: ${formatPHP(goal.saved_cents)} of ${formatPHP(goal.target_cents)}`}
         onClick={onOpen}
       >
-        <span className="flex flex-wrap items-baseline justify-between gap-3">
-          <span className="min-w-0 break-words font-medium">{goal.name}</span>
-          <span className="tabular-nums">
-            <strong>{formatPHP(goal.saved_cents)}</strong>
-            <span className="text-muted-foreground">
-              {" "}
-              of {formatPHP(goal.target_cents)}
-            </span>
+        <GoalProgressGauge
+          percent={percent}
+          label={`${goal.name} progress`}
+          className={cn("size-9 flex-none", goal.archived && "opacity-40")}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium">{goal.name}</span>
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            of {formatPHP(goal.target_cents)}
           </span>
         </span>
-        <span className="mt-1 block text-xs text-muted-foreground">
-          {goal.archived
-            ? "Archived"
-            : goal.achieved
-              ? "Achieved"
-              : "Saving"}
-          {goal.linked_account_name
-            ? ` · Held in ${goal.linked_account_name}`
-            : " · Held in the goal"}
-          {goal.due_date && ` · Due ${goal.due_date}`}
-          {overdue && " · overdue"}
-        </span>
-        <span
-          role="progressbar"
-          aria-label={`${goal.name} progress`}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={percent}
-          className="mt-2 block h-1.5 overflow-hidden rounded-sm bg-muted"
-        >
+        <span className="shrink-0 text-right">
+          <span className="block text-xs font-medium tabular-nums">
+            {formatPHP(goal.saved_cents)}
+          </span>
           <span
-            className="block h-full bg-primary"
-            style={{ width: `${percent}%` }}
-          />
+            className={cn(
+              "mt-0.5 block text-xs",
+              overdue
+                ? "text-destructive"
+                : goal.achieved && !goal.archived
+                  ? "text-primary"
+                  : "text-muted-foreground",
+            )}
+          >
+            {status}
+          </span>
         </span>
       </button>
     </li>
@@ -479,6 +512,9 @@ function MovementPanel({ goals, disabled }: { goals: FinanceGoalsController; dis
           onValueChange={(value) => goals.setAmount(value)}
         />
         <FieldDescription>{note}</FieldDescription>
+        {!deposit && (
+          <FieldDescription>Available to withdraw: {formatPHP(goal.saved_cents)}.</FieldDescription>
+        )}
       </Field>
       <div className="flex flex-wrap justify-end gap-2">
         <Button

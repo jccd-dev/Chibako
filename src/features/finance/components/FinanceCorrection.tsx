@@ -232,46 +232,19 @@ export function FinanceCorrection({
             {!refund &&
               !record.obligation_id &&
               (record.type === "income" || record.type === "expense") && (
-                <FieldGroup className="gap-4">
-                  <FinancePlanCategories
-                    activity={activity}
-                    type={categoryType}
-                    value={edit.categoryId}
-                    onChange={(value) => {
-                      edit.setCategoryId(value);
-                      edit.setSubcategoryId("");
-                    }}
-                    disabled={blocked}
-                    id="correction-category"
-                  />
-                  <Field>
-                    <FieldLabel htmlFor="correction-subcategory">
-                      Subcategory
-                    </FieldLabel>
-                    <NativeSelect
-                      id="correction-subcategory"
-                      className="w-full"
-                      value={edit.subcategoryId}
-                      disabled={blocked}
-                      onChange={(event) =>
-                        edit.setSubcategoryId(event.target.value)
-                      }
-                    >
-                      <NativeSelectOption value="">No subcategory</NativeSelectOption>
-                      {activity.classifications
-                        .filter(
-                          (item) =>
-                            item.parent_id === edit.categoryId &&
-                            (!item.archived || item.id === edit.subcategoryId),
-                        )
-                        .map((item) => (
-                          <NativeSelectOption key={item.id} value={item.id}>
-                            {item.name}
-                          </NativeSelectOption>
-                        ))}
-                     </NativeSelect>
-                  </Field>
-                </FieldGroup>
+                <FinancePlanCategories
+                  activity={activity}
+                  type={categoryType}
+                  value={edit.categoryId}
+                  onChange={(value) => {
+                    edit.setCategoryId(value);
+                    edit.setSubcategoryId("");
+                  }}
+                  subcategoryId={edit.subcategoryId}
+                  onSubcategoryChange={edit.setSubcategoryId}
+                  disabled={blocked}
+                  id="correction-category"
+                />
               )}
             {edit.fee && !refund && (
               <FieldSet className="gap-4 rounded-xl bg-muted/50 p-4">
@@ -297,47 +270,20 @@ export function FinanceCorrection({
                     onValueChange={(value) => edit.setFeeAmount(value)}
                   />
                 </Field>
-                <FieldGroup className="gap-4">
-                  <FinancePlanCategories
-                    activity={activity}
-                    type={edit.fee.type === "income" ? "income" : "expense"}
-                    value={edit.feeCategoryId}
-                    onChange={(value) => {
-                      edit.setFeeCategoryId(value);
-                      edit.setFeeSubcategoryId("");
-                    }}
-                    disabled={blocked}
-                    id="correction-fee-category"
-                  />
-                  <Field>
-                    <FieldLabel htmlFor="correction-fee-subcategory">
-                      Fee subcategory
-                    </FieldLabel>
-                    <NativeSelect
-                      id="correction-fee-subcategory"
-                      className="w-full"
-                      value={edit.feeSubcategoryId}
-                      disabled={blocked}
-                      onChange={(event) =>
-                        edit.setFeeSubcategoryId(event.target.value)
-                      }
-                    >
-                      <NativeSelectOption value="">No subcategory</NativeSelectOption>
-                      {activity.classifications
-                        .filter(
-                          (item) =>
-                            item.parent_id === edit.feeCategoryId &&
-                            (!item.archived || item.id === edit.feeSubcategoryId),
-                        )
-                        .map((item) => (
-                          <NativeSelectOption key={item.id} value={item.id}>
-                            {item.name}
-                          </NativeSelectOption>
-                        ))}
-                    </NativeSelect>
-                  </Field>
-               </FieldGroup>
-             </FieldSet>
+                <FinancePlanCategories
+                  activity={activity}
+                  type={edit.fee.type === "income" ? "income" : "expense"}
+                  value={edit.feeCategoryId}
+                  onChange={(value) => {
+                    edit.setFeeCategoryId(value);
+                    edit.setFeeSubcategoryId("");
+                  }}
+                  subcategoryId={edit.feeSubcategoryId}
+                  onSubcategoryChange={edit.setFeeSubcategoryId}
+                  disabled={blocked}
+                  id="correction-fee-category"
+                />
+              </FieldSet>
             )}
             <FieldGroup className="gap-4">
               <Field>

@@ -81,6 +81,7 @@ port="$(node -e '
 
 export CHIBAKO_PORT="$port"
 export CHIBAKO_DATA_VOLUME="$vault_dir"
+export CHIBAKO_SETUP_TOKEN="$(node -e 'console.log(require("node:crypto").randomBytes(32).toString("hex"))')"
 
 die() {
   echo "SMOKE FAILED: $*" >&2
@@ -114,12 +115,12 @@ wait_for_health() {
 
 wait_for_health
 
-password="SmokePass-12345!"
+password="SmokePass-12345!strong"
 setup_status="$(curl -sS --max-time 5 -o "$response_file" -w '%{http_code}' \
   -X POST "http://127.0.0.1:$port/api/setup" \
   -H 'Content-Type: application/json' \
   -c "$cookie_jar" \
-  --data "$(printf '{\"password\":\"%s\"}' "$password")")"
+  --data "$(printf '{\"password\":\"%s\",\"setupToken\":\"%s\"}' "$password" "$CHIBAKO_SETUP_TOKEN")")"
 [[ "$setup_status" == "200" ]] || die "fresh setup returned HTTP $setup_status"
 grep -Fq '"ok":true' "$response_file" || die "fresh setup did not return ok=true"
 

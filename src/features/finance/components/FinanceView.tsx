@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconPlus } from "@tabler/icons-react";
+import { IconChevronDown, IconPlus } from "@tabler/icons-react";
 import { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
 import { useFinanceActivity } from "@/features/finance/use-finance-activity";
 import {
@@ -14,12 +14,12 @@ import { FinanceReports, FinanceBudgets } from "./FinanceReports";
 import { useFinanceBudget } from "@/features/finance/use-finance-budget";
 import { FinancePlans } from "./FinancePlans";
 import { FinanceGoals } from "./FinanceGoals";
+import { FinanceObligations } from "./FinanceObligations";
 import { useFinancePlanning } from "@/features/finance/use-finance-planning";
 import { useFinanceReports } from "@/features/finance/use-finance-reports";
 import { FinanceAccounts } from "./FinanceAccounts";
 import { FinanceAccountPanel } from "./FinanceAccountPanel";
 import { FinanceClassifications } from "./FinanceClassifications";
-import { FinanceImportInspection } from "./FinanceImportInspection";
 import { FinanceOverviewDashboard } from "./FinanceOverviewDashboard";
 import type { FinanceAccount } from "@/features/finance/types";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,6 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   }, [activity.notice, finance.notice, planning.notice]);
   const [transactionOpen, setTransactionOpen] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
-  const [inspectionOpen, setInspectionOpen] = useState(false);
   useEffect(() => {
     if (finance.notice) void refreshOptions();
   }, [finance.notice, refreshOptions]);
@@ -174,11 +173,15 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
                     }}
                   />
 
-                  <details className="mt-4 border-t border-border pt-3">
-                    <summary className="min-h-11 cursor-pointer font-heading text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
+                  <details className="group/details mt-3 overflow-hidden rounded-lg bg-card text-xs/relaxed ring-1 ring-foreground/10">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 font-heading text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                       Detailed spending reports
+                      <IconChevronDown
+                        aria-hidden="true"
+                        className="size-4 shrink-0 text-muted-foreground transition-transform [details[open]_&]:rotate-180"
+                      />
                     </summary>
-                    <div className="pt-4">
+                    <div className="px-3 pb-3">
                       <FinanceReports
                         reports={reports}
                         onCategory={(id) => {
@@ -209,9 +212,10 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           </div>
         )}
         {tab === "planning" && (
-          <div>
-            <FinanceBudgets budget={budget} activity={activity} />
+          <div className="flex flex-col gap-3">
+            <FinanceBudgets budget={budget} activity={activity} reports={reports} />
             <FinancePlans planning={planning} activity={activity} />
+            <FinanceObligations activity={activity} />
             <FinanceGoals />
           </div>
         )}
@@ -221,40 +225,8 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           </div>
         )}
         {tab === "manage" && (
-          <div>
+          <div className="flex flex-col gap-3">
             <FinanceClassifications activity={activity} />
-            <section className="mt-8 border-t border-border pt-5">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-semibold">
-                    Tarsi migration preview
-                  </h3>
-                  <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-                    Choose a Tarsi backup and review its structure without writing
-                    anything. Review reconciled balances, mappings, and
-                    exclusions. Commit requires a recoverable backup and separate
-                    confirmation.
-                  </p>
-                </div>
-                <Button variant="outline" onClick={() => setInspectionOpen(true)}>
-                  Inspect backup
-                </Button>
-              </div>
-            </section>
-            <FinanceImportInspection
-              open={inspectionOpen}
-              onClose={(committed) => {
-                setInspectionOpen(false);
-                if (committed) {
-                  void Promise.all([
-                    refreshAfterPlan(),
-                    activity.refreshOptions(),
-                    planning.refresh(),
-                  ]);
-                  window.dispatchEvent(new Event("finance-changed"));
-                }
-              }}
-            />
           </div>
         )}
       </div>

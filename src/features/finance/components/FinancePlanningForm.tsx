@@ -193,6 +193,8 @@ export function FinancePlanningForm({
           type={type}
           value={category}
           onChange={form.changeCategory}
+          subcategoryId={subcategory}
+          onSubcategoryChange={setSubcategory}
           disabled={busy}
           id="schedule-category"
         />
@@ -248,38 +250,15 @@ export function FinancePlanningForm({
           />
         )}
         {recurring && <FinanceScheduleFields form={form} />}
-        {(form.subcategories.length > 0 || recurring) && (
+        {recurring && (
           <details
             className="rounded-xl border border-border p-4"
-            open={association || subcategory ? true : undefined}
+            open={association ? true : undefined}
           >
             <summary className="cursor-pointer text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
               More options
             </summary>
             <FieldGroup className="mt-4">
-              {form.subcategories.length > 0 && (
-                <Field>
-                  <FieldLabel htmlFor="schedule-subcategory">
-                    Subcategory
-                  </FieldLabel>
-                  <NativeSelect
-                    id="schedule-subcategory"
-                    className="w-full"
-                    value={subcategory}
-                    disabled={busy}
-                    onChange={(event) => setSubcategory(event.target.value)}
-                  >
-                    <NativeSelectOption value="">
-                      No subcategory
-                    </NativeSelectOption>
-                    {form.subcategories.map((row) => (
-                      <NativeSelectOption key={row.id} value={row.id}>
-                        {row.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-              )}
               {recurring &&
                 (reminders.error ? (
                   <Alert>

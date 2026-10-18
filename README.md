@@ -178,8 +178,14 @@ agent memory**, that's the gap Chibako was built to fill.
 
 ```bash
 npm install
+cp .env.example .env.local
+# Set CHIBAKO_SETUP_TOKEN in .env.local to the output of: openssl rand -hex 32
 npm run dev        # http://localhost:3000 → run the one-time setup
 ```
+
+Enter the configured setup token and a unique password of at least 15 characters.
+After setup, remove the token from your environment file and restart the app.
+Existing vaults do not need a setup token; their passwords remain valid.
 
 Run `npm run lint` for ESLint (errors and warnings fail the check),
 `npm run typecheck` for route generation and TypeScript, and `npm test` for
@@ -200,6 +206,8 @@ host nginx is the public entrypoint.
    ```bash
    git clone https://github.com/jccd-dev/Chibako.git /opt/chibako
    cd /opt/chibako
+   cp .env.example .env
+   # Set CHIBAKO_SETUP_TOKEN in .env to: openssl rand -hex 32
    docker compose up -d --build
    ```
 
@@ -273,18 +281,36 @@ host nginx is the public entrypoint.
    curl -fsS https://your-domain.com/api/health
    ```
 
-5. Open `https://your-domain.com/setup` and complete the one-time setup over
-   HTTPS. Use a long, unique admin password; setup is one-time and cannot be
-   repeated after the password is stored.
+5. Once nginx overwrites `X-Chibako-Client-IP` and direct public access to the
+   app is blocked, set `CHIBAKO_TRUST_PROXY=true` in `.env` and recreate the
+   container. Leave it false for direct/local access.
 
-The app also applies a five-attempt-per-minute limit per client address to
-`/api/login` and `/api/setup` in each application process, using a capped
-in-memory table. With this nginx template, nginx overwrites the dedicated
-`X-Chibako-Client-IP` header from `$remote_addr`; the app never uses
-`X-Forwarded-For`. Direct/local requests
-without the proxy header share a bounded fallback bucket, so keep the app
-loopback-only. If you run multiple app processes, add a shared or
-trusted-proxy rate limiter before exposing auth.
+   Open `https://your-domain.com/setup`, enter the configured setup token,
+   and choose a unique admin password of at least 15 characters. Setup fails
+   closed unless `CHIBAKO_SETUP_TOKEN` contains at least 32 characters. After
+   setup, remove the token from `.env` and recreate the container. Setup
+   cannot be repeated after the password is stored.
+
+Login, setup, and current-password verification share a five-attempt-per-minute
+client limit and a 50-attempt-per-minute vault-wide limit. Counters live in SQLite
+and survive app restarts; workers using the same vault share them. Attempts over
+the limit receive HTTP 429 with `Retry-After`; blocked requests do not extend the
+window. During an attack these limits can temporarily delay legitimate login.
+Only accepted attempts are counted, including successful authentication and
+malformed credentials, before password hashing or setup writes.
+
+By default, all clients share the five-attempt bucket and client-IP headers are
+ignored. Enable `CHIBAKO_TRUST_PROXY=true` only behind the trusted nginx proxy;
+it overwrites `X-Chibako-Client-IP` from `$remote_addr`. `X-Forwarded-For` is never
+used. The app must remain loopback-only. Client identifiers are hashed in the
+limiter table and expired rows are removed on the next authentication attempt.
+The trusted-proxy setting also controls client identity for remote MCP throttling.
+
+New passwords must contain 15–1024 characters and pass a small local common-password
+blocklist; this is not a comprehensive breached-password check. Existing passwords
+continue to work until changed. Upgrading an initialized vault needs no setup token.
+Before upgrading production, review its proxy settings separately; no production
+configuration is changed by these repository templates.
 
 ## 🤖 Connect your AI agent
 
@@ -319,6 +345,16 @@ exposed.
 
 Remote MCP exposes only tools allowed by the key. `notes:purge` is separate
 from ordinary writes, and embedding indexing is intentionally local-only.
+
+Finance access requires explicit scopes, even on wildcard keys: `finance:read`
+for balances and reports, `finance:write` for activity, and `finance:manage` for
+definitions and settings. Moving goal money requires both write and manage;
+Finance Note links also require `notes:read`. Start with `get_finance_overview`
+or `get_finance_attention`, then use filtered, paginated lists and request
+`include_details` only when needed. For mutations, reuse the same `request_id`
+when retrying an unchanged request and supply the current resource version
+where required. Local stdio does not run automatic schedules; those require
+the running Next.js server.
 
 ### Advanced: local stdio MCP
 

@@ -31,7 +31,6 @@ import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
 import { authorizeFinance, authorizeFinanceNotes } from "../server/auth/finance-authorization";
 import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
-import { listTarsiImportSummaries, listTarsiImportSummariesSchema } from "../features/finance/import-read";
 import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
 import { postTransfer, reconcileAccount, valueAsset } from "../features/finance/movements";
 import { correctActivity, hideActivity, revertActivity, recordRefund } from "../features/finance/corrections";
@@ -66,7 +65,7 @@ function deny(): { content: [{ type: "text"; text: string }]; isError: true } {
 
 function ok(data: object) {
   const structuredContent = { ...data };
-  const text = JSON.stringify(structuredContent, null, 2);
+  const text = JSON.stringify(structuredContent);
   if (Buffer.byteLength(text) > 512 * 1024) {
     return fail("result exceeds 512 KiB; narrow the query or use pagination");
   }
@@ -105,7 +104,7 @@ export function createMcpServer(options: McpServerOptions): McpServer {
   const authorized = (required: readonly string[]) => (options.exposure === "local" && options.scopes === null) || (options.scopes !== null && hasAnyScope(options.scopes, required));
   const server = new McpServer(
     { name: "chibako", version: "0.1.0" },
-    { instructions: "Start with get_knowledge_schema. Use recall or search_notes before loading full notes, prefer ingest_note for context, and only use write tools when the user intends to change the Vault." },
+    { instructions: "For Notes, start with get_knowledge_schema, then use recall or search_notes before loading full notes; prefer ingest_note for context. For Finance, start with get_finance_overview or get_finance_attention, then use bounded list/read tools for details. Use stable request_id values for retries and current versions for edits. Only use write tools when the user intends the change." },
   );
 
 if (authorized(["notes:read"])) server.registerTool("list_notes", {
@@ -410,25 +409,22 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     server.registerTool("get_finance_note_links", {
       title: "Read finance Note links", description: "Explicitly read linked Note titles for one Activity record. Requires finance:read plus notes:read. Note content and editing use independent Note tools.",
       inputSchema: getActivityNoteLinksSchema,
+      annotations: READ_ONLY,
     }, ({ id }) => financeResult("finance:read", actor => ({ ...getActivityNoteLinks(actor, id) })));
     server.registerTool("list_finance_note_choices", {
       title: "Choose a Note for finance", description: "Bounded title-only lookup outside Trash. Requires finance:read plus notes:read. Does not change Notes or create links automatically.",
       inputSchema: financeNoteChoicesSchema,
+      annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...getFinanceNoteChoices(actor, args) })));
   }
   if (notesAuthorized() && financeAuthorized("finance:write")) {
     server.registerTool("set_finance_note_links", {
       title: "Set finance Note links", description: "Replace the optional Note links on one Activity record, or remove all with note_ids: []. Requires finance:write plus notes:read, request_id and current version. Never changes Notes or balances. Up to 20 links.",
       inputSchema: setActivityNoteLinksSchema.extend({ id: getActivityNoteLinksSchema.shape.id }),
+      annotations: { ...MUTATING, idempotentHint: true },
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
   }
   if (financeAuthorized("finance:read")) {
-    server.registerTool("list_finance_imports", {
-      title: "Read Tarsi import summaries",
-      description: "List completed Tarsi migrations with compact counts. Explicitly set include_details=true to read private import results and retained source records. Requires finance:read; this tool cannot commit or restore imports.",
-      inputSchema: listTarsiImportSummariesSchema,
-      annotations: READ_ONLY,
-    }, args => financeResult("finance:read", actor => listTarsiImportSummaries(actor, args)));
     server.registerTool("list_finance_obligations", {
       title: "List debts and receivables", description: "Paginated obligations with optional due dates and overdue flags as_of a local calendar day (default today). Outstanding debt and receivable totals include archived definitions and remain separate from cash/assets. Creating a definition has no cash effect.",
       inputSchema: listObligationsSchema, annotations: READ_ONLY,
@@ -454,7 +450,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: listGoalAccountsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listGoalAccounts(actor, args) })));
     server.registerTool("list_finance_schedules", {
-      title: "List recurring finance schedules", description: "Bounded recurrence definitions, active or paused, with calendar intervals and optional end dates. No automatic posting or generation. Text/tags require include_details.",
+      title: "List recurring finance schedules", description: "Read bounded recurrence definitions, active or paused, with calendar intervals and optional end dates. This listing does not generate occurrences or post cash; automatic schedules are handled by the running Next server. Text/tags require include_details.",
       inputSchema: listSchedulesSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listSchedules(actor, args) })));
     server.registerTool("get_finance_schedule", {
@@ -470,7 +466,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: getPlanSchema, annotations: READ_ONLY,
     }, ({ id, ...args }) => financeResult("finance:read", actor => ({ plan: getPlan(actor, id, args) })));
     server.registerTool("get_finance_report", {
-      title: "Spending and budget report", description: "Exact PHP category spending, monthly income/spending trends and unbudgeted spending across all accounts. Date range defaults to this month, at most 12 calendar months; categories paginated up to 100. Hidden activity counts, reverted does not; refunds reduce spending on refund dates. Budget totals are full calendar-month limits even for partial date ranges. Pending forecasts follow due dates, separate from actuals and budget consumption.",
+      title: "Spending and budget report", description: "Exact PHP category spending, daily and monthly income/spending trends and unbudgeted spending across all accounts. Date range defaults to this month, at most 12 calendar months; categories paginated up to 100. Hidden activity counts, reverted does not; refunds reduce spending on refund dates. Budget totals are full calendar-month limits even for partial date ranges. Pending forecasts follow due dates, separate from actuals and budget consumption.",
       inputSchema: financeReportSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...getFinanceReport(actor, args) })));
     server.registerTool("get_finance_budget", {
