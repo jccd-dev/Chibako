@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { getNote, listNotes } from "@/lib/notes";
-import { NoteClient } from "@/components/NoteClient";
+import { NoteRoute } from "@/features/notes/components/NoteWorkspace";
 import { isNoteDate } from "@/features/calendar/note-dates";
-import type { ViewMode } from "@/components/NoteClient";
+import type { ViewMode } from "@/features/notes/components/NoteClient";
 
 function viewFromCookie(value: string | undefined): ViewMode | undefined {
   return value === "write" || value === "edit" || value === "split" || value === "preview" ? value : undefined;
@@ -20,12 +20,14 @@ export default async function NotePage({ params, searchParams }: {
   if (id === "new") {
     const requestedDate = (await searchParams).date;
     const draftDate = typeof requestedDate === "string" && isNoteDate(requestedDate) ? requestedDate : undefined;
-    return <NoteClient initial={null} allNotes={listNotes()} draftDate={draftDate} initialView={initialView} />;
+    // The note tree is not a navigation concern — it is fetched once and cached
+    // on the client, so switching notes costs only this note's own payload.
+    return <NoteRoute initial={null} draftDate={draftDate} initialView={initialView} />;
   }
   const note = getNote(id);
   if (!note) {
     const home = listNotes().find((n) => n.kind === "index");
     redirect(home ? `/app/note/${home.id}` : "/app");
   }
-  return <NoteClient initial={note} allNotes={listNotes()} initialView={initialView} />;
+  return <NoteRoute initial={note} initialView={initialView} />;
 }

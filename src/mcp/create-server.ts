@@ -29,10 +29,35 @@ import { reindexEmbeddings, embeddingStatus } from "../lib/embedding-index";
 import { getKnowledgeSchema } from "../features/schema/knowledge-schema";
 import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
+import { authorizeFinance, authorizeFinanceNotes } from "../server/auth/finance-authorization";
+import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
+import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
+import { postTransfer, reconcileAccount, valueAsset } from "../features/finance/movements";
+import { correctActivity, hideActivity, revertActivity, recordRefund } from "../features/finance/corrections";
+import { correctActivitySchema, activityActionSchema, recordRefundSchema } from "../features/finance/correction-types";
+import { postTransferSchema, postAdjustmentSchema } from "../features/finance/movement-types";
+import { getActivityNoteLinks, setActivityNoteLinks, getFinanceNoteChoices } from "../features/finance/note-links";
+import { getActivityNoteLinksSchema, setActivityNoteLinksSchema, financeNoteChoicesSchema } from "../features/finance/note-link-types";
+import { createPlan, getPlan, listPlans, updatePlan, cancelPlan, postPlan, matchPlan } from "../features/finance/planning";
+import { createSchedule, getSchedule, listSchedules, updateSchedule, pauseSchedule, resumeSchedule, catchUpPlans, skipPlans } from "../features/finance/recurrence";
+import { createScheduleSchema, getScheduleSchema, listSchedulesSchema, updateScheduleSchema, scheduleActionSchema, catchUpPlansSchema, skipPlansSchema } from "../features/finance/recurrence-types";
+import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema } from "../features/finance/planning-types";
+import { getBudget, setBudget, getFinanceReport } from "../features/finance/budgets";
+import { getFinanceAttention, getFinanceOverview } from "../features/finance/overview";
+import { createObligation, updateObligation, getObligation, listObligations, postObligationMovement, postObligationPayment, closeObligation, getObligationPaymentHistory } from "../features/finance/obligations";
+import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema, postObligationPaymentSchema, closeObligationSchema, obligationHistorySchema } from "../features/finance/obligation-types";
+import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts, moveGoalMoney } from "../features/finance/goals";
+import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema, moveGoalMoneySchema } from "../features/finance/goal-types";
+import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
+import { financeAttentionSchema } from "../features/finance/overview-types";
+import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
+import { postTransactionSchema, listTransactionsSchema, getTransactionSchema, activityTotalsSchema, createClassificationSchema, updateClassificationSchema, listClassificationsSchema } from "../features/finance/activity-types";
+import { createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema, FinanceError, type FinanceActor, type FinanceScope } from "../features/finance/types";
 
 export interface McpServerOptions {
   scopes: readonly string[] | null;
   exposure: "local" | "remote";
+  financeActor?: FinanceActor;
 }
 function deny(): { content: [{ type: "text"; text: string }]; isError: true } {
   return { content: [{ type: "text", text: "unauthorized: API key lacks the required scope" }], isError: true };
@@ -40,7 +65,7 @@ function deny(): { content: [{ type: "text"; text: string }]; isError: true } {
 
 function ok(data: object) {
   const structuredContent = { ...data };
-  const text = JSON.stringify(structuredContent, null, 2);
+  const text = JSON.stringify(structuredContent);
   if (Buffer.byteLength(text) > 512 * 1024) {
     return fail("result exceeds 512 KiB; narrow the query or use pagination");
   }
@@ -76,10 +101,10 @@ const MUTATING = { readOnlyHint: false, destructiveHint: false, idempotentHint: 
 const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
 
 export function createMcpServer(options: McpServerOptions): McpServer {
-  const authorized = (required: readonly string[]) => options.scopes === null || hasAnyScope(options.scopes, required);
+  const authorized = (required: readonly string[]) => (options.exposure === "local" && options.scopes === null) || (options.scopes !== null && hasAnyScope(options.scopes, required));
   const server = new McpServer(
     { name: "chibako", version: "0.1.0" },
-    { instructions: "Start with get_knowledge_schema. Use recall or search_notes before loading full notes, prefer ingest_note for context, and only use write tools when the user intends to change the Vault." },
+    { instructions: "For Notes, start with get_knowledge_schema, then use recall or search_notes before loading full notes; prefer ingest_note for context. For Finance, start with get_finance_overview or get_finance_attention, then use bounded list/read tools for details. Use stable request_id values for retries and current versions for edits. Only use write tools when the user intends the change." },
   );
 
 if (authorized(["notes:read"])) server.registerTool("list_notes", {
@@ -359,5 +384,269 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
   return ok(getVaultStats());
 });
 
+  const financeActor: FinanceActor | undefined = options.scopes === null
+    ? options.exposure === "local" ? { kind: "trusted-local" } : undefined
+    : options.financeActor?.kind === "api-key"
+      ? { kind: "api-key", id: options.financeActor.id, scopes: options.scopes }
+      : undefined;
+  const financeAuthorized = (scope: FinanceScope) => {
+    if (!financeActor) return false;
+    try { authorizeFinance(financeActor, scope); return true; } catch { return false; }
+  };
+  const financeResult = (scope: FinanceScope, operation: (actor: FinanceActor) => object) => {
+    if (!financeActor || !financeAuthorized(scope)) return deny();
+    try { return ok(operation(financeActor)); } catch (error) {
+      if (error instanceof FinanceError) return fail(`${error.code}: ${error.message}`);
+      console.error(error);
+      return fail("internal_error: Finance operation failed");
+    }
+  };
+  const notesAuthorized = () => {
+    if (!financeActor) return false;
+    try { authorizeFinanceNotes(financeActor); return true; } catch { return false; }
+  };
+  if (notesAuthorized() && financeAuthorized("finance:read")) {
+    server.registerTool("get_finance_note_links", {
+      title: "Read finance Note links", description: "Explicitly read linked Note titles for one Activity record. Requires finance:read plus notes:read. Note content and editing use independent Note tools.",
+      inputSchema: getActivityNoteLinksSchema,
+      annotations: READ_ONLY,
+    }, ({ id }) => financeResult("finance:read", actor => ({ ...getActivityNoteLinks(actor, id) })));
+    server.registerTool("list_finance_note_choices", {
+      title: "Choose a Note for finance", description: "Bounded title-only lookup outside Trash. Requires finance:read plus notes:read. Does not change Notes or create links automatically.",
+      inputSchema: financeNoteChoicesSchema,
+      annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...getFinanceNoteChoices(actor, args) })));
+  }
+  if (notesAuthorized() && financeAuthorized("finance:write")) {
+    server.registerTool("set_finance_note_links", {
+      title: "Set finance Note links", description: "Replace the optional Note links on one Activity record, or remove all with note_ids: []. Requires finance:write plus notes:read, request_id and current version. Never changes Notes or balances. Up to 20 links.",
+      inputSchema: setActivityNoteLinksSchema.extend({ id: getActivityNoteLinksSchema.shape.id }),
+      annotations: { ...MUTATING, idempotentHint: true },
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...setActivityNoteLinks(actor, id, args) })));
+  }
+  if (financeAuthorized("finance:read")) {
+    server.registerTool("list_finance_obligations", {
+      title: "List debts and receivables", description: "Paginated obligations with optional due dates and overdue flags as_of a local calendar day (default today). Outstanding debt and receivable totals include archived definitions and remain separate from cash/assets. Creating a definition has no cash effect.",
+      inputSchema: listObligationsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listObligations(actor, args) })));
+    server.registerTool("get_finance_obligation", {
+      title: "Inspect an obligation", description: "Read a debt or receivable, opening, paid, written-off and outstanding principal, status, due date and current version. No cash movement.",
+      inputSchema: getObligationSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ obligation: getObligation(actor, id, args) })));
+    server.registerTool("get_finance_obligation_history", {
+      title: "Read obligation payment history", description: "Bounded newest-first payment and write-off history. Text and linked cash details require include_details=true.",
+      inputSchema: obligationHistorySchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => getObligationPaymentHistory(actor, id, args)));
+    server.registerTool("list_finance_goals", {
+      title: "List savings goals", description: "Paginated PHP savings goals with held money, optional linked account and achievement, active by default. Unlinked savings are held in the goal and included once in money totals. Funding allocations identify remaining contributions, not source reservations.",
+      inputSchema: listGoalsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listGoals(actor, args) })));
+    server.registerTool("get_finance_goal", {
+      title: "Inspect savings goal", description: "Read a goal's held money, linked account, target and remaining funding contributions. Account shortfalls describe linked account holdings, not missing cash at original funding sources.",
+      inputSchema: getGoalSchema, annotations: READ_ONLY,
+    }, ({ id }) => financeResult("finance:read", actor => ({ goal: getGoal(actor, id) })));
+    server.registerTool("list_finance_goal_accounts", {
+      title: "Read reservable money", description: "Paginated money accounts with cash, reserved money, unreserved money and shortfalls. Active accounts by default. Reservation totals never add to cash; negative cash deficits remain separate from uncovered reservations.",
+      inputSchema: listGoalAccountsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listGoalAccounts(actor, args) })));
+    server.registerTool("list_finance_schedules", {
+      title: "List recurring finance schedules", description: "Read bounded recurrence definitions, active or paused, with calendar intervals and optional end dates. This listing does not generate occurrences or post cash; automatic schedules are handled by the running Next server. Text/tags require include_details.",
+      inputSchema: listSchedulesSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listSchedules(actor, args) })));
+    server.registerTool("get_finance_schedule", {
+      title: "Inspect recurring schedule", description: "Read one recurrence definition. Personal text/tags require include_details.",
+      inputSchema: getScheduleSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ schedule: getSchedule(actor, id, args) })));
+    server.registerTool("list_finance_plans", {
+      title: "Review finance plans and occurrences", description: "Bounded one-time and recurring income/expense plans, pending by default, ordered by due date including overdue and upcoming. Filter due-date range, schedule_id, account, type or status. Plans have no cash effects; text/tags require include_details.",
+      inputSchema: listPlansSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listPlans(actor, args) })));
+    server.registerTool("get_finance_plan", {
+      title: "Inspect finance plan", description: "Read one plan and satisfaction link. Personal text/tags require include_details: true.",
+      inputSchema: getPlanSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ plan: getPlan(actor, id, args) })));
+    server.registerTool("get_finance_report", {
+      title: "Spending and budget report", description: "Exact PHP category spending, daily and monthly income/spending trends and unbudgeted spending across all accounts. Date range defaults to this month, at most 12 calendar months; categories paginated up to 100. Hidden activity counts, reverted does not; refunds reduce spending on refund dates. Budget totals are full calendar-month limits even for partial date ranges. Pending forecasts follow due dates, separate from actuals and budget consumption.",
+      inputSchema: financeReportSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...getFinanceReport(actor, args) })));
+    server.registerTool("get_finance_budget", {
+      title: "Monthly category budget", description: "Read one top-level expense category's limit and schedule version for YYYY-MM. Null limit means no budget; version 0 means no schedule exists.",
+      inputSchema: getBudgetSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ budget: getBudget(actor, args) })));
+    server.registerTool("list_finance_activity", {
+      title: "Finance activity", description: "Bounded dated activity including refunds, transfers and adjustments. Hidden and reverted records require explicit hidden/reverted filters (false, true, all). Search by date, account, category, type or text/tag. Compact by default; explicitly request include_details for text, tags and timestamps.",
+      inputSchema: listTransactionsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listTransactions(actor, args) })));
+    server.registerTool("get_finance_transaction", {
+      title: "Inspect finance transaction", description: "Inspect one posted transaction. Personal text and tags require include_details: true.",
+      inputSchema: getTransactionSchema, annotations: READ_ONLY,
+    }, ({ id, ...args }) => financeResult("finance:read", actor => ({ transaction: getTransaction(actor, id, args) })));
+    server.registerTool("get_finance_activity_totals", {
+      title: "Monthly finance totals", description: "Exact PHP income and spending by transaction calendar month (YYYY-MM), defaulting to this month. Excludes openings and assets.",
+      inputSchema: activityTotalsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...getActivityTotals(actor, args) })));
+    server.registerTool("list_finance_classifications", {
+      title: "Finance categories and tags", description: "Bounded categories, subcategories and tags. Income and expense types remain separate; archived entries require an explicit filter.",
+      inputSchema: listClassificationsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listClassifications(actor, args) })));
+    server.registerTool("list_finance_accounts", {
+      title: "List finance accounts", description: "Bounded PHP accounts with exact cent balances. Defaults to active accounts, 50 per page; filter archived or kind explicitly.",
+      inputSchema: listAccountsSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...listAccounts(actor, args) })));
+    server.registerTool("get_finance_account", {
+      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version.",
+      inputSchema: getAccountSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ account: getAccount(actor, args.id) })));
+    server.registerTool("get_finance_summary", {
+      title: "Finance summary", description: "Separate money and asset totals in PHP integer cents, including archived holdings. Openings do not count as income or spending.",
+      inputSchema: z.object({}).strict(), annotations: READ_ONLY,
+    }, () => financeResult("finance:read", actor => ({ ...getFinanceSummary(actor) })));
+    server.registerTool("get_finance_overview", {
+      title: "Finance overview", description: "Compact summary-first holdings with cash, assets, reserved goal money, debt and receivable totals. Reservation and obligation totals remain separate from cash.",
+      inputSchema: z.object({}).strict(), annotations: READ_ONLY,
+    }, () => financeResult("finance:read", actor => ({ ...getFinanceOverview(actor) })));
+    server.registerTool("get_finance_attention", {
+      title: "Finance attention queue", description: "Bounded upcoming and overdue plans, obligation due dates, current-month budget overruns and account allocation shortfalls. Text and personal obligation names are omitted; use the linked review capability for detail.",
+      inputSchema: financeAttentionSchema, annotations: READ_ONLY,
+    }, args => financeResult("finance:read", actor => ({ ...getFinanceAttention(actor, args) })));
+  }
+  if (financeAuthorized("finance:write")) {
+    const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("record_finance_borrowing_lending", {
+      title: "Record actual borrowing or lending", description: "Borrowing adds cash and debt principal; lending removes cash and adds receivable principal. Neither counts as income or spending. Supply an existing obligation_id and version, or a name/optional due_date to create the linked obligation atomically (also requires finance:manage). Requires finance:write, request_id, actual amount/account/transaction_date. Corrections in Activity require both activity version and obligation_version. Delete preserves effects; Revert cancels both.",
+      inputSchema: postObligationMovementSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...postObligationMovement(actor, args) })));
+    server.registerTool("post_finance_obligation_payment", {
+      title: "Pay debt principal or collect receivable", description: "Record a dated partial principal payment/collection under finance:write. Supply the obligation version. Optionally link one existing compatible income/expense activity by id and current cash_activity_version; account, amount and date must match. Existing history gets no second cash effect. Hidden, reverted, refunded, transfer-linked, fee and cashback-linked activities are rejected. Optional fee {type, amount, category_id?, subcategory_id?} posts explicit separate income/expense atomically and follows payment correction/Delete/Revert. Linking existing cash cannot post a fee.",
+      inputSchema: postObligationPaymentSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...postObligationPayment(actor, args) })));
+    server.registerTool("catch_up_finance_plans", {
+      title: "Catch up recurring pending review", description: "Generate at most 1000 pending recurring occurrences through through_date (default today), plus one next upcoming per active schedule, respecting slot limits. This call has no cash effects; automatic schedules are posted separately by the running server when their local due time arrives. Requires finance:write and request_id. Repeat with fresh request IDs while has_more; identical retries return the original result.",
+      inputSchema: catchUpPlansSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...catchUpPlans(actor, args) })));
+    server.registerTool("skip_finance_plans", {
+      title: "Bulk skip pending plans", description: "Skip up to 100 distinct pending plans/occurrences atomically, without cash effects. Supply plans [{id,version}], request_id. Any stale or non-pending entry rejects the entire batch.",
+      inputSchema: skipPlansSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...skipPlans(actor, args) })));
+    server.registerTool("create_finance_plan", {
+      title: "Plan one-time income or expense", description: "Create pending PHP activity with due_date and expected amount/account, without changing balances or actual spending. Optional logged_time (HH:mm, default 00:00) and timezone (IANA, default UTC). Requires finance:write and request_id.",
+      inputSchema: createPlanSchema, annotations,
+    }, args => financeResult("finance:write", actor => createPlan(actor, args)));
+    server.registerTool("update_finance_plan", {
+      title: "Edit or reschedule pending plan", description: "Change expected fields or due_date while pending. Recurring occurrences accept nullable obligation_id for debt expense or receivable income reminders. No cash effect. Requires request_id and current plan version.",
+      inputSchema: updatePlanSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => updatePlan(actor, id, args)));
+    server.registerTool("cancel_finance_plan", {
+      title: "Cancel pending plan", description: "Cancel expected activity without cash movement. Cancelled plans remain inspectable. Requires request_id and current plan version.",
+      inputSchema: planActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => cancelPlan(actor, id, args)));
+    server.registerTool("post_finance_plan", {
+      title: "Post actual activity from a plan", description: "Explicitly confirm actual positive PHP amount, active money account and transaction_date. Post once atomically and satisfy the plan; request retries return original results. Requires current plan version. An obligation-linked recurring reminder also requires obligation_version: amount is principal, with optional explicit fee {type,amount,category_id?,subcategory_id?}. Optional cash_activity_id/current cash_activity_version links compatible existing cash without reposting; no fee can be posted when linking cash. Revert reopens it; Delete preserves satisfaction.",
+      inputSchema: postPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...postPlan(actor, id, args) })));
+    server.registerTool("match_finance_plan", {
+      title: "Match manually recorded activity", description: "Explicitly select same-type unreverted income/expense not linked to a plan or transfer fee; cashback income cannot be matched. Actual amount/account/date may differ. No new cash effect. Requires request_id, current plan version and transaction_version. Obligation reminders instead select an existing principal payment of that same obligation, requiring obligation_version. Matching changes no principal progress or cash again. One transaction satisfies one plan; Revert reopens and Delete preserves satisfaction.",
+      inputSchema: matchPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...matchPlan(actor, id, args) })));
+    server.registerTool("correct_finance_activity", {
+      title: "Correct finance activity", description: "Replace mistaken amount, account, date or details atomically. Amount is a PHP decimal; adjustments accept a signed difference, not a new target balance. Transfer source is account_id, destination is destination_account_id; a linked fee moves with it. Optional fee correction requires its version. Expense cashback follows account/date changes; percentage cashback recalculates, fixed cashback stays unchanged and cannot exceed the corrected expense. Correct the expense rather than its cashback income. Refunds retain their expense/category link. Requires current version and request_id; returns affected balances.",
+      inputSchema: correctActivitySchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...correctActivity(actor, id, args) })));
+    server.registerTool("hide_finance_activity", {
+      title: "Delete finance activity (hide only)", description: "Hide a record from default Activity without cancelling balances or reports. Transfer fee hides with its transfer; cashback income hides with its expense. Requires current version and request_id. Inspect with hidden filters. Linked plan satisfaction is retained.",
+      inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...hideActivity(actor, id, args) })));
+    server.registerTool("revert_finance_activity", {
+      title: "Revert mistaken finance activity", description: "Cancel financial/reporting effects once, including a transfer's linked fee and an expense's cashback income. Revert cashback through its original expense. Revert active refunds before their expense (including fees). Refund reversion cancels its own credit and spending reduction. Linked plans reopen when their transaction is reverted. Requires current version and request_id; identical retries return the original result.",
+      inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...revertActivity(actor, id, args) })));
+    server.registerTool("record_finance_refund", {
+      title: "Record a dated expense refund", description: "Link a full/partial positive PHP refund to expense id, credit its receiving money account, and reduce spending in the expense category on transaction_date, never as income. Active totals cannot exceed the expense. Requires expense version and request_id; increments expense version.",
+      inputSchema: recordRefundSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...recordRefund(actor, id, args) })));
+    server.registerTool("post_finance_transfer", {
+      title: "Transfer money", description: "Atomically move a positive PHP amount between two active money accounts. Optional categorized fee is a linked expense deducted from the source. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
+      inputSchema: postTransferSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...postTransfer(actor, args) })));
+    server.registerTool("reconcile_finance_account", {
+      title: "Reconcile money account", description: "Compare actual_balance (signed PHP decimal) to expected_balance_cents from a recent read. Append the dated difference, never overwrite the opening. Reject a changed balance. Requires request_id and transaction_date. Excluded from income/spending.",
+      inputSchema: postAdjustmentSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...reconcileAccount(actor, args) })));
+    server.registerTool("value_finance_asset", {
+      title: "Adjust asset valuation", description: "Record actual_balance as the new tracked asset value by appending a dated difference from expected_balance_cents. Active asset accounts only, no cash or income/spending effects. Requires request_id and transaction_date.",
+      inputSchema: postAdjustmentSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...valueAsset(actor, args) })));
+    server.registerTool("post_finance_transaction", {
+      title: "Record income or expense", description: "Post actual PHP activity to an active money account. Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string} atomically records Cashback income to the same account/date. Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking.",
+      inputSchema: postTransactionSchema, annotations,
+    }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
+  }
+  if (financeAuthorized("finance:manage")) {
+    server.registerTool("create_finance_obligation", {
+      title: "Define a debt or receivable", description: "Create a debt (owner owes) or receivable (owner is owed) without moving cash. Optional principal records money already outstanding; default zero. Optional due_date. Use borrowing/lending to record actual cash, never record the same principal twice. Requires finance:manage and request_id.",
+      inputSchema: createObligationSchema, annotations: { ...MUTATING, idempotentHint: true },
+    }, args => financeResult("finance:manage", actor => createObligation(actor, args)));
+    server.registerTool("update_finance_obligation", {
+      title: "Manage an obligation", description: "Rename, change/clear due_date, archive or restore a definition with its current version. No cash or principal change; archived principal remains in totals. Requires finance:manage and request_id. Correct actual borrowing/lending through Activity.",
+      inputSchema: updateObligationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations: { ...MUTATING, idempotentHint: true },
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateObligation(actor, id, args)));
+    server.registerTool("close_finance_obligation", {
+      title: "Write off remaining obligation", description: "Close an open obligation by writing off exactly its remaining principal with an explicit reason. No cash or report effect. Requires finance:manage, request_id and current obligation version.",
+      inputSchema: closeObligationSchema.extend({ id: getObligationSchema.shape.id }), annotations: { ...MUTATING, idempotentHint: true },
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => closeObligation(actor, id, args)));
+    const annotations = { ...MUTATING, idempotentHint: true };
+    server.registerTool("create_finance_goal", {
+      title: "Create savings goal", description: "Create a positive PHP target, optional due date and optional linked_account_id. Starts empty. Deposits debit a source and credit the linked account, or stay held in the goal if unlinked.",
+      inputSchema: createGoalSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createGoal(actor, args)));
+    server.registerTool("update_finance_goal", {
+      title: "Edit or archive savings goal", description: "Update name, target, due date or linked_account_id, or archive an empty goal. Changing linked_account_id requires finance:write too and moves the saved balance between backing locations; null holds money in the goal. Withdraw all money before archiving. Requires request_id and current version.",
+      inputSchema: updateGoalSchema.safeExtend({ id: getGoalSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateGoal(actor, id, args)));
+    if (financeAuthorized("finance:write")) server.registerTool("set_finance_goal_allocation", {
+      title: "Set goal funding from an account", description: "Compatibility absolute per-source PHP holding. Increasing moves the difference out of the source into the goal's linked account or goal-held money. Decreasing returns the difference to that account. Requires finance:manage, finance:write, request_id and goal version. Prefer move_finance_goal_money for new deposits or withdrawals. Never income or spending.",
+      inputSchema: setGoalAllocationSchema.extend({ id: getGoalSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => setGoalAllocation(actor, id, args)));
+    if (financeAuthorized("finance:write")) server.registerTool("move_finance_goal_money", {
+      title: "Add or withdraw goal money", description: "Move a positive PHP amount into or out of a goal. direction is deposit or withdrawal; account_id is the source for deposits or destination for withdrawals. Deposits debit the source and credit the linked account, or stay held in an unlinked goal. Withdrawals debit goal holdings and credit the chosen account. Neither is income or spending. Requires finance:manage, finance:write, request_id and current goal version.",
+      inputSchema: moveGoalMoneySchema.extend({ id: getGoalSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => moveGoalMoney(actor, id, args)));
+    server.registerTool("create_finance_schedule", {
+      title: "Create recurring finance schedule", description: "Create income/expense expectations every N day/week/month/year from start_date to optional end_date. Month/year dates clamp to month-end from the original anchor. handling defaults to manual. Automatic handling also requires finance:write and posts at logged_time in the IANA timezone while the Next server runs, including missed dates after restart. Obligation reminders require manual handling. Optional max_occurrences or total_limit (PHP decimal) cap scheduled slots including skips; no partial final payment. Imported schedules remain manual and may start paused. Requires finance:manage and request_id.",
+      inputSchema: createScheduleSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createSchedule(actor, args)));
+    server.registerTool("update_finance_schedule", {
+      title: "Edit this and future occurrences", description: "Change a schedule from selected pending from_plan_id onward, including nullable obligation_id. Requires schedule version, from_plan_version and request_id. Earlier occurrences and satisfied history remain intact. For one occurrence use update_finance_plan. Cadence changes cancel obsolete future pending expectations and restart from selected/new start_date. Slot caps retain the earlier slot count. Total-limit slots use the current amount. Manual schedules need catch-up; automatic schedules run on the server. Editing an automatic schedule also requires finance:write.",
+      inputSchema: updateScheduleSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateSchedule(actor, id, args)));
+    server.registerTool("pause_finance_schedule", {
+      title: "Pause recurring schedule", description: "Stop new occurrences, retaining every existing pending occurrence for review. Requires finance:manage, request_id and current schedule version.",
+      inputSchema: scheduleActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => pauseSchedule(actor, id, args)));
+    server.registerTool("resume_finance_schedule", {
+      title: "Resume recurring schedule", description: "Explicitly resume a paused schedule from its next future anchored due date, skipping dates while paused. Existing pending review and history remain. Requires finance:manage, request_id and current version; automatic schedules also require finance:write.",
+      inputSchema: scheduleActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => resumeSchedule(actor, id, args)));
+    server.registerTool("set_finance_budget", {
+      title: "Set monthly expense budget", description: "Set a non-negative PHP decimal limit for a top-level expense category. Includes subcategories across all accounts, no rollover. Requires request_id and current category schedule version (0 to create). Mode forward replaces limits/corrections from chosen YYYY-MM onward, preserving earlier months; correction changes only that month. Overspending never blocks posting.",
+      inputSchema: setBudgetSchema, annotations,
+    }, args => financeResult("finance:manage", actor => setBudget(actor, args)));
+    server.registerTool("create_finance_classification", {
+      title: "Create category or tag", description: "Create a typed income/expense category, one-level subcategory or untyped tag. Requires request_id.",
+      inputSchema: createClassificationSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createClassification(actor, args)));
+    server.registerTool("update_finance_classification", {
+      title: "Manage category or tag", description: "Rename or archive a classification, preserving history. Requires request_id and current version.",
+      inputSchema: updateClassificationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateClassification(actor, id, args)));
+    server.registerTool("create_finance_account", {
+      title: "Create finance account", description: "Create a PHP money (Debit in the UI) or asset account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Optional account_group and include_in_summary (default true). Requires request_id; identical retries return the original account.",
+      inputSchema: createAccountSchema, annotations,
+    }, args => financeResult("finance:manage", actor => createAccount(actor, args)));
+    server.registerTool("update_finance_account", {
+      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, or edit maintaining_balance on a money account. Changing maintaining_balance changes net balance by the same difference. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
+      inputSchema: updateAccountSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => updateAccount(actor, id, args)));
+  }
   return server;
 }

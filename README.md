@@ -178,8 +178,18 @@ agent memory**, that's the gap Chibako was built to fill.
 
 ```bash
 npm install
+cp .env.example .env.local
+# Set CHIBAKO_SETUP_TOKEN in .env.local to the output of: openssl rand -hex 32
 npm run dev        # http://localhost:3000 → run the one-time setup
 ```
+
+Enter the configured setup token and a unique password of at least 15 characters.
+After setup, remove the token from your environment file and restart the app.
+Existing vaults do not need a setup token; their passwords remain valid.
+
+Run `npm run lint` for ESLint (errors and warnings fail the check),
+`npm run typecheck` for route generation and TypeScript, and `npm test` for
+the Node test suite. Next.js generates `next-env.d.ts`; it is not tracked in Git.
 
 ## 🚢 Deploy to your VPS (Docker Compose + nginx)
 
@@ -196,6 +206,8 @@ host nginx is the public entrypoint.
    ```bash
    git clone https://github.com/jccd-dev/Chibako.git /opt/chibako
    cd /opt/chibako
+   cp .env.example .env
+   # Set CHIBAKO_SETUP_TOKEN in .env to: openssl rand -hex 32
    docker compose up -d --build
    ```
 
@@ -269,18 +281,36 @@ host nginx is the public entrypoint.
    curl -fsS https://your-domain.com/api/health
    ```
 
-5. Open `https://your-domain.com/setup` and complete the one-time setup over
-   HTTPS. Use a long, unique admin password; setup is one-time and cannot be
-   repeated after the password is stored.
+5. Once nginx overwrites `X-Chibako-Client-IP` and direct public access to the
+   app is blocked, set `CHIBAKO_TRUST_PROXY=true` in `.env` and recreate the
+   container. Leave it false for direct/local access.
 
-The app also applies a five-attempt-per-minute limit per client address to
-`/api/login` and `/api/setup` in each application process, using a capped
-in-memory table. With this nginx template, nginx overwrites the dedicated
-`X-Chibako-Client-IP` header from `$remote_addr`; the app never uses
-`X-Forwarded-For`. Direct/local requests
-without the proxy header share a bounded fallback bucket, so keep the app
-loopback-only. If you run multiple app processes, add a shared or
-trusted-proxy rate limiter before exposing auth.
+   Open `https://your-domain.com/setup`, enter the configured setup token,
+   and choose a unique admin password of at least 15 characters. Setup fails
+   closed unless `CHIBAKO_SETUP_TOKEN` contains at least 32 characters. After
+   setup, remove the token from `.env` and recreate the container. Setup
+   cannot be repeated after the password is stored.
+
+Login, setup, and current-password verification share a five-attempt-per-minute
+client limit and a 50-attempt-per-minute vault-wide limit. Counters live in SQLite
+and survive app restarts; workers using the same vault share them. Attempts over
+the limit receive HTTP 429 with `Retry-After`; blocked requests do not extend the
+window. During an attack these limits can temporarily delay legitimate login.
+Only accepted attempts are counted, including successful authentication and
+malformed credentials, before password hashing or setup writes.
+
+By default, all clients share the five-attempt bucket and client-IP headers are
+ignored. Enable `CHIBAKO_TRUST_PROXY=true` only behind the trusted nginx proxy;
+it overwrites `X-Chibako-Client-IP` from `$remote_addr`. `X-Forwarded-For` is never
+used. The app must remain loopback-only. Client identifiers are hashed in the
+limiter table and expired rows are removed on the next authentication attempt.
+The trusted-proxy setting also controls client identity for remote MCP throttling.
+
+New passwords must contain 15–1024 characters and pass a small local common-password
+blocklist; this is not a comprehensive breached-password check. Existing passwords
+continue to work until changed. Upgrading an initialized vault needs no setup token.
+Before upgrading production, review its proxy settings separately; no production
+configuration is changed by these repository templates.
 
 ## 🤖 Connect your AI agent
 
@@ -316,11 +346,22 @@ exposed.
 Remote MCP exposes only tools allowed by the key. `notes:purge` is separate
 from ordinary writes, and embedding indexing is intentionally local-only.
 
+Finance access requires explicit scopes, even on wildcard keys: `finance:read`
+for balances and reports, `finance:write` for activity, and `finance:manage` for
+definitions and settings. Moving goal money requires both write and manage;
+Finance Note links also require `notes:read`. Start with `get_finance_overview`
+or `get_finance_attention`, then use filtered, paginated lists and request
+`include_details` only when needed. For mutations, reuse the same `request_id`
+when retrying an unchanged request and supply the current resource version
+where required. Local stdio does not run automatic schedules; those require
+the running Next.js server.
+
 ### Advanced: local stdio MCP
 
 When the client runs on the Chibako host and can read the Vault directory, it
 can launch `dist/mcp/server.mjs` with `CHIBAKO_DATA_DIR`. An optional
-`CHIBAKO_API_KEY` restricts its tools; without one, stdio has full local access.
+`CHIBAKO_API_KEY` restricts its tools. Only an unset variable grants full local
+stdio access; an empty or invalid configured key grants no access.
 Do not copy a VPS or Docker filesystem path into a client running on your
 laptop—the path is local to the machine that starts Node.
 
@@ -426,6 +467,65 @@ Contributors can check discovery before publishing without installing anything:
 npx skills add ./skills --list
 ```
 
+## Finance planning
+
+Finance → Planning uses one **Plans** list for recurring schedules and one-time
+plans. Filter by **All**, **Needs attention**, **Upcoming**, or **Paused**. Open a
+schedule to review its payments, log or match actual activity, skip a payment, or
+view recorded history. Use **Confirm** or **Confirm income** beside a pending payment
+to confirm actual activity inline in the same overview drawer, including early
+payments on automatic schedules. Recording or matching a recurring payment prepares
+the next payment automatically, including when paid early. Recorded payments are
+not posted again automatically. Due counts stay on the schedule instead
+of a separate queue. Payment history is shown newest first.
+
+Use **Edit plan** in the overview to change pending and future occurrences. **Delete plan**
+stops recurrence and cancels its pending payments while retaining recorded cash activity
+and audit history. Reverting recorded activity from a deleted schedule does not reopen
+its payments.
+
+Choose **Add plan**, then select income or expense. New plans default to recurring,
+monthly, and manual handling. Use **Set as recurring** to switch to a one-time plan,
+or choose a repeat preset or custom interval, handling, and ending controls.
+**Every 2 months** means exactly that; bi-weekly means every two weeks. The schedule preview shows the first and next dates before saving.
+
+Income and expense plans are expectations until posted or matched to actual activity.
+Recurring schedules support daily, weekly, monthly, and yearly intervals, plus custom
+interval counts. Month-end dates remain anchored: January 31 becomes February 28,
+then March 31. Plans and schedules store `logged_time` (`HH:mm`, default `00:00`),
+`timezone` (IANA, default `UTC`).
+
+Schedules default to `handling: "manual"`, including existing and imported schedules.
+Manual plans need confirmation before changing account balances. Opting into
+`handling: "automatic"` requires both `finance:manage` and `finance:write`.
+The running Next.js Node server checks automatic schedules at startup and every minute,
+even while the browser is closed. After downtime it catches up missed due dates in
+bounded batches. The server must stay running; static hosting, suspended/serverless
+processes, and the standalone MCP stdio process do not run this scheduler.
+Build and test phases do not start the runner. No external cron service is required.
+
+Handling belongs to each occurrence: editing "this and future" preserves earlier
+manual or automatic plans. The schedule handling sets the default for newly generated
+occurrences; each plan returns its own `handling`. Global pause stops all automatic
+occurrences of that schedule.
+
+Automatic plans post the expected amount/account once, on the schedule's local date
+and time. Paused schedules do not post. A skipped occurrence stays skipped; reverting
+a posted occurrence reopens it for manual review without automatic reposting. Failed
+posting leaves no partial financial effects, exposes `automatic_error` on its schedule,
+and retries on the next check. Linked debt/receivable reminders always use manual
+handling so principal and fees can be reviewed. Automatic posts use the trusted-local
+audit identity, and SQLite write transactions serialize competing server processes.
+
+Optional `max_occurrences` and `total_limit` (PHP decimal input, returned as
+`total_limit_cents`) cap scheduled slots, including skipped slots. A total allows only
+whole payments: PHP 25 at PHP 12 per slot creates two slots. It measures the planned
+budget at the current schedule amount, rather than actual posted spending. Changing
+the amount recalculates that slot budget; satisfied history stays unchanged. Cadence
+edits retain earlier consumed slots. Shortening limits cancels affected future pending
+slots; extending limits can restore boundary cancellations but never explicit skips.
+The inclusive `end_date` remains an additional boundary.
+
 ## 🔌 REST API reference
 
 | Method | Path | Scope | Description |
@@ -483,12 +583,16 @@ snapshot contains the vault, links, search index, API keys, and sessions.
 ## 🗂️ Project layout
 
 ```
-src/app/          pages + API route handlers
-src/lib/          db, auth, notes engine, markdown/wikilinks, api wrapper
-src/components/   sidebar, editor, preview, graph, settings, agent guide
-src/mcp/server.ts MCP stdio server (bundled to dist/mcp/server.mjs)
-nginx/            reverse-proxy template for the VPS
-docs/adr/         architecture decision records
+src/app/                  pages + thin API route handlers; remote MCP at /mcp
+src/features/             feature capabilities, client controllers, and components/
+src/components/           shared controls and UI primitives
+src/components/layout/    sidebar, top bar, workspace shell, command palette
+src/components/providers/ theme, appearance, and notifications
+src/server/               portable authorization and vault setup
+src/lib/                  db, notes engine, markdown/wikilinks, embeddings, shared utilities
+src/mcp/                  shared tool factory + local stdio adapter
+nginx/                    reverse-proxy template for self-hosting
+docs/adr/                 architecture decision records
 ```
 
 See `AGENTS.md` for developer conventions and `CONTEXT.md` for the domain

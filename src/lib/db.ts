@@ -13,6 +13,11 @@ export function dataDir(): string {
 let _db: Database.Database | null = null;
 
 const MIGRATIONS: string[] = [
+  `CREATE TABLE IF NOT EXISTS auth_attempts (
+    bucket TEXT PRIMARY KEY,
+    window_started_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL
+  );`,
   `CREATE TABLE IF NOT EXISTS folders (path TEXT PRIMARY KEY);`,
   `
   CREATE TABLE IF NOT EXISTS notes (
@@ -36,6 +41,9 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (source_id, target_title)
   );
   CREATE INDEX IF NOT EXISTS idx_links_target ON links (target_title);
+  -- Title lookups are case-insensitive, so the BINARY index above cannot serve
+  -- them. unlinkedMentions excludes already-linked notes with a NOCASE match.
+  CREATE INDEX IF NOT EXISTS idx_links_target_nocase ON links (target_title COLLATE NOCASE);
   `,
   `
   -- Full-text search over note title + content. id is stored (unindexed) so
@@ -116,6 +124,247 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_bookmarks_note ON bookmarks (note_id);
   `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_accounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('money', 'asset')),
+    currency TEXT NOT NULL CHECK (currency = 'PHP'),
+    opening_balance_cents INTEGER NOT NULL CHECK (typeof(opening_balance_cents) = 'integer' AND opening_balance_cents BETWEEN -9007199254740991 AND 9007199254740991),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991),
+    account_group TEXT NOT NULL DEFAULT '',
+    include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_accounts_list ON finance_accounts (archived, created_at, id);
+  CREATE TABLE IF NOT EXISTS finance_requests (
+    actor_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    result TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (actor_id, request_id)
+  );
+  CREATE TABLE IF NOT EXISTS finance_audit (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    affected_ids TEXT NOT NULL,
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (actor_id, request_id) REFERENCES finance_requests (actor_id, request_id) DEFERRABLE INITIALLY DEFERRED
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_audit_created ON finance_audit (created_at, id);
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_classifications (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('category', 'tag')),
+    type TEXT CHECK (type IN ('income', 'expense')),
+    name TEXT NOT NULL,
+    parent_id TEXT REFERENCES finance_classifications(id),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((kind = 'category' AND type IS NOT NULL) OR (kind = 'tag' AND type IS NULL AND parent_id IS NULL))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_classifications_list ON finance_classifications (kind, type, parent_id, name, id);
+  CREATE TABLE IF NOT EXISTS finance_transactions (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    transaction_date TEXT NOT NULL,
+    category_id TEXT REFERENCES finance_classifications(id),
+    subcategory_id TEXT REFERENCES finance_classifications(id),
+    text TEXT NOT NULL DEFAULT '',
+    tag_ids TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_transactions_date ON finance_transactions (transaction_date DESC, created_at DESC, id);
+  CREATE INDEX IF NOT EXISTS idx_finance_transactions_account ON finance_transactions (account_id, transaction_date);
+  CREATE INDEX IF NOT EXISTS idx_finance_transactions_category ON finance_transactions (category_id, transaction_date);
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_movements (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('transfer', 'reconciliation', 'valuation')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    destination_account_id TEXT REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN -9007199254740991 AND 9007199254740991),
+    transaction_date TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    tag_ids TEXT NOT NULL DEFAULT '[]',
+    fee_transaction_id TEXT UNIQUE REFERENCES finance_transactions(id),
+    compared_balance_cents INTEGER,
+    actual_balance_cents INTEGER,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((type = 'transfer' AND destination_account_id IS NOT NULL AND destination_account_id != account_id AND amount_cents > 0 AND compared_balance_cents IS NULL AND actual_balance_cents IS NULL)
+      OR (type != 'transfer' AND destination_account_id IS NULL AND fee_transaction_id IS NULL AND compared_balance_cents IS NOT NULL AND actual_balance_cents IS NOT NULL))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_movements_date ON finance_movements (transaction_date DESC, created_at DESC, id);
+  CREATE INDEX IF NOT EXISTS idx_finance_movements_account ON finance_movements (account_id, transaction_date);
+  CREATE INDEX IF NOT EXISTS idx_finance_movements_destination ON finance_movements (destination_account_id, transaction_date);
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_plans (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    due_date TEXT NOT NULL,
+    category_id TEXT REFERENCES finance_classifications(id),
+    subcategory_id TEXT REFERENCES finance_classifications(id),
+    text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'satisfied', 'cancelled')),
+    transaction_id TEXT UNIQUE REFERENCES finance_transactions(id),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    CHECK ((status = 'satisfied' AND transaction_id IS NOT NULL) OR (status != 'satisfied' AND transaction_id IS NULL))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_plans_due ON finance_plans(status, due_date, id);
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_budget_plans (
+    category_id TEXT PRIMARY KEY REFERENCES finance_classifications(id),
+    version INTEGER NOT NULL CHECK (version > 0)
+  );
+  CREATE TABLE IF NOT EXISTS finance_budget_limits (
+    category_id TEXT NOT NULL REFERENCES finance_budget_plans(category_id),
+    month TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('forward', 'correction')),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 0 AND 9007199254740991),
+    PRIMARY KEY (category_id, month, mode)
+  );
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_schedules (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('income','expense')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    category_id TEXT REFERENCES finance_classifications(id), subcategory_id TEXT REFERENCES finance_classifications(id),
+    text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+    interval_count INTEGER NOT NULL CHECK (interval_count BETWEEN 1 AND 10000),
+    interval_unit TEXT NOT NULL CHECK (interval_unit IN ('day','week','month','year')),
+    start_date TEXT NOT NULL, end_date TEXT, paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0,1)),
+    next_index INTEGER NOT NULL DEFAULT 0 CHECK (next_index >= 0), generation INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    CHECK (end_date IS NULL OR end_date >= start_date)
+  );
+  `,
+  `
+  -- Goal holdings are attributed to their funding accounts; cash effects are recorded separately.
+  CREATE TABLE IF NOT EXISTS finance_goals (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    target_cents INTEGER NOT NULL CHECK (typeof(target_cents) = 'integer' AND target_cents BETWEEN 1 AND 9007199254740991),
+    -- Retained for the draft dev schema; public progress is derived from allocations.
+    saved_cents INTEGER NOT NULL CHECK (typeof(saved_cents) = 'integer' AND saved_cents BETWEEN -9007199254740991 AND 9007199254740991),
+    due_date TEXT,
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_goals_list ON finance_goals (archived, created_at, id);
+  CREATE TABLE IF NOT EXISTS finance_goal_allocations (
+    goal_id TEXT NOT NULL REFERENCES finance_goals(id),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    PRIMARY KEY (goal_id, account_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_allocations_account ON finance_goal_allocations(account_id);
+  CREATE TABLE IF NOT EXISTS finance_goal_movements (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL REFERENCES finance_goals(id),
+    type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal', 'relocation')),
+    source_account_id TEXT REFERENCES finance_accounts(id),
+    destination_account_id TEXT REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL,
+    CHECK (source_account_id IS NOT NULL OR destination_account_id IS NOT NULL)
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_movements_goal ON finance_goal_movements(goal_id, created_at, id);
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_movements_source ON finance_goal_movements(source_account_id);
+  CREATE INDEX IF NOT EXISTS idx_finance_goal_movements_destination ON finance_goal_movements(destination_account_id);
+   `,
+  `
+  CREATE TABLE IF NOT EXISTS finance_obligations (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('debt','receivable')),
+    name TEXT NOT NULL,
+    opening_principal_cents INTEGER NOT NULL CHECK (typeof(opening_principal_cents) = 'integer' AND opening_principal_cents BETWEEN 0 AND 9007199254740991),
+    starting_progress_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(starting_progress_cents) = 'integer' AND starting_progress_cents BETWEEN 0 AND opening_principal_cents),
+    due_date TEXT,
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0,1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_obligations_due ON finance_obligations(due_date, id);
+  CREATE TABLE IF NOT EXISTS finance_obligation_movements (
+    id TEXT PRIMARY KEY,
+    obligation_id TEXT NOT NULL REFERENCES finance_obligations(id),
+    type TEXT NOT NULL CHECK (type IN ('borrowing','lending')),
+    account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+    amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+    transaction_date TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+    hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0,1)),
+    reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0,1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_obligation_movements_principal ON finance_obligation_movements(obligation_id, reverted);
+  CREATE INDEX IF NOT EXISTS idx_finance_obligation_movements_account ON finance_obligation_movements(account_id, reverted);
+  `,
+  `
+  WITH defaults(type, slug, name) AS (VALUES
+    ('income', 'salary', 'Salary'),
+    ('income', 'bonus', 'Bonus'),
+    ('income', 'freelance', 'Freelance'),
+    ('income', 'commission', 'Commission'),
+    ('income', 'business', 'Business'),
+    ('income', 'side-hustles', 'Side hustles'),
+    ('income', 'allowance', 'Allowance'),
+    ('income', 'gift', 'Gift'),
+    ('income', 'refund', 'Refund'),
+    ('income', 'cashback', 'Cashback'),
+    ('income', 'interest', 'Interest'),
+    ('income', 'dividend', 'Dividend'),
+    ('income', 'rental', 'Rental'),
+    ('income', 'others', 'Others'),
+    ('expense', 'food', 'Food'),
+    ('expense', 'transport', 'Transport'),
+    ('expense', 'phone', 'Phone'),
+    ('expense', 'bills', 'Bills'),
+    ('expense', 'shopping', 'Shopping'),
+    ('expense', 'fun', 'Fun'),
+    ('expense', 'health', 'Health'),
+    ('expense', 'fees', 'Fees'),
+    ('expense', 'subscriptions', 'Subscriptions'),
+    ('expense', 'other', 'Other')
+  )
+  INSERT OR IGNORE INTO finance_classifications (id, kind, type, name, created_at, updated_at)
+    SELECT 'default-' || type || ':' || slug, 'category', type, name, unixepoch(), unixepoch()
+    FROM defaults
+    WHERE NOT EXISTS (
+      SELECT 1 FROM finance_classifications c
+      WHERE c.kind = 'category' AND c.type = defaults.type AND c.parent_id IS NULL
+        AND c.name = defaults.name COLLATE NOCASE
+    );
+  `,
 ];
 
 export function getDb(): Database.Database {
@@ -147,6 +396,109 @@ export function getDb(): Database.Database {
     if (!embNames.has("content_hash")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`);
     if (!embNames.has("dim")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN dim INTEGER NOT NULL DEFAULT 0`);
     if (!embNames.has("input_version")) db.exec(`ALTER TABLE note_embeddings ADD COLUMN input_version INTEGER NOT NULL DEFAULT 1`);
+    const accountColumns = db.prepare("PRAGMA table_info(finance_accounts)").all() as Array<{ name: string }>;
+    const accountNames = new Set(accountColumns.map(column => column.name));
+    if (!accountNames.has("account_group")) db.exec("ALTER TABLE finance_accounts ADD COLUMN account_group TEXT NOT NULL DEFAULT ''");
+    if (!accountNames.has("include_in_summary")) db.exec("ALTER TABLE finance_accounts ADD COLUMN include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1))");
+    if (!accountNames.has("maintaining_balance_cents")) db.exec("ALTER TABLE finance_accounts ADD COLUMN maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991)");
+    const goalColumns = db.prepare("PRAGMA table_info(finance_goals)").all() as Array<{ name: string }>;
+    if (!goalColumns.some(column => column.name === "linked_account_id")) {
+      db.exec(`ALTER TABLE finance_goals ADD COLUMN linked_account_id TEXT REFERENCES finance_accounts(id);
+        INSERT INTO finance_goal_movements (id, goal_id, type, source_account_id, amount_cents, created_at)
+          SELECT 'goal-migration:' || a.goal_id || ':' || a.account_id, a.goal_id, 'deposit', a.account_id, a.amount_cents, g.updated_at
+          FROM finance_goal_allocations a JOIN finance_goals g ON g.id = a.goal_id WHERE g.archived = 0;`);
+    }
+    for (const table of ["finance_transactions", "finance_movements"]) {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      const existing = new Set(columns.map(column => column.name));
+      if (!existing.has("hidden")) db.exec(`ALTER TABLE ${table} ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))`);
+      if (!existing.has("reverted")) db.exec(`ALTER TABLE ${table} ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0, 1))`);
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_cashbacks (
+      expense_id TEXT PRIMARY KEY REFERENCES finance_transactions(id) ON DELETE CASCADE,
+      income_id TEXT NOT NULL UNIQUE REFERENCES finance_transactions(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL CHECK (mode IN ('percent', 'amount')), value TEXT NOT NULL
+    );`);
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_refunds (
+      id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES finance_transactions(id),
+      account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+      transaction_date TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', tag_ids TEXT NOT NULL DEFAULT '[]',
+      hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0, 1)),
+      version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS idx_finance_refunds_expense ON finance_refunds(expense_id);`);
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_note_links (
+      activity_id TEXT NOT NULL,
+      note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+      PRIMARY KEY (activity_id, note_id)
+    ); CREATE INDEX IF NOT EXISTS idx_finance_note_links_note ON finance_note_links(note_id);`);
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_obligation_payments (
+      id TEXT PRIMARY KEY, obligation_id TEXT NOT NULL REFERENCES finance_obligations(id),
+      cash_activity_id TEXT NOT NULL UNIQUE REFERENCES finance_transactions(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+      created_at INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS idx_finance_obligation_payments_obligation ON finance_obligation_payments(obligation_id, created_at, id);
+    CREATE TABLE IF NOT EXISTS finance_obligation_writeoffs (
+      id TEXT PRIMARY KEY, obligation_id TEXT NOT NULL REFERENCES finance_obligations(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents BETWEEN 1 AND 9007199254740991),
+      reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 2000), created_at INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS idx_finance_obligation_writeoffs_obligation ON finance_obligation_writeoffs(obligation_id, created_at, id);`);
+    const obligationColumns = new Set((db.prepare("PRAGMA table_info(finance_obligations)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!obligationColumns.has("starting_progress_cents")) db.exec("ALTER TABLE finance_obligations ADD COLUMN starting_progress_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(starting_progress_cents) = 'integer' AND starting_progress_cents BETWEEN 0 AND opening_principal_cents)");
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_import_migrations (
+      id TEXT PRIMARY KEY, source_hash TEXT NOT NULL UNIQUE, proposal_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL, result_json TEXT NOT NULL
+    ); CREATE TABLE IF NOT EXISTS finance_import_records (
+      id INTEGER PRIMARY KEY,
+      migration_id TEXT NOT NULL REFERENCES finance_import_migrations(id), collection TEXT NOT NULL,
+      source_id TEXT NOT NULL, source_path TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('imported','skipped','excluded')),
+      reason TEXT, source_json TEXT NOT NULL
+    );`);
+    const importRecordColumns = new Set((db.prepare("PRAGMA table_info(finance_import_records)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!importRecordColumns.has("id")) {
+      db.exec(`ALTER TABLE finance_import_records RENAME TO finance_import_records_legacy;
+        CREATE TABLE finance_import_records (
+          id INTEGER PRIMARY KEY,
+          migration_id TEXT NOT NULL REFERENCES finance_import_migrations(id), collection TEXT NOT NULL,
+          source_id TEXT NOT NULL, source_path TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('imported','skipped','excluded')),
+          reason TEXT, source_json TEXT NOT NULL
+        );
+        INSERT INTO finance_import_records (id,migration_id,collection,source_id,source_path,status,reason,source_json)
+          SELECT rowid,migration_id,collection,source_id,source_path,status,reason,source_json FROM finance_import_records_legacy;
+        DROP TABLE finance_import_records_legacy;`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_finance_import_records_status ON finance_import_records(migration_id,status,collection);
+      CREATE INDEX IF NOT EXISTS idx_finance_import_records_identity ON finance_import_records(migration_id,collection,source_id);`);
+    const planColumns = new Set((db.prepare("PRAGMA table_info(finance_plans)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!planColumns.has("schedule_id")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_id TEXT REFERENCES finance_schedules(id)");
+    if (!planColumns.has("occurrence_date")) db.exec("ALTER TABLE finance_plans ADD COLUMN occurrence_date TEXT");
+    if (!planColumns.has("schedule_generation")) db.exec("ALTER TABLE finance_plans ADD COLUMN schedule_generation INTEGER");
+    if (!planColumns.has("cancel_reason")) db.exec("ALTER TABLE finance_plans ADD COLUMN cancel_reason TEXT");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_occurrence_identity ON finance_plans(schedule_id, schedule_generation, occurrence_date)");
+    for (const table of ["finance_plans", "finance_schedules"]) {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (!columns.some(column => column.name === "obligation_id")) db.exec(`ALTER TABLE ${table} ADD COLUMN obligation_id TEXT REFERENCES finance_obligations(id)`);
+    }
+    for (const table of ["finance_plans", "finance_schedules"]) {
+      const columns = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(column => column.name));
+      if (!columns.has("logged_time")) db.exec(`ALTER TABLE ${table} ADD COLUMN logged_time TEXT NOT NULL DEFAULT '00:00'`);
+      if (!columns.has("timezone")) db.exec(`ALTER TABLE ${table} ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'`);
+      if (table === "finance_plans") {
+        if (!columns.has("automatic_eligible")) db.exec("ALTER TABLE finance_plans ADD COLUMN automatic_eligible INTEGER NOT NULL DEFAULT 0 CHECK (automatic_eligible IN (0,1))");
+        if (!columns.has("slot_index")) db.exec("ALTER TABLE finance_plans ADD COLUMN slot_index INTEGER CHECK (slot_index >= 0)");
+        if (!columns.has("automatic_posted")) db.exec("ALTER TABLE finance_plans ADD COLUMN automatic_posted INTEGER NOT NULL DEFAULT 0 CHECK (automatic_posted IN (0,1)); UPDATE finance_plans SET automatic_posted=1 WHERE status='satisfied'");
+      } else {
+        if (!columns.has("handling")) db.exec("ALTER TABLE finance_schedules ADD COLUMN handling TEXT NOT NULL DEFAULT 'manual' CHECK (handling IN ('manual','automatic'))");
+        if (!columns.has("max_occurrences")) db.exec("ALTER TABLE finance_schedules ADD COLUMN max_occurrences INTEGER CHECK (max_occurrences BETWEEN 1 AND 4000000)");
+        if (!columns.has("total_limit_cents")) db.exec("ALTER TABLE finance_schedules ADD COLUMN total_limit_cents INTEGER CHECK (total_limit_cents IS NULL OR (typeof(total_limit_cents)='integer' AND total_limit_cents BETWEEN 1 AND 9007199254740991))");
+        if (!columns.has("slot_offset")) db.exec("ALTER TABLE finance_schedules ADD COLUMN slot_offset INTEGER NOT NULL DEFAULT 0 CHECK (slot_offset >= 0)");
+        if (!columns.has("automatic_error")) db.exec("ALTER TABLE finance_schedules ADD COLUMN automatic_error TEXT");
+        if (!columns.has("deleted_at")) db.exec("ALTER TABLE finance_schedules ADD COLUMN deleted_at INTEGER");
+      }
+    }
+    const paymentColumns = db.prepare("PRAGMA table_info(finance_obligation_payments)").all() as Array<{ name: string }>;
+    if (!paymentColumns.some(column => column.name === "fee_transaction_id")) db.exec("ALTER TABLE finance_obligation_payments ADD COLUMN fee_transaction_id TEXT REFERENCES finance_transactions(id)");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_payment_fee ON finance_obligation_payments(fee_transaction_id)");
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

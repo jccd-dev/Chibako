@@ -29,6 +29,33 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+test("updating session callbacks preserves edits and uses the latest handlers", async () => {
+  const pending = deferred<Note>();
+  const calls: string[] = [];
+  const original = note("existing");
+  const controller = createEditorSessionController(original, {
+    save: () => { calls.push("old save"); return pending.promise; },
+    onSaved: () => { calls.push("old saved"); },
+    onError: () => { calls.push("old error"); },
+  });
+  controller.patch({ content: "edited" });
+  const saving = controller.persist();
+  const before = controller.getSnapshot();
+  controller.updateEffects({
+    save: async () => { calls.push("new save"); return note("existing", { content: "next" }); },
+    onSaved: () => { calls.push("new saved"); },
+    onError: () => { calls.push("new error"); },
+  });
+  assert.equal(controller.getSnapshot(), before);
+  pending.resolve(note("existing", { content: "edited" }));
+  await saving;
+  controller.patch({ content: "next" });
+  await controller.persist();
+  assert.deepEqual(calls, ["old save", "new saved", "new save", "new saved"]);
+  assert.equal(controller.getSnapshot().content, "next");
+  assert.equal(controller.getSnapshot().dirty, false);
+});
+
 test("editor session serializes saves and keeps edits made during a request", async () => {
   const calls: Array<{ current: Note | null; patch: UpdateNoteInput; full: Record<string, unknown> }> = [];
   const pending = [deferred<Note>(), deferred<Note>()];
@@ -116,10 +143,11 @@ test("server refresh does not replace fields owned by pending or in-flight edits
 });
 
 test("document replacement flushes the old session before resetting it", async () => {
+  let saved = 0;
   const save = deferred<Note>();
   const controller = createEditorSessionController(note("old"), {
     save: async () => save.promise,
-    onSaved: () => {},
+    onSaved: () => { saved += 1; },
     onError: () => {},
   });
   controller.patch({ content: "unsent" });
@@ -131,16 +159,41 @@ test("document replacement flushes the old session before resetting it", async (
   assert.equal(controller.getSnapshot().content, "original");
   assert.equal(controller.getSnapshot().saveState, "saved");
   assert.equal(controller.shouldBlockUnload(), false);
+  assert.equal(saved, 1, "switch-flushed updates still notify cache consumers");
+});
+
+test("switch-flushed draft creation notifies caches without owning the destination route", async () => {
+  const notifications: Array<{ created: boolean; switching: boolean | undefined }> = [];
+  const controller = createEditorSessionController(null, {
+    save: async () => note("created", { title: "Draft", content: "draft body" }),
+    onSaved: (_note, created, switching) => { notifications.push({ created, switching }); },
+    onError: () => {},
+  });
+  controller.patch({ title: "Draft", content: "draft body" });
+  await controller.replaceDocument(note("destination"));
+  assert.deepEqual(notifications, [{ created: true, switching: true }]);
+  assert.equal(controller.getSnapshot().note?.id, "destination");
+});
+
+test("document replacement carries the requested draft's initial content", async () => {
+  const controller = createEditorSessionController(note("old"), {
+    save: async () => note("old"), onSaved: () => {}, onError: () => {},
+  });
+  await controller.replaceDocument(null, { content: "---\ndate: 2026-10-02\n---\n" });
+  assert.equal(controller.getSnapshot().content, "---\ndate: 2026-10-02\n---\n");
+  assert.equal(controller.getSnapshot().dirty, false);
 });
 
 test("document replacement suppresses stale save effects after a failed flush", async () => {
   const save = deferred<Note>();
   let errors = 0;
   let saved = 0;
+  const blocked: Array<string | null> = [];
   const controller = createEditorSessionController(note("old"), {
     save: async () => save.promise,
     onSaved: () => { saved += 1; },
     onError: () => { errors += 1; },
+    onSwitchBlocked: (title) => { blocked.push(title); },
   });
   controller.patch({ content: "unsent" });
   const replacement = controller.replaceDocument(note("new", { title: "New" }));
@@ -149,9 +202,102 @@ test("document replacement suppresses stale save effects after a failed flush", 
 
   assert.equal(errors, 0, "a failed save from the previous document is not reported for the new one");
   assert.equal(saved, 0);
-  assert.equal(controller.getSnapshot().note?.id, "new");
+  assert.deepEqual(blocked, ["Original"], "the blocked switch names the note that kept the text");
+  assert.equal(controller.getSnapshot().note?.id, "old");
+  assert.equal(controller.getSnapshot().saveState, "error");
+  assert.equal(controller.shouldBlockUnload(), true);
+});
+
+test("a switch away from an unflushable note is sent back to that note", async () => {
+  const controller = createEditorSessionController(note("old", { content: "original" }), {
+    save: async () => { throw new Error("offline"); },
+    onSaved: () => {},
+    onError: () => {},
+  });
+  controller.patch({ content: "typed but never saved" });
+  await controller.replaceDocument(note("new", { title: "New" }));
+  // The user tries a different note instead of retrying the save.
+  await controller.replaceDocument(note("other", { title: "Other" }));
+
+  assert.equal(controller.getSnapshot().note?.id, "old", "the route must land back on the note holding the text");
+  assert.equal(controller.getSnapshot().content, "typed but never saved");
+});
+
+test("a failed flush keeps the edited document instead of loading the server copy", async () => {
+  const save = deferred<Note>();
+  const controller = createEditorSessionController(note("old"), {
+    save: async () => save.promise,
+    onSaved: () => {},
+    onError: () => {},
+  });
+  controller.patch({ content: "typed but never saved" });
+  const replacement = controller.replaceDocument(note("new", { title: "New", content: "new body" }));
+  save.reject(new Error("offline"));
+  await replacement;
+
+  assert.equal(controller.getSnapshot().content, "typed but never saved", "the unsaved keystrokes survive the switch");
+  assert.equal(controller.getSnapshot().saveState, "error");
+  assert.equal(controller.getSnapshot().dirty, true);
+  assert.equal(controller.shouldBlockUnload(), true);
+});
+
+test("a later switch resumes from the unsaved document once the save recovers", async () => {
+  let failNext = true;
+  const saved: Array<string> = [];
+  const controller = createEditorSessionController(note("old", { content: "original" }), {
+    save: async (_current, patch) => {
+      if (failNext) {
+        failNext = false;
+        throw new Error("offline");
+      }
+      saved.push(patch.content as string);
+      return note("old", { content: patch.content });
+    },
+    onSaved: () => {},
+    onError: () => {},
+  });
+  controller.patch({ content: "typed but never saved" });
+  await controller.replaceDocument(note("new", { title: "New", content: "new body" }));
+  assert.equal(controller.getSnapshot().content, "typed but never saved");
+
+  await controller.persist();
+  assert.deepEqual(saved, ["typed but never saved"], "the recovered flush replays the text the user typed");
   assert.equal(controller.getSnapshot().saveState, "saved");
+  assert.equal(controller.getSnapshot().dirty, false);
+  await controller.replaceDocument(note("new", { title: "New", content: "new body" }));
+  assert.equal(controller.getSnapshot().note?.id, "new", "retry must release the failed-switch latch");
+  assert.equal(controller.getSnapshot().content, "new body");
+});
+
+test("a switch still replaces the document when the previous one flushed cleanly", async () => {
+  const controller = createEditorSessionController(note("old", { content: "original" }), {
+    save: async (_current, patch) => note("old", { content: patch.content as string }),
+    onSaved: () => {},
+    onError: () => {},
+  });
+  controller.patch({ content: "saved fine" });
+  await controller.replaceDocument(note("new", { title: "New", content: "new body" }));
+
+  assert.equal(controller.getSnapshot().note?.id, "new");
+  assert.equal(controller.getSnapshot().content, "new body");
+  assert.equal(controller.getSnapshot().saveState, "saved");
+  assert.equal(controller.getSnapshot().dirty, false);
   assert.equal(controller.shouldBlockUnload(), false);
+});
+
+test("an unsaved draft whose save failed is held against any other note", async () => {
+  const controller = createEditorSessionController(null, {
+    save: async () => { throw new Error("offline"); },
+    onSaved: () => {},
+    onError: () => {},
+  });
+  controller.patch({ title: "Typed draft", content: "draft body" });
+  // The draft has no id yet, so the switch to a real note must be refused.
+  await controller.replaceDocument(note("existing", { title: "Existing" }));
+
+  assert.equal(controller.getSnapshot().note, null, "the draft keeps holding the text");
+  assert.equal(controller.getSnapshot().content, "draft body");
+  assert.equal(controller.getSnapshot().saveState, "error");
 });
 
 test("unload blocking follows dirty state and disposal flushes pending edits", async () => {

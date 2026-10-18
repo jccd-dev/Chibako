@@ -5,6 +5,8 @@ services:
     environment:
       - DATA_DIR=/app/data
       - SITE_NAME=${SITE_NAME:-Chibako}
+      - CHIBAKO_SETUP_TOKEN=${CHIBAKO_SETUP_TOKEN:-}
+      - CHIBAKO_TRUST_PROXY=${CHIBAKO_TRUST_PROXY:-false}
     volumes:
       - ${CHIBAKO_DATA_VOLUME:-./data}:/app/data
     networks:

@@ -9,7 +9,7 @@ test('recall returns token-budgeted ranked snippets, never full bodies', async (
   process.env.CHIBAKO_DATA_DIR = vault;
   process.env.CHIBAKO_EMBEDDING_PROVIDER = '';
   process.env.CHIBAKO_EMBEDDING_API_KEY = '';
-  const { createNote, getNote, getNoteByTitle } = await import('../src/lib/notes');
+  const { createNote, getNoteByTitle } = await import('../src/lib/notes');
   const { recall } = await import('../src/lib/recall');
   const { getDb } = await import('../src/lib/db');
   try {

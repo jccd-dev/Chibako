@@ -1,0 +1,960 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import Link from "next/link";
+import Image from "next/image";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { IconCalendarMonth, IconChartPie, IconCreditCard, IconDotsVertical, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
+import type { NoteSummary, SearchResult } from "@/lib/notes";
+import { noteTreeCache } from "@/features/notes/note-tree-cache";
+import { notifyOrganizationChanged as notifyChanged, requestOrganizationChange as request } from "@/features/organization/organization-client";
+import type { NoteBatchInput } from "@/features/organization/note-batch";
+import type { Bookmark } from "@/lib/bookmarks";
+import { financeTabs, financeTabLabel, isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
+import { cn } from "@/lib/utils";
+import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { NoteLink } from "@/components/NoteLink";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from "@/components/ui/dropdown-menu";
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuGroup, ContextMenuItem } from "@/components/ui/context-menu";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+type Item = { type: "note" | "folder"; id: string; name: string; parent: string };
+type Action = { mode: "create" | "rename" | "move"; item: Item };
+const parentOf = (path: string) => path.split("/").slice(0, -1).join("/");
+const nameOf = (path: string) => path.split("/").at(-1)!;
+const join = (parent: string, name: string) => parent ? `${parent}/${name}` : name;
+const financeTabIcons: Record<FinanceTab, typeof IconWallet> = {
+  overview: IconLayoutDashboard,
+  activity: IconHistory,
+  planning: IconChartPie,
+  accounts: IconCreditCard,
+  manage: IconTags,
+};
+
+export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onExpand }: {
+  collapsed: boolean; mobile: boolean; mobileOpen: boolean;
+  onMobileOpenChange: (open: boolean) => void; onExpand: () => void;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const financeTabParam = searchParams.get("tab");
+  const financeTab: FinanceTab = isFinanceTab(financeTabParam) ? financeTabParam : "overview";
+  const onFinance = pathname === "/app/finance";
+
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [trash, setTrash] = useState<NoteSummary[]>([]);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [bookmarkDialog, setBookmarkDialog] = useState<{ noteId: string; group: string } | null>(null);
+  const [bmNewGroup, setBmNewGroup] = useState("");
+  const [dragBookmarkId, setDragBookmarkId] = useState<string | null>(null);
+  const [dropBookmarkId, setDropBookmarkId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [fileView, setFileView] = useState<"files" | "trash">("files");
+
+  // Search state
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchActive, setSearchActive] = useState(0);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchAbort = useRef<AbortController | null>(null);
+
+  const [action, setAction] = useState<Action | null>(null);
+  const [name, setName] = useState("");
+  const [parent, setParent] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState<Item | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<NoteSummary | null>(null);
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<Item | null>(null);
+  const [deleteNoteTarget, setDeleteNoteTarget] = useState<Item | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkMoveParent, setBulkMoveParent] = useState("");
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkPurgeOpen, setBulkPurgeOpen] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  const treeCache = useMemo(() => noteTreeCache(async () => {
+    const response = await fetch("/api/notes");
+    if (!response.ok) throw new Error("Could not load notes");
+    return response.json();
+  }), []);
+  const load = useCallback(() => {
+    return Promise.all([treeCache.read(), fetch("/api/trash"), fetch("/api/bookmarks")])
+      .then(async ([data, trashed, marks]) => {
+        if (!trashed.ok) throw new Error();
+        setNotes(data.notes as NoteSummary[]);
+        setFolders(data.folders);
+        setTrash((await trashed.json()).notes);
+        if (marks.ok) setBookmarks((await marks.json()).bookmarks);
+      })
+      .catch(() => { toast.error("Could not load notes. Try again."); });
+  }, [treeCache]);
+
+  // Refresh on focus or an explicit write. Navigation never changes the note
+  // tree, so refetching notes/trash/bookmarks on every switch is pure traffic.
+  useEffect(() => {
+    void load();
+    const refresh = () => { void load(); };
+    const focus = () => { treeCache.invalidate(); refresh(); };
+    window.addEventListener("focus", focus);
+    window.addEventListener("chibako:notes-changed", refresh);
+    return () => {
+      window.removeEventListener("focus", focus);
+      window.removeEventListener("chibako:notes-changed", refresh);
+    };
+  }, [load, treeCache]);
+
+  // Drop ids that no longer exist (deleted or purged elsewhere) so bulk actions
+  // never fire at rows that are gone.
+  const [selectionSources, setSelectionSources] = useState({ notes, trash });
+  if (selectionSources.notes !== notes || selectionSources.trash !== trash) {
+    setSelectionSources({ notes, trash });
+    const live = new Set([...notes.map(n => n.id), ...trash.map(n => n.id)]);
+    if ([...selected].some(id => !live.has(id))) setSelected(new Set([...selected].filter(id => live.has(id))));
+  }
+
+  const [previousSearchQuery, setPreviousSearchQuery] = useState(searchQuery);
+  if (previousSearchQuery !== searchQuery) {
+    setPreviousSearchQuery(searchQuery);
+    setSearchBusy(Boolean(searchQuery.trim()));
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setSearchActive(0);
+    }
+  }
+
+  // Live search effect
+  useEffect(() => {
+    searchAbort.current?.abort();
+    if (!searchQuery.trim()) {
+      return;
+    }
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      searchAbort.current?.abort();
+      const ctrl = new AbortController();
+      searchAbort.current = ctrl;
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`, { signal: ctrl.signal });
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data.results);
+          setSearchActive(0);
+        }
+      } catch {
+        // aborted or error
+      } finally {
+        if (searchAbort.current === ctrl) setSearchBusy(false);
+      }
+    }, 180);
+    return () => {
+      clearTimeout(searchTimer.current);
+      searchAbort.current?.abort();
+    };
+  }, [searchQuery]);
+
+  // Focus search input when search mode is activated
+  useEffect(() => {
+    if (searchMode && (!collapsed || mobileOpen)) {
+      const t = setTimeout(() => searchInputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [searchMode, collapsed, mobileOpen]);
+
+  // Auto-scroll selected search result item into view
+  useEffect(() => {
+    if (searchMode && searchResults.length > 0) {
+      const el = document.getElementById(`search-result-${searchActive}`);
+      el?.scrollIntoView({ block: "nearest" });
+    }
+  }, [searchActive, searchMode, searchResults.length]);
+
+  function activateSearch() {
+    setSearchMode(true);
+    if (collapsed) {
+      onExpand();
+    }
+    if (mobile && !mobileOpen) {
+      onMobileOpenChange(true);
+    }
+    // Finance swaps the panel for its own nav, so recovery lands on Notes.
+    if (onFinance) router.push("/app");
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent) {
+    if (searchResults.length === 0 && e.key !== "Escape") return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSearchActive((prev) => (searchResults.length ? (prev + 1) % searchResults.length : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSearchActive((prev) => (searchResults.length ? (prev - 1 + searchResults.length) % searchResults.length : 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const selected = searchResults[searchActive];
+      if (selected) {
+        router.push(`/app/note/${selected.id}`);
+        if (mobile) onMobileOpenChange(false);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if (searchQuery) {
+        setSearchQuery("");
+      } else {
+        setSearchMode(false);
+      }
+    }
+  }
+
+  function start(mode: Action["mode"], item: Item) {
+    setAction({ mode, item }); setName(mode === "create" ? "" : item.name);
+    setParent(item.parent); setError("");
+  }
+  function create(type: Item["type"], parent = "") { start("create", { type, parent, id: "", name: "" }); }
+  const multiSelect = (e: React.MouseEvent) => e.metaKey || e.ctrlKey || e.altKey;
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() { setSelected(prev => (prev.size ? new Set() : prev)); }
+  async function bulk(input: NoteBatchInput, failure = "Could not complete the action.", navigateAway = true) {
+    if (!input.ids.length || busy) return false;
+    setBusy(true);
+    try {
+      await request("/api/notes/batch", "POST", input);
+      setSelected(new Set());
+      if (navigateAway && input.ids.some(id => pathname === `/app/note/${id}`)) router.push("/app");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : failure);
+      return false;
+    } finally { setBusy(false); }
+  }
+  async function upload(files: FileList | null) {
+    const picked = [...(files ?? [])];
+    const markdown = picked.filter(f => /\.(md|markdown)$/i.test(f.name));
+    if (!markdown.length) { toast.error(picked.length ? "Only Markdown (.md) files can be imported." : "Pick a Markdown file to import."); return; }
+    setBusy(true);
+    const created: string[] = [];
+    const failed: string[] = [];
+    try {
+      for (const file of markdown) {
+        try {
+          const data = await request("/api/notes", "POST", { title: file.name.replace(/\.(md|markdown)$/i, ""), content: await file.text(), folder: selectedFolder ?? "" }, true);
+          if (!data.note) throw new Error("Could not create Note.");
+          created.push(data.note.id);
+        } catch { failed.push(file.name); }
+      }
+      if (created.length) notifyChanged();
+      if (failed.length) toast.error(`Could not import: ${failed.join(", ")}`);
+      if (created.length === 1) router.push(`/app/note/${created[0]}`);
+      else if (created.length) toast.success(`Imported ${created.length} files.`);
+    } finally { setBusy(false); }
+  }
+  async function move(item: Item, destination: string) {
+    if (item.parent === destination) return;
+    if (item.type === "folder") await request("/api/folders", "PATCH", { from: item.id, to: join(destination, item.name) });
+    else await request(`/api/notes/${item.id}`, "PATCH", { folder: destination });
+    setExpanded(prev => new Set(prev).add(destination));
+  }
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!action || busy) return;
+    const { mode, item } = action;
+    if (mode !== "move" && (!name.trim() || /[\/\\\x00-\x1f]/.test(name) || name === "." || name === "..")) {
+      setError("Enter a name without slashes or control characters."); return;
+    }
+    setBusy(true); setError("");
+    try {
+      if (mode === "move") await move(item, parent);
+      else if (item.type === "folder") {
+        await request("/api/folders", mode === "create" ? "POST" : "PATCH",
+          mode === "create" ? { path: join(parent, name.trim()) } : { from: item.id, to: join(item.parent, name.trim()) });
+      } else {
+        const data = await request(mode === "create" ? "/api/notes" : `/api/notes/${item.id}`,
+          mode === "create" ? "POST" : "PATCH", mode === "create" ? { title: name.trim(), folder: parent } : { title: name.trim() });
+        if (mode === "create") {
+          if (!data.note) throw new Error("Could not create Note.");
+          router.push(`/app/note/${data.note.id}`);
+        }
+      }
+      setAction(null);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save changes."); }
+    finally { setBusy(false); }
+  }
+  function validDrop(path: string) {
+    return dragging && !busy && dragging.parent !== path &&
+      (dragging.type !== "folder" || (path !== dragging.id && !path.startsWith(`${dragging.id}/`)));
+  }
+  function dropProps(path: string) {
+    return {
+      onDragOver(e: DragEvent) {
+        if (!dragging) return;
+        e.stopPropagation();
+        if (!validDrop(path)) { setDropTarget(null); return; }
+        e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(path);
+      },
+      onDragLeave(e: DragEvent) {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
+      },
+      async onDrop(e: DragEvent) {
+        if (!dragging) return;
+        e.preventDefault(); e.stopPropagation(); setDropTarget(null);
+        if (!validDrop(path)) return;
+        setBusy(true);
+        try {
+          const group = dragging.type === "note" && selected.has(dragging.id)
+            ? notes.filter(n => selected.has(n.id)).map(n => ({ type: "note" as const, id: n.id, name: n.title, parent: n.folder }))
+            : [dragging];
+          if (dragging.type === "note") {
+            await request("/api/notes/batch", "POST", { action: "move", ids: group.map(item => item.id), folder: path });
+            setExpanded(prev => new Set(prev).add(path));
+          } else {
+            await move(dragging, path);
+          }
+          if (group.length > 1) setSelected(new Set());
+        } catch (e) { toast.error(e instanceof Error ? e.message : "Could not move item."); }
+        finally { setBusy(false); setDragging(null); }
+      },
+    };
+  }
+  function dragProps(item: Item) {
+    return {
+      draggable: !busy,
+      onDragStart(e: DragEvent) { e.stopPropagation(); e.dataTransfer.setData("text/plain", item.id); e.dataTransfer.effectAllowed = "move"; setDragging(item); },
+      onDragEnd() { setDragging(null); setDropTarget(null); },
+    };
+  }
+  function actions(item: Item) {
+    const mark = item.type === "note" ? bookmarkByNote.get(item.id) : undefined;
+    return <ContextMenuGroup>
+      {item.type === "folder" && <><ContextMenuItem disabled={busy} onClick={() => create("note", item.id)}>New file</ContextMenuItem><ContextMenuItem disabled={busy} onClick={() => create("folder", item.id)}>New folder</ContextMenuItem></>}
+      {item.type === "note" && <ContextMenuItem disabled={busy} onClick={() => openBookmarkDialog(item.id)}>{mark ? "Edit bookmark" : "Bookmark"}</ContextMenuItem>}
+      <ContextMenuItem disabled={busy} onClick={() => start("rename", item)}>Rename</ContextMenuItem>
+      <ContextMenuItem disabled={busy} onClick={() => start("move", item)}>Move to…</ContextMenuItem>
+      {item.type === "folder"
+        ? <ContextMenuItem disabled={busy} variant="destructive" onClick={() => setDeleteFolderTarget(item)}>Delete folder</ContextMenuItem>
+        : <ContextMenuItem disabled={busy} variant="destructive" onClick={() => { if (selected.size > 1 && selected.has(item.id)) setBulkDeleteOpen(true); else setDeleteNoteTarget(item); }}>Delete</ContextMenuItem>}
+    </ContextMenuGroup>;
+  }
+  function menu(item: Item) {
+    return <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="sidebar-row-action" aria-label={`Actions for ${item.name}`} disabled={busy} />}><IconDotsVertical /></DropdownMenuTrigger>
+      <DropdownMenuContent align="end">{actions(item)}</DropdownMenuContent>
+    </DropdownMenu>;
+  }
+
+  // ---- bookmarks ----
+  const bookmarkByNote = new Map(bookmarks.map(b => [b.note_id, b]));
+  const titleByNoteId = useMemo(() => new Map(notes.map(n => [n.id, n.title])), [notes]);
+  const orderedBookmarks = useMemo(() =>
+    [...bookmarks].sort((a, b) => a.group_name.localeCompare(b.group_name) || a.sort - b.sort), [bookmarks]);
+  const bookmarkGroupNames = useMemo(() =>
+    [...new Set(bookmarks.map((b) => b.group_name).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [bookmarks]);
+  const flatBookmarks = orderedBookmarks.filter(b => !b.group_name);
+  const bookmarkGroups = useMemo(() => {
+    const map = new Map<string, Bookmark[]>();
+    for (const b of orderedBookmarks) {
+      if (!b.group_name) continue;
+      const list = map.get(b.group_name) ?? [];
+      list.push(b);
+      map.set(b.group_name, list);
+    }
+    return [...map.entries()];
+  }, [orderedBookmarks]);
+
+  async function reloadBookmarks() {
+    const res = await fetch("/api/bookmarks");
+    if (res.ok) setBookmarks((await res.json()).bookmarks);
+  }
+  function openBookmarkDialog(noteId: string) {
+    const existing = bookmarkByNote.get(noteId);
+    setBookmarkDialog({ noteId, group: existing?.group_name ?? "" });
+    setBmNewGroup("");
+  }
+  async function submitBookmark(e: React.FormEvent) {
+    e.preventDefault();
+    if (!bookmarkDialog) return;
+    const existing = bookmarkByNote.get(bookmarkDialog.noteId);
+    const group = bookmarkDialog.group === "__new__" ? bmNewGroup.trim() : bookmarkDialog.group;
+    const res = await fetch("/api/bookmarks", {
+      method: existing ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(existing
+        ? { id: existing.id, label: "", group_name: group }
+        : { note_id: bookmarkDialog.noteId, label: "", group_name: group }),
+    });
+    if (res.ok) { setBookmarkDialog(null); void reloadBookmarks(); }
+    else toast.error("Could not save bookmark.");
+  }
+  async function removeBookmark(id: string) {
+    const res = await fetch(`/api/bookmarks?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (res.ok) void reloadBookmarks(); else toast.error("Could not remove bookmark.");
+  }
+  function bookmarkDragProps(b: Bookmark) {
+    return {
+      draggable: true,
+      onDragStart(e: DragEvent) { e.stopPropagation(); e.dataTransfer.effectAllowed = "move"; setDragBookmarkId(b.id); },
+      onDragEnd() { setDragBookmarkId(null); setDropBookmarkId(null); },
+    };
+  }
+  function bookmarkDropProps(b: Bookmark) {
+    return {
+      onDragOver(e: DragEvent) {
+        if (!dragBookmarkId || dragBookmarkId === b.id) return;
+        e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; setDropBookmarkId(b.id);
+      },
+      onDragLeave(e: DragEvent) {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropBookmarkId(null);
+      },
+      async onDrop(e: DragEvent) {
+        e.preventDefault(); e.stopPropagation();
+        const from = dragBookmarkId;
+        setDropBookmarkId(null); setDragBookmarkId(null);
+        if (!from || from === b.id) return;
+        const ordered = orderedBookmarks.map(x => ({ id: x.id, group_name: x.group_name }));
+        const fromIdx = ordered.findIndex(x => x.id === from);
+        const targetIdx = ordered.findIndex(x => x.id === b.id);
+        if (fromIdx === -1 || targetIdx === -1) return;
+        const [moved] = ordered.splice(fromIdx, 1);
+        const target = ordered.find(x => x.id === b.id)!;
+        moved.group_name = target.group_name;
+        ordered.splice(ordered.findIndex(x => x.id === b.id), 0, moved);
+        try {
+          const res = await fetch("/api/bookmarks", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: ordered }) });
+          if (!res.ok) throw new Error();
+          void reloadBookmarks();
+        } catch { toast.error("Could not reorder bookmarks."); }
+      },
+    };
+  }
+  function bookmarkRow(b: Bookmark) {
+    const title = titleByNoteId.get(b.note_id) ?? "(missing note)";
+    const label = b.label || title;
+    return <div key={b.id} className={cn("flex items-center rounded-md", dropBookmarkId === b.id && "bg-accent ring-1 ring-primary")} {...bookmarkDragProps(b)} {...bookmarkDropProps(b)}>
+      <ContextMenu>
+        <ContextMenuTrigger className="flex min-w-0 flex-1">
+          <NoteLink noteId={b.note_id} title={title} className="tree-item min-w-0 flex-1" draggable={false}>
+            <IconBookmark size={14} /><span className="truncate">{label}</span>
+          </NoteLink>
+        </ContextMenuTrigger>
+        <ContextMenuContent><ContextMenuGroup>
+          <ContextMenuItem onClick={() => openBookmarkDialog(b.note_id)}>Edit bookmark</ContextMenuItem>
+          <ContextMenuItem variant="destructive" onClick={() => removeBookmark(b.id)}>Remove bookmark</ContextMenuItem>
+        </ContextMenuGroup></ContextMenuContent>
+      </ContextMenu>
+    </div>;
+  }
+  function noteRow(note: NoteSummary) {
+    const item: Item = { type: "note", id: note.id, name: note.title, parent: note.folder };
+    const picked = selected.has(note.id);
+    return <div key={note.id} data-accented={picked || undefined} className={cn("group/sidebar-row flex items-center rounded-md", picked && "bg-accent ring-1 ring-primary/40")} {...dragProps(item)}>
+      <ContextMenu>
+        <ContextMenuTrigger className="flex min-w-0 flex-1">
+          <NoteLink noteId={note.id} aria-current={pathname === `/app/note/${note.id}` ? "page" : undefined}
+            title={note.title} className={cn("tree-item min-w-0 flex-1", pathname === `/app/note/${note.id}` && "active")} draggable={false}
+            onClick={e => { setSelectedFolder(null); if (multiSelect(e)) { e.preventDefault(); toggleSelected(note.id); } else clearSelection(); }}>
+            <IconFile size={14} className="shrink-0" /><span className="truncate">{note.title}</span>
+          </NoteLink>
+        </ContextMenuTrigger>
+        <ContextMenuContent>{actions(item)}</ContextMenuContent>
+      </ContextMenu>{menu(item)}
+    </div>;
+  }
+  const hasItems = (path: string) =>
+    folders.some(folder => folder === path || folder.startsWith(`${path}/`)) ||
+    notes.some(note => note.folder === path || note.folder.startsWith(`${path}/`));
+  /** Folder destination picker, shared by create/rename/move and bulk move. */
+  function folderPicker(value: string, onChange: (value: string) => void, exclude?: Item, id?: string) {
+    const options = folders.filter(f => !exclude || exclude.type !== "folder" || (f !== exclude.id && !f.startsWith(`${exclude.id}/`)));
+    return <Select items={{ "": "Files (root)", ...Object.fromEntries(options.map(f => [f, f])) }} value={value} onValueChange={v => { if (v !== null) onChange(v); }}>
+      <SelectTrigger id={id} size="sm" className="w-full"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="">Files (root)</SelectItem>
+        {options.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+      </SelectContent>
+    </Select>;
+  }
+  function folderRow(path: string): React.ReactNode {
+    const item: Item = { type: "folder", id: path, name: nameOf(path), parent: parentOf(path) };
+    const open = expanded.has(path);
+    return <div key={path}>
+      <div data-accented={(dropTarget === path || selectedFolder === path) || undefined} className={cn("group/sidebar-row flex items-center rounded-md", (dropTarget === path || selectedFolder === path) && "bg-accent", dropTarget === path && "ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
+        <ContextMenu>
+          <ContextMenuTrigger className="flex min-w-0 flex-1">
+            <button className="tree-item min-w-0 flex-1" aria-expanded={open} aria-pressed={selectedFolder === path} onClick={() => {
+              setSelectedFolder(path);
+              clearSelection();
+              setExpanded(prev => {
+                const next = new Set(prev); if (next.has(path)) next.delete(path); else next.add(path); return next;
+              });
+            }}>
+              <IconChevron size={12} className={cn(open && "rotate-90")} />
+              <IconFolder size={14} filled={hasItems(path)} className={cn(hasItems(path) && "text-primary")} />
+              <span className="truncate">{item.name}</span>
+            </button>
+          </ContextMenuTrigger>
+          <ContextMenuContent>{actions(item)}</ContextMenuContent>
+        </ContextMenu>{menu(item)}
+      </div>
+      {open && <div {...dropProps(path)} className="ml-3 min-h-8 border-l border-border pl-1">{folders.filter(f => parentOf(f) === path).map(folderRow)}{notes.filter(n => n.folder === path).map(noteRow)}</div>}
+    </div>;
+  }
+
+
+
+  const searchView = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-2 pb-1 pt-2">
+        <div className="relative flex items-center">
+          <IconSearch size={13} className="pointer-events-none absolute left-2.5 text-muted-foreground" />
+          <Input
+            ref={searchInputRef}
+            aria-label="Search all notes"
+            placeholder="Search notes…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            className="h-8 border-transparent bg-muted/50 pl-8 pr-7 text-xs shadow-none focus-visible:border-border"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => { setSearchQuery(""); searchInputRef.current?.focus(); }}
+              className="absolute right-2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <IconX size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox" id="sidebar-search-results">
+        {searchQuery.trim() === "" ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            <p>Search across titles and note content.</p>
+            <p className="mt-1 text-[11px]">Use ↑↓ to navigate results, ↵ to open.</p>
+          </div>
+        ) : searchResults.length === 0 && !searchBusy ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No notes found for &quot;{searchQuery}&quot;.
+          </div>
+        ) : (
+          searchResults.map((r, i) => (
+            <NoteLink
+              key={r.id}
+              noteId={r.id}
+              prefetch={i === searchActive}
+              id={`search-result-${i}`}
+              role="option"
+              tabIndex={-1}
+              aria-selected={i === searchActive}
+              className={cn(
+                "block w-full rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent",
+                i === searchActive && "bg-accent ring-1 ring-primary/40"
+              )}
+              onMouseEnter={() => setSearchActive(i)}
+              onClick={(event) => {
+                event.preventDefault();
+                router.push(`/app/note/${r.id}`);
+                if (mobile) onMobileOpenChange(false);
+              }}
+            >
+              <div className="flex items-center gap-1.5 font-medium text-foreground">
+                <IconFile size={13} className="shrink-0 text-muted-foreground" />
+                <span className="truncate">{r.title}</span>
+                {r.folder && (
+                  <span className="ml-auto shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                    {r.folder}
+                  </span>
+                )}
+              </div>
+              {r.snippet && (
+                <div className="mt-0.5 line-clamp-2 pl-4 text-[11px] leading-tight text-muted-foreground">
+                  {r.snippet.split(/(<mark>|<\/mark>)/).map((part, idx, parts) =>
+                    part === "<mark>" || part === "</mark>"
+                      ? null
+                      : parts[idx - 1] === "<mark>"
+                      ? <mark key={idx}>{part}</mark>
+                      : part
+                  )}
+                </div>
+              )}
+            </NoteLink>
+          ))
+        )}
+      </div>
+      {searchResults.length > 0 && (
+        <div className="border-t border-border px-3 py-1.5 text-[10.5px] text-muted-foreground">
+          ↑↓ navigate · ↵ open · esc close
+        </div>
+      )}
+    </div>
+  );
+
+  const fileTree = (
+    <>
+      <nav aria-label="Files and folders" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
+        {bookmarks.length > 0 && (
+          <details open className="mb-1">
+            <summary className="tree-item"><IconBookmark size={14} />Bookmarks</summary>
+            {flatBookmarks.map(bookmarkRow)}
+            {bookmarkGroups.map(([group, items]) => (
+              <div key={group} className="ml-3 border-l border-border pl-1">
+                <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{group}</div>
+                {items.map(bookmarkRow)}
+              </div>
+            ))}
+          </details>
+        )}
+        {notes.some(n => n.is_pinned) && <details><summary className="tree-item">Pinned</summary>{notes.filter(n => n.is_pinned).map(noteRow)}</details>}
+        <details><summary className="tree-item">Recent</summary>{[...notes].sort((a,b) => b.updated_at - a.updated_at).slice(0,5).map(noteRow)}</details>
+        <div {...dropProps("")} className="min-h-16 flex-1" onClick={e => { if (e.target === e.currentTarget) { clearSelection(); setSelectedFolder(null); } }}>
+          <button type="button" aria-pressed={selectedFolder === ""} onClick={() => { setSelectedFolder(""); clearSelection(); }}
+            className={cn("tree-item my-1", (dropTarget === "" || selectedFolder === "") && "bg-accent", dropTarget === "" && "ring-1 ring-primary")}>
+            <IconFolder size={14} />Files
+          </button>
+          {folders.filter(f => !parentOf(f)).map(folderRow)}
+          {notes.filter(n => !n.folder).map(noteRow)}
+        </div>
+      </nav>
+      {selected.size > 0 && (
+        <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{selected.size} selected</span>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setBulkMoveParent(selectedFolder ?? ""); setBulkMoveOpen(true); }}>Move</Button>
+          <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => setBulkDeleteOpen(true)}>Delete</Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={clearSelection}><IconX /></Button>
+        </div>
+      )}
+      <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{notes.length} files</div>
+    </>
+  );
+
+  const trashView = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {selected.size > 0 && (
+        <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{selected.size}</span>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void bulk({ action: "restore", ids: [...selected] }, "Could not restore files.", false)}>Restore</Button>
+          <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => setBulkPurgeOpen(true)}>Delete forever</Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={clearSelection}><IconX /></Button>
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {trash.length === 0 ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">Trash is empty.</div>
+        ) : trash.map(n => (
+          <div key={n.id} onClick={e => { if (multiSelect(e)) toggleSelected(n.id); else setSelected(new Set([n.id])); }}
+            className={cn("flex items-center gap-1 rounded-md px-2 ", selected.has(n.id) && "bg-accent ring-1 ring-primary/40")}>
+            <span className="min-w-0 flex-1 truncate text-xs" title={n.title}>{n.title}</span>
+            <Button variant="ghost" size="sm" onClick={async e => {
+              e.stopPropagation(); clearSelection();
+              try { await request(`/api/notes/${n.id}/restore`, "POST"); router.push(`/app/note/${n.id}`); }
+              catch { toast.error("Could not restore file."); }
+            }}>Restore</Button>
+            <Button variant="ghost" size="icon-sm" aria-label={`Delete ${n.title} forever`} onClick={e => { e.stopPropagation(); if (selected.size > 1 && selected.has(n.id)) setBulkPurgeOpen(true); else setPurgeTarget(n); }}><IconTrash /></Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const financeNav = (
+    <nav aria-label="Finance views" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
+      <div className="px-2 py-1 text-[11px] font-semibold tracking-wider text-muted-foreground">Finance</div>
+      {financeTabs.map((value) => {
+        const Icon = financeTabIcons[value];
+        const active = financeTab === value;
+        return (
+          <Link
+            key={value}
+            href={`/app/finance?tab=${value}`}
+            scroll={false}
+            aria-current={active ? "page" : undefined}
+            className={cn("tree-item w-full", active && "active")}
+            onClick={() => { if (mobile) onMobileOpenChange(false); }}
+          >
+            <Icon size={14} aria-hidden="true" className="shrink-0" />
+            <span className="truncate">{financeTabLabel(value)}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+
+  const filePanel = (
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 px-3 py-2.5">
+        <Link href="/app" className="flex min-w-0 flex-1 items-center gap-2 font-heading text-sm font-semibold">
+          <Image src="/logo_main.png" alt="" width={20} height={20} className="h-5 w-5 shrink-0" />
+          <span className="truncate">Chibako</span>
+        </Link>
+        {!onFinance && (
+          <>
+            <Button variant="ghost" size="icon" aria-label="New file" onClick={() => create("note", selectedFolder ?? "")}><IconPlus /></Button>
+            <Button variant="ghost" size="icon" aria-label="New folder" onClick={() => create("folder", selectedFolder ?? "")}><IconFolderPlus /></Button>
+            <Button variant="ghost" size="icon" aria-label="Import Markdown files" disabled={busy} onClick={() => uploadRef.current?.click()}><IconUpload /></Button>
+            <input ref={uploadRef} type="file" accept=".md,.markdown,text/markdown" multiple className="hidden"
+              onChange={e => { void upload(e.target.files); e.target.value = ""; }} />
+          </>
+        )}
+      </div>
+      {onFinance ? financeNav : searchMode ? searchView : fileView === "trash" ? trashView : fileTree}
+    </div>
+  );
+
+  const activityRail = (
+    <nav aria-label="Workspace" className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border py-2">
+      <Link
+        href="/app"
+        aria-label="Home"
+        title="Home"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app" && !searchMode && "bg-accent text-foreground"
+        )}
+      >
+        <IconHome size={16} />
+      </Link>
+      {/* Files icon: goes back to file list (expands panel if collapsed) */}
+      <button
+        type="button"
+        aria-label="Files"
+        title="Files"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          !onFinance && !searchMode && fileView === "files" && !collapsed && "bg-accent text-foreground"
+        )}
+        onClick={() => {
+          if (searchMode) { setSearchMode(false); setSearchQuery(""); }
+          setFileView("files");
+          clearSelection();
+          if (collapsed) onExpand();
+          if (onFinance) router.push("/app");
+        }}
+      >
+        <IconFile size={16} />
+      </button>
+      <button
+        type="button"
+        aria-label="Search notes"
+        title="Search notes"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          !onFinance && searchMode && (!collapsed || mobileOpen) && "bg-accent text-foreground"
+        )}
+        onClick={activateSearch}
+      >
+        <IconSearch size={16} />
+      </button>
+      <button
+        type="button"
+        aria-label="Trash"
+        title="Trash"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          !onFinance && !searchMode && fileView === "trash" && !collapsed && "bg-accent text-foreground"
+        )}
+        onClick={() => {
+          setSearchMode(false);
+          if (searchQuery) setSearchQuery("");
+          setFileView("trash");
+          clearSelection();
+          if (collapsed) onExpand();
+          if (onFinance) router.push("/app");
+        }}
+      >
+        <IconTrash size={16} />
+      </button>
+      <Link
+        href="/app/graph"
+        aria-label="Graph"
+        title="Graph"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/graph" && "bg-accent text-foreground"
+        )}
+      >
+        <IconGraph size={16} />
+      </Link>
+      <Link
+        href="/app/calendar"
+        aria-label="Calendar"
+        title="Calendar"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/calendar" && "bg-accent text-foreground"
+        )}
+      >
+        <IconCalendarMonth size={16} />
+      </Link>
+      <Link
+        href="/app/finance"
+        aria-label="Finance"
+        title="Finance"
+        aria-current={pathname === "/app/finance" ? "page" : undefined}
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+          pathname === "/app/finance" && "bg-accent text-foreground"
+        )}
+      >
+        <IconWallet size={16} />
+      </Link>
+      <Link
+        href="/app/agent"
+        aria-label="Agent access"
+        title="Agent access"
+        className={cn(
+          "mt-auto grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/agent" && "bg-accent text-foreground"
+        )}
+      >
+        <IconBot size={16} />
+      </Link>
+      <Link
+        href="/app/settings"
+        aria-label="Settings"
+        title="Settings"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/settings" && "bg-accent text-foreground"
+        )}
+      >
+        <IconGear size={16} />
+      </Link>
+    </nav>
+  );
+
+  return <>
+    {mobile ? (
+      <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
+        <SheetContent side="left" className="w-72 p-0">
+          <SheetTitle className="sr-only">Files and folders</SheetTitle>
+          <div className="flex h-full flex-col pt-8">
+            {filePanel}
+          </div>
+        </SheetContent>
+      </Sheet>
+    ) : (
+      <aside
+        id="file-sidebar"
+        aria-label="Sidebar"
+        className={cn(
+          "flex shrink-0 border-r border-border bg-sidebar transition-[width] duration-150 ease-out",
+          collapsed ? "w-11" : "w-[17.75rem]"
+        )}
+      >
+        {activityRail}
+        {!collapsed && filePanel}
+      </aside>
+    )}
+
+    <Dialog open={action !== null} onOpenChange={open => { if (!open && !busy) setAction(null); }}>
+      <DialogContent><form onSubmit={submit} className="flex flex-col gap-4">
+        <DialogHeader><DialogTitle>{action?.mode === "create" ? "New" : action?.mode === "rename" ? "Rename" : "Move"} {action?.item.type === "folder" ? "folder" : "file"}</DialogTitle></DialogHeader>
+        <FieldGroup>
+          {action?.mode !== "move" && <Field data-invalid={!!error}><FieldLabel htmlFor="item-name">Name</FieldLabel><Input id="item-name" autoFocus value={name} onChange={e => setName(e.target.value)} aria-invalid={!!error} maxLength={120} /></Field>}
+          {action?.mode !== "rename" && <Field><FieldLabel htmlFor="item-parent">Folder</FieldLabel>{folderPicker(parent, setParent, action?.mode === "move" ? action.item : undefined, "item-parent")}</Field>}
+          {error && <FieldError>{error}</FieldError>}
+        </FieldGroup>
+        <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setAction(null)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Saving…" : action?.mode === "move" ? "Move" : action?.mode === "rename" ? "Rename" : "Create"}</Button></DialogFooter>
+      </form></DialogContent>
+    </Dialog>
+
+    <Dialog open={bulkMoveOpen} onOpenChange={open => { if (!open && !busy) setBulkMoveOpen(false); }}>
+      <DialogContent><form onSubmit={async e => {
+        e.preventDefault();
+        if (await bulk({ action: "move", ids: [...selected], folder: bulkMoveParent }, "Could not move files.")) setBulkMoveOpen(false);
+      }} className="flex flex-col gap-4">
+        <DialogHeader><DialogTitle>Move {selected.size} files</DialogTitle></DialogHeader>
+        <FieldGroup><Field><FieldLabel htmlFor="bulk-parent">Folder</FieldLabel>{folderPicker(bulkMoveParent, setBulkMoveParent, undefined, "bulk-parent")}</Field></FieldGroup>
+        <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setBulkMoveOpen(false)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Moving…" : "Move"}</Button></DialogFooter>
+      </form></DialogContent>
+    </Dialog>
+
+    <Dialog open={bookmarkDialog !== null} onOpenChange={open => { if (!open) setBookmarkDialog(null); }}>
+      <DialogContent><form onSubmit={submitBookmark} className="flex flex-col gap-4">
+        <DialogHeader><DialogTitle>Bookmark</DialogTitle></DialogHeader>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="bm-group">Group</FieldLabel>
+            <Select
+              items={{ "": "No group", ...Object.fromEntries(bookmarkGroupNames.map((g) => [g, g])), "__new__": "New group…" }}
+              value={bookmarkDialog?.group ?? ""}
+              onValueChange={(v) => { if (v !== null) setBookmarkDialog(d => d ? { ...d, group: v } : d); }}
+            >
+              <SelectTrigger size="sm" aria-label="Bookmark group" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">No group</SelectItem>
+                {bookmarkGroupNames.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                <SelectSeparator />
+                <SelectItem value="__new__">New group…</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {bookmarkDialog?.group === "__new__" && (
+            <Field>
+              <FieldLabel htmlFor="bm-newgroup">New group name</FieldLabel>
+              <Input id="bm-newgroup" value={bmNewGroup} placeholder="e.g. Projects" maxLength={60}
+                onChange={e => setBmNewGroup(e.target.value)} autoFocus />
+            </Field>
+          )}
+        </FieldGroup>
+        <DialogFooter>
+          <Button variant="outline" type="button" onClick={() => setBookmarkDialog(null)}>Cancel</Button>
+          <Button type="submit">Save bookmark</Button>
+        </DialogFooter>
+      </form></DialogContent>
+    </Dialog>
+
+    <ConfirmDialog open={purgeTarget !== null} onOpenChange={open => !open && setPurgeTarget(null)} title={`Delete "${purgeTarget?.title}" forever?`} description="This cannot be undone." confirmLabel="Delete forever" destructive onConfirm={async () => {
+      if (!purgeTarget) return;
+      try { await request(`/api/trash/${purgeTarget.id}`, "DELETE"); setPurgeTarget(null); } catch { toast.error("Could not delete file."); }
+    }} />
+    <ConfirmDialog open={bulkDeleteOpen} onOpenChange={open => !open && setBulkDeleteOpen(false)} title={`Delete ${selected.size} files?`} description="The files move to Trash. You can restore them from there for 30 days." confirmLabel="Delete" destructive onConfirm={async () => {
+      if (await bulk({ action: "delete", ids: [...selected] }, "Could not delete files.")) setBulkDeleteOpen(false);
+    }} />
+    <ConfirmDialog open={bulkPurgeOpen} onOpenChange={open => !open && setBulkPurgeOpen(false)} title={`Delete ${selected.size} files forever?`} description="This cannot be undone." confirmLabel="Delete forever" destructive onConfirm={async () => {
+      if (await bulk({ action: "purge", ids: [...selected] }, "Could not delete files.")) setBulkPurgeOpen(false);
+    }} />
+    <ConfirmDialog open={deleteFolderTarget !== null} onOpenChange={open => !open && setDeleteFolderTarget(null)} title={`Delete folder "${deleteFolderTarget?.name}"?`} description={deleteFolderTarget ? `Files inside will move up to "${deleteFolderTarget.parent || "Files (root)"}" and keep their subfolders. The folder itself and its empty subfolders are removed.` : ""} confirmLabel="Delete folder" destructive onConfirm={async () => {
+      if (!deleteFolderTarget) return;
+      try { await request(`/api/folders?path=${encodeURIComponent(deleteFolderTarget.id)}`, "DELETE"); setDeleteFolderTarget(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not delete folder."); }
+    }} />
+    <ConfirmDialog open={deleteNoteTarget !== null} onOpenChange={open => !open && setDeleteNoteTarget(null)} title={`Delete "${deleteNoteTarget?.name}"?`} description="The file moves to Trash. You can restore it from there for 30 days." confirmLabel="Delete" destructive onConfirm={async () => {
+      if (!deleteNoteTarget) return;
+      try { await request(`/api/notes/${deleteNoteTarget.id}`, "DELETE"); if (pathname === `/app/note/${deleteNoteTarget.id}`) router.push("/app"); setDeleteNoteTarget(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not delete file."); }
+    }} />
+  </>;
+}
+
+export function relTime(ts: number): string {
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 86400 * 30) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(ts * 1000).toLocaleDateString();
+}

@@ -1,7 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { ensureIndexNote } from "@/lib/notes";
-import { WorkspaceShell } from "@/components/WorkspaceShell";
-import { CommandPalette } from "@/components/CommandPalette";
+import { WorkspaceShell } from "@/components/layout/WorkspaceShell";
+import { CommandPalette } from "@/components/layout/CommandPalette";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

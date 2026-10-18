@@ -33,7 +33,19 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    "/Users/jccd/My-Projects/Chibako/.next-abs-probe/types/**/*.ts",
+    "/Users/jccd/My-Projects/Chibako/.next-abs-probe/dev/types/**/*.ts",
+    ".next-abs-probe/types/**/*.ts",
+    ".next-abs-probe/dev/types/**/*.ts",
+    ".next/test-builds/password-routes/types/**/*.ts",
+    ".next/test-builds/password-routes/dev/types/**/*.ts",
+    ".scratch/tarsi-finance/checks/e2e-build/types/**/*.ts",
+    ".scratch/tarsi-finance/checks/e2e-build/dev/types/**/*.ts",
+    ".scratch/tarsi-finance/checks/e2e-build/dev/dev/types/**/*.ts",
+    ".next/test-builds/password-routes/dev/dev/types/**/*.ts",
+    ".scratch/chibako-overview-build/types/**/*.ts",
+    ".scratch/chibako-overview-build/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

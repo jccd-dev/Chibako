@@ -1,0 +1,297 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
+import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { IconPlus, IconX } from "@/components/icons";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { noteTreeCache } from "@/features/notes/note-tree-cache";
+import { restoreNoteTabs, type NoteTab } from "@/features/notes/note-tabs-state";
+
+const STORAGE_KEY = "chibako_note_tabs";
+
+type NoteTabEvent = { id: string; title: string };
+
+function noteIdFromPath(pathname: string | null): string | null {
+  if (!pathname?.startsWith("/app/note/")) return null;
+  const id = pathname.slice("/app/note/".length).split("/")[0];
+  return id ? decodeURIComponent(id) : null;
+}
+
+function readTabs(): NoteTab[] {
+  try {
+    const value: unknown = JSON.parse(
+      localStorage.getItem(STORAGE_KEY) ?? "null",
+    );
+    if (!Array.isArray(value)) return [];
+    const seen = new Set<string>();
+    return value.filter((tab): tab is NoteTab => {
+      if (!tab || typeof tab !== "object") return false;
+      const { id, title } = tab as Partial<NoteTab>;
+      if (typeof id !== "string" || !id || seen.has(id)) return false;
+      seen.add(id);
+      return typeof title === "string";
+    });
+  } catch {
+    return [];
+  }
+}
+
+function saveTabs(tabs: NoteTab[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+  } catch {
+    // private mode — tabs still work for this session
+  }
+}
+
+export function NoteTabs() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const activeId = noteIdFromPath(pathname);
+  const [tabs, setTabs] = useState<NoteTab[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const treeCache = useMemo(() => noteTreeCache(async () => {
+    const response = await fetch("/api/notes");
+    if (!response.ok) throw new Error("Could not load notes");
+    return response.json();
+  }), []);
+
+  const hydrated = useHydrated();
+  if (hydrated && !loaded) {
+    setTabs(restoreNoteTabs(readTabs(), tabs));
+    setLoaded(true);
+  }
+
+  useEffect(() => {
+    // Prune tabs for notes that no longer exist (deleted to trash or purged).
+    const onNotesChanged = () => {
+      void treeCache.read()
+        .then(({ notes }) => {
+          const ids = new Set(notes.map((note) => note.id));
+          setTabs((current) => {
+            const next = current.filter((tab) => tab.id === "new" || ids.has(tab.id));
+            return next.length === current.length ? current : next;
+          });
+        })
+        .catch(() => { /* transient fetch failure — keep current tabs */ });
+    };
+
+    const onTab = (event: Event) => {
+      const detail = (event as CustomEvent<NoteTabEvent>).detail;
+      if (!detail?.id || typeof detail.title !== "string") return;
+      setTabs((current) => {
+        const title = detail.title.trim() || "Untitled";
+        const index = current.findIndex((tab) => tab.id === detail.id);
+        if (index < 0) return [...current, { id: detail.id, title }];
+        if (current[index].title === title) return current;
+        const next = [...current];
+        next[index] = { id: detail.id, title };
+        return next;
+      });
+    };
+    window.addEventListener("chibako:note-tab", onTab);
+    window.addEventListener("chibako:notes-changed", onNotesChanged);
+    return () => {
+      window.removeEventListener("chibako:note-tab", onTab);
+      window.removeEventListener("chibako:notes-changed", onNotesChanged);
+    };
+  }, [treeCache]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    saveTabs(tabs);
+  }, [loaded, tabs]);
+
+  const [previousActiveId, setPreviousActiveId] = useState<string | null>(null);
+  if (loaded && activeId && previousActiveId !== activeId) {
+    setPreviousActiveId(activeId);
+    const withoutDraft = activeId === "new" ? tabs : tabs.filter(tab => tab.id !== "new");
+    const next = withoutDraft.some(tab => tab.id === activeId)
+      ? withoutDraft
+      : [...withoutDraft, { id: activeId, title: activeId === "new" ? "Untitled" : "Loading…" }];
+    if (next !== tabs) setTabs(next);
+  }
+
+  // Drag-to-reorder lives in transient state; the dropped order persists through
+  // the normal saveTabs effect and comes back in that order on restore.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  function reorderTabs(from: number, to: number) {
+    setTabs((current) => {
+      if (from < 0 || from >= current.length || to < 0 || to > current.length) return current;
+      const insert = to > from ? to - 1 : to;
+      if (insert === from) return current;
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(insert, 0, moved);
+      return next;
+    });
+  }
+
+  function endDrag() {
+    setDragIndex(null);
+    setDropIndex(null);
+  }
+
+  function commitDrop() {
+    if (dragIndex !== null) reorderTabs(dragIndex, dropIndex ?? tabs.length);
+    endDrag();
+  }
+
+  function closeTab(id: string) {
+    if (tabs.length === 1) return;
+    const index = tabs.findIndex((tab) => tab.id === id);
+    if (index < 0) return;
+    const next = tabs.filter((tab) => tab.id !== id);
+    setTabs(next);
+    if (id === activeId) {
+      const fallback = tabs[index - 1] ?? tabs[index + 1];
+      if (fallback) router.push(`/app/note/${fallback.id}`);
+    }
+  }
+
+  async function createNoteTab() {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const response = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Untitled", content: "", kind: "note" }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        note?: { id?: unknown; title?: unknown };
+      } | null;
+      const id = data?.note?.id;
+      if (!response.ok || typeof id !== "string" || !id) {
+        throw new Error(
+          typeof data?.error === "string"
+            ? data.error
+            : "Could not create note.",
+        );
+      }
+
+      const created = {
+        id,
+        title:
+          typeof data?.note?.title === "string" ? data.note.title : "Untitled",
+      };
+      setTabs((current) => [
+        ...current.filter((tab) => tab.id !== "new" && tab.id !== created.id),
+        { id: created.id, title: created.title || "Untitled" },
+      ]);
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+      router.push(`/app/note/${created.id}`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not create note.",
+      );
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (!activeId) return null;
+
+  return (
+    <div
+      className="flex h-full min-w-0 flex-1 items-center gap-1"
+      role="tablist"
+      aria-label="Open notes"
+    >
+      <div
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+        onDragOver={(event) => {
+          if (dragIndex === null || dragIndex >= tabs.length - 1) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDropIndex(tabs.length);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (dragIndex === null) return;
+          commitDrop();
+        }}
+      >
+        {tabs.map((tab, index) => {
+          const active = tab.id === activeId;
+          return (
+            <div
+              key={tab.id}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", tab.id);
+                setDragIndex(index);
+              }}
+              onDragOver={(event) => {
+                if (dragIndex === null) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = "move";
+                const rect = event.currentTarget.getBoundingClientRect();
+                const target = event.clientX - rect.left < rect.width / 2 ? index : index + 1;
+                setDropIndex(target === dragIndex || target === dragIndex + 1 ? null : target);
+              }}
+              onDragEnd={endDrag}
+              className={cn(
+                "group relative flex h-8 min-w-0 max-w-48 flex-1 items-center rounded-md",
+                active
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60",
+                dragIndex === index && "opacity-40",
+              )}
+            >
+              {dragIndex !== null && dropIndex === index && (
+                <span aria-hidden="true" className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary" />
+              )}
+              {dragIndex !== null && dropIndex === index + 1 && (
+                <span aria-hidden="true" className="absolute inset-y-1 right-0 w-0.5 rounded-full bg-primary" />
+              )}
+              {index > 0 && dragIndex === null && !active && tabs[index - 1].id !== activeId && (
+                <span aria-hidden="true" className="pointer-events-none absolute -left-0.5 top-1/2 h-4 w-px -translate-y-1/2 rounded-full bg-border" />
+              )}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className="min-w-0 flex-1 truncate rounded-md px-3 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+                onClick={() => router.push(`/app/note/${tab.id}`)}
+              >
+                {tab.title}
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${tab.title} tab`}
+                className={cn(
+                  "mr-1 rounded p-1 text-muted-foreground transition hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50",
+                  active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                )}
+                onClick={() => closeTab(tab.id)}
+              >
+                <IconX size={13} />
+              </button>
+            </div>
+          );
+        })}
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="New note tab"
+          aria-busy={creating}
+          disabled={creating}
+          className="mr-2 rounded-md bg-muted/60 hover:bg-muted"
+          onClick={() => void createNoteTab()}
+        >
+          <IconPlus />
+        </Button>
+      </div>
+    </div>
+  );
+}

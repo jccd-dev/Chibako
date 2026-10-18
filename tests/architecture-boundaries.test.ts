@@ -104,10 +104,10 @@ test("MCP import graph stays independent of Next-specific adapters", () => {
         violations.push(`${path.relative(process.cwd(), resolved)} -> ${specifier}`);
       }
       if (local) {
-        const module = sourceModule(local);
-        if (module) pending.push(module);
-        if (module === path.join(sourceRoot, "lib", "api.ts") || module === path.join(sourceRoot, "lib", "auth.ts")) {
-          violations.push(`${path.relative(process.cwd(), resolved)} -> ${path.relative(process.cwd(), module)}`);
+        const resolvedModule = sourceModule(local);
+        if (resolvedModule) pending.push(resolvedModule);
+        if (resolvedModule === path.join(sourceRoot, "lib", "api.ts") || resolvedModule === path.join(sourceRoot, "lib", "auth.ts")) {
+          violations.push(`${path.relative(process.cwd(), resolved)} -> ${path.relative(process.cwd(), resolvedModule)}`);
         }
       }
     }

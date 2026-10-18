@@ -1,0 +1,923 @@
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { FinancePlanCategories } from "./FinancePlanCategories";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldDescription,
+  FieldError,
+  FieldSet,
+  FieldLegend,
+} from "@/components/ui/field";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import type { FinanceTransaction } from "@/features/finance/activity-types";
+import { FinanceCorrection } from "./FinanceCorrection";
+import { FinanceHistoryFilters } from "./FinanceHistoryFilters";
+import { FinanceDateInput, FinanceMonthInput } from "./FinanceDateInputs";
+import { FinanceNoteLinks, FinanceNotePicker } from "./FinanceNoteLinks";
+import { FinanceTransferFields } from "./FinanceTransferFields";
+import { FinanceCashbackFields } from "./FinanceCashbackFields";
+import { MoneyInput } from "./MoneyInput";
+import { useFinanceEntry } from "@/features/finance/use-finance-entry";
+import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
+import { financeDrawerFooter, financeSheet, formatPHP, formatHistoryDate } from "@/features/finance/presentation";
+
+const activityLabel = (type: FinanceTransaction["type"]) =>
+  ({
+    income: "Income",
+    expense: "Expense",
+    transfer: "Transfer",
+    reconciliation: "Reconciliation",
+    valuation: "Asset valuation",
+    refund: "Refund",
+    borrowing: "Borrowing",
+    lending: "Lending",
+  })[type];
+const principalPaymentLabel = (
+  row: Pick<FinanceTransaction, "type" | "obligation_payment">,
+) =>
+  row.obligation_payment
+    ? row.type === "expense"
+      ? "Debt principal payment"
+      : "Receivable collection"
+    : activityLabel(row.type);
+
+export function FinanceMonthlyTotals({
+  activity,
+}: {
+  activity: FinanceActivityController;
+}) {
+  return (
+    <section
+      aria-label="Monthly income and spending"
+      className="border-b border-border py-6"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold">Income and spending</h2>
+        <label className="flex items-center gap-3 text-sm">
+          Report month
+          <FinanceMonthInput
+            aria-label="Report month"
+            value={activity.month}
+            min="1000-01"
+            max="9999-12"
+            onChange={activity.setMonth}
+            className="w-auto"
+          />
+        </label>
+      </div>
+      {activity.totalsError ? (
+        <Alert className="mt-4">
+          <AlertDescription>
+            {activity.totalsError}
+            <Button
+              variant="outline"
+              onClick={() => void activity.refreshTotals()}
+            >
+              Retry totals
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : activity.totals ? (
+        <dl className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div>
+            <dt className="text-sm text-muted-foreground">Income</dt>
+            <dd
+              className="mt-2 break-words text-2xl font-semibold tabular-nums"
+              data-testid="finance-income-total"
+            >
+              {formatPHP(activity.totals.income_cents)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-sm text-muted-foreground">Spending</dt>
+            <dd
+              className="mt-2 break-words text-2xl font-semibold tabular-nums"
+              data-testid="finance-expense-total"
+            >
+              {formatPHP(activity.totals.expense_cents)}
+            </dd>
+          </div>
+        </dl>
+      ) : (
+        <p role="status" className="py-5 text-sm text-muted-foreground">
+          Loading monthly totals…
+        </p>
+      )}
+      <p className="mt-3 text-sm text-muted-foreground">
+        By the calendar day money moved. Refunds reduce spending on their refund
+        date, never income. Openings, transfers, borrowing, lending, principal
+        payments and adjustments are excluded; transfer fees count as spending.
+      </p>
+    </section>
+  );
+}
+
+export function FinanceActivityList({
+  activity,
+  onInspect,
+}: {
+  activity: FinanceActivityController;
+  onInspect: (id: string) => void;
+}) {
+  return (
+    <section aria-label="Transaction history">
+      <h2 className="text-lg font-semibold">History</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Find the transactions behind your balances. Select a record to inspect
+        or correct it.
+      </p>
+      {activity.filters.obligation_id && (
+        <p className="mt-3 text-sm">
+          Showing this obligation&apos;s linked activity, including hidden and
+          reverted records. Clear filters to return to all activity.
+        </p>
+      )}
+      <div className="mt-4 grid min-w-0 items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+        <FinanceHistoryFilters activity={activity} />
+        <div className="min-w-0">
+          <FinanceOptionStatus activity={activity} />
+          {activity.loadError ? (
+            <Alert>
+              <AlertDescription>
+                {activity.loadError}
+                <Button
+                  variant="outline"
+                  onClick={() => void activity.refreshHistory()}
+                >
+                  Retry history
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : activity.loading ? (
+            <p role="status" className="py-6 text-sm text-muted-foreground">
+              Loading history…
+            </p>
+          ) : activity.page?.transactions.length ? (
+            <ul className="divide-y divide-border">
+              {activity.page.transactions.map((row) => {
+                const titled = row.obligation_payment
+                  ? principalPaymentLabel(row)
+                  : row.type === "income" || row.type === "expense"
+                    ? (row.category_name ?? "Uncategorized")
+                    : activityLabel(row.type);
+                return (
+                  <li key={row.id}>
+                    <button
+                      type="button"
+                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted"
+                      onClick={() => onInspect(row.id)}
+                      aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}
+                    >
+                      <span className="min-w-0 truncate text-sm font-medium">
+                        {titled}
+                        {row.subcategory_name ? ` / ${row.subcategory_name}` : ""}
+                      </span>
+                      <strong className="justify-self-end text-sm tabular-nums">
+                        {formatPHP(row.amount_cents)}
+                      </strong>
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">
+                        {formatHistoryDate(row.transaction_date)} · {row.account_name}
+                        {row.destination_account_name
+                          ? ` to ${row.destination_account_name}`
+                          : ""}
+                        {row.cashback_expense_id ? " · Cashback" : row.linked_record_id ? " · Transfer fee" : ""}
+                      </span>
+                      {row.type === "income" || row.type === "expense" ? (
+                        <span className="justify-self-end text-xs text-muted-foreground">
+                          {activityLabel(row.type)}
+                        </span>
+                      ) : (
+                        <span aria-hidden="true" />
+                      )}
+                      {(row.hidden || row.reverted) && (
+                        <span className="col-span-2 text-xs">
+                          {row.hidden ? "Hidden" : ""}
+                          {row.hidden && row.reverted ? " · " : ""}
+                          {row.reverted ? "Reverted" : ""}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="py-8 text-sm text-muted-foreground">
+              No matching transactions. Add a transaction or clear your filters.
+            </p>
+          )}
+          {activity.page && activity.page.total > 25 && (
+            <nav
+              aria-label="History pages"
+              className="mt-5 flex flex-wrap items-center gap-3"
+            >
+              <Button
+                variant="outline"
+                disabled={activity.offset === 0 || activity.loading}
+                onClick={() =>
+                  activity.setOffset(Math.max(0, activity.offset - 25))
+                }
+              >
+                Previous history
+              </Button>
+              <span className="text-sm">
+                {activity.offset + 1}-
+                {Math.min(activity.offset + 25, activity.page.total)} of{" "}
+                {activity.page.total}
+              </span>
+              <Button
+                variant="outline"
+                disabled={
+                  activity.offset + 25 >= activity.page.total ||
+                  activity.loading
+                }
+                onClick={() => activity.setOffset(activity.offset + 25)}
+              >
+                Next history
+              </Button>
+            </nav>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function FinanceTransactionDetails({
+  activity,
+  inspectionId,
+  onClose,
+}: {
+  activity: FinanceActivityController;
+  inspectionId: string | null;
+  onClose: () => void;
+}) {
+  const [selectedState, setSelected] = useState<{ key: string; value: FinanceTransaction } | null>(null);
+  const [inspectionErrorState, setInspectionError] = useState<{ key: string; message: string } | null>(null);
+  const [detailId, setDetailId] = useState(inspectionId);
+  const [reload, setReload] = useState(0);
+  const inspectSequence = useRef(0);
+  const { inspect: loadDetail, resetSave } = activity;
+  const requestKey = `${inspectionId ?? ""}:${detailId ?? ""}:${reload}`;
+  const selected = selectedState?.key === requestKey ? selectedState.value : null;
+  const inspectionError = inspectionErrorState?.key === requestKey ? inspectionErrorState.message : "";
+  useEffect(() => {
+    const requests = inspectSequence;
+    const sequence = ++inspectSequence.current;
+    if (!inspectionId || !detailId) return;
+    resetSave();
+    void loadDetail(detailId)
+      .then((detail) => {
+        if (sequence === inspectSequence.current) setSelected({ key: requestKey, value: detail });
+      })
+      .catch((error) => {
+        if (sequence === inspectSequence.current)
+          setInspectionError({ key: requestKey, message: error instanceof Error
+              ? error.message
+              : "Could not inspect transaction." });
+      });
+    return () => {
+      requests.current++;
+    };
+  }, [inspectionId, detailId, reload, loadDetail, resetSave, requestKey]);
+  function inspect(id: string) {
+    inspectSequence.current++;
+    setDetailId(id);
+    setReload((value) => value + 1);
+  }
+  return (
+    <Dialog
+      open={inspectionId !== null}
+      onOpenChange={(open) => {
+        if (!open && !activity.busy) onClose();
+      }}
+    >
+      <DialogContent
+        className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl motion-reduce:animate-none"
+        showCloseButton={false}
+      >
+        <DialogHeader className="shrink-0 border-b border-border p-4">
+          <DialogTitle>Transaction details</DialogTitle>
+          <DialogDescription>
+            Dated financial activity. Correct mistakes together.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
+          {inspectionError ? (
+            <Alert>
+              <AlertDescription>
+                {inspectionError}
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (detailId) void inspect(detailId);
+                  }}
+                >
+                  Retry inspection
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : selected ? (
+            <>
+              <section aria-label="Transaction summary">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <dt className="text-muted-foreground">Amount</dt>
+                  <dd className="mt-2 break-words text-2xl font-semibold tabular-nums">
+                    {formatPHP(selected.amount_cents)}
+                  </dd>
+                  {(selected.hidden || selected.reverted) && (
+                    <p className="mt-1 text-sm">
+                      {selected.hidden ? "Hidden" : ""}
+                      {selected.hidden && selected.reverted ? " · " : ""}
+                      {selected.reverted ? "Reverted" : ""}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Type</dt>
+                  <dd className="mt-1 break-words">
+                    {selected.obligation_payment
+                      ? principalPaymentLabel(selected)
+                      : activityLabel(selected.type)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Transaction date</dt>
+                  <dd className="mt-1">
+                    {formatHistoryDate(selected.transaction_date)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Account</dt>
+                  <dd className="mt-1 break-words">{selected.account_name}</dd>
+                </div>
+                {selected.destination_account_name && (
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Destination account
+                    </dt>
+                    <dd className="mt-1 break-words">
+                      {selected.destination_account_name}
+                    </dd>
+                  </div>
+                )}
+                {selected.compared_balance_cents != null && (
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Derived balance before adjustment
+                    </dt>
+                    <dd className="mt-1 tabular-nums">
+                      {formatPHP(selected.compared_balance_cents)}
+                    </dd>
+                  </div>
+                )}
+                {selected.actual_balance_cents != null && (
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Actual balance / value
+                    </dt>
+                    <dd className="mt-1 tabular-nums">
+                      {formatPHP(selected.actual_balance_cents)}
+                    </dd>
+                  </div>
+                )}
+                {selected.obligation_id && (
+                  <div className="sm:col-span-2">
+                    <dt className="text-muted-foreground">Linked obligation</dt>
+                    <dd className="mt-1 break-words">
+                      {selected.obligation_payment
+                        ? "This activity backs principal. Corrections, hiding and reverting update cash and outstanding principal together here and reopen settlement when the obligation was closed. Its category is excluded from income and spending reports."
+                        : "Cash and principal change together. Inspect outstanding principal, payments and write-offs in Planning. Neither borrowing nor lending counts as income or spending."}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </section>
+            <section aria-label="Supporting details">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+                {(selected.type === "income" || selected.type === "expense") && (
+                  <div>
+                    <dt className="text-muted-foreground">Category</dt>
+                    <dd className="mt-1 break-words">
+                      {selected.category_name ?? "Uncategorized"}
+                      {selected.subcategory_name
+                        ? ` / ${selected.subcategory_name}`
+                        : ""}
+                    </dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-muted-foreground">Tags</dt>
+                  <dd className="mt-1 break-words">
+                    {selected.tag_ids
+                      ?.map(
+                        (id) =>
+                          activity.classifications.find(
+                            (tag) => tag.id === id,
+                          )?.name ?? "Saved tag",
+                      )
+                      .join(", ") || "No tags."}
+                  </dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-muted-foreground">Transaction text</dt>
+                  <dd className="mt-1 whitespace-pre-wrap break-words">
+                    {selected.text || "No additional text."}
+                  </dd>
+                </div>
+                <div className="text-xs text-muted-foreground sm:col-span-2">
+                  <dt>Recorded at</dt>
+                  <dd className="mt-1">
+                    {selected.created_at
+                      ? new Date(selected.created_at * 1000).toLocaleString()
+                      : "Unavailable"}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+            {(selected.fee_transaction_id ||
+              selected.cashback_transaction_id ||
+              selected.expense_id ||
+              selected.linked_record_id) && (
+              <section aria-label="Related records">
+                <dl className="flex flex-col gap-3 text-sm">
+                  {selected.fee_transaction_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        Separate transfer fee
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() =>
+                            void inspect(selected.fee_transaction_id!)
+                          }
+                        >
+                          Inspect fee
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                  {selected.cashback_transaction_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        Cashback income
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() =>
+                            void inspect(selected.cashback_transaction_id!)
+                          }
+                        >
+                          Inspect cashback
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                  {selected.expense_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        Original expense
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() => void inspect(selected.expense_id!)}
+                        >
+                          Inspect original expense
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                  {selected.linked_record_id && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <dt className="text-muted-foreground">
+                        {selected.cashback_expense_id
+                          ? "Original expense"
+                          : "Linked transfer"}
+                      </dt>
+                      <dd>
+                        <Button
+                          variant="outline"
+                          disabled={activity.busy}
+                          onClick={() =>
+                            void inspect(selected.linked_record_id!)
+                          }
+                        >
+                          {selected.cashback_expense_id
+                            ? "Inspect original expense"
+                            : "Inspect transfer"}
+                        </Button>
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </section>
+            )}
+            </>
+          ) : (
+            <p role="status">Loading transaction…</p>
+          )}
+          {selected && <FinanceOptionStatus activity={activity} />}
+          {selected && (
+            <FinanceNoteLinks
+              key={`notes:${selected.id}:${selected.version}`}
+              record={selected}
+              activity={activity}
+              onSaved={(id) => void inspect(id)}
+            />
+          )}
+          {selected && (
+            <FinanceCorrection
+              key={`${selected.id}:${selected.version}`}
+              record={selected}
+              activity={activity}
+              onSaved={(id) => void inspect(id)}
+            />
+          )}
+        </div>
+        <div className="shrink-0 border-t border-border p-4">
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              disabled={activity.busy}
+              onClick={onClose}
+            >
+              Close details
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function FinanceOptionStatus({
+  activity,
+}: {
+  activity: FinanceActivityController;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {activity.optionsError && (
+        <Alert>
+          <AlertDescription>
+            {activity.optionsError}
+            <Button
+              variant="outline"
+              onClick={() => void activity.refreshOptions()}
+            >
+              Retry options
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {(activity.accountTotal > activity.accounts.length ||
+        activity.classificationTotal > activity.classifications.length) && (
+        <div className="flex flex-wrap gap-3">
+          {activity.accountTotal > activity.accounts.length && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void activity.loadMoreOptions("accounts")}
+            >
+              Load more account options
+            </Button>
+          )}
+          {activity.classificationTotal > activity.classifications.length && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void activity.loadMoreOptions("classifications")}
+            >
+              Load more categories and tags
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function FinanceTransactionEntry({
+  activity,
+  open,
+  onClose,
+}: {
+  activity: FinanceActivityController;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const entry = useFinanceEntry(activity, open);
+  const {
+    type,
+    changeType,
+    amount,
+    setAmount,
+    accountId,
+    setAccountId,
+    date,
+    setDate,
+    categoryId,
+    changeCategory,
+    subcategoryId,
+    setSubcategoryId,
+    text,
+    setText,
+    tagIds,
+    setTagIds,
+    notes,
+    setNotes,
+    errors,
+    shortfall,
+    save,
+  } = entry;
+  const accountKey = type === "transfer" ? "source_account_id" : "account_id";
+  const amountRef = useRef<HTMLInputElement>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const another =
+      (event.nativeEvent as SubmitEvent).submitter?.getAttribute("name") ===
+      "another";
+    const result = await save(another);
+    if (result.invalidField)
+      document.getElementById(`transaction-${result.invalidField}`)?.focus();
+    if (!result.saved) return;
+    if (another) amountRef.current?.focus();
+    else onClose();
+  }
+  const errorProps = (key: string) => ({
+    "aria-invalid": !!errors[key],
+    "aria-describedby": errors[key] ? `error-${key}` : undefined,
+  });
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(value) => {
+        if (!value && !activity.busy) onClose();
+      }}
+    >
+      <SheetContent className={financeSheet} showCloseButton={false}>
+        <SheetHeader className="border-b border-border p-4">
+          <SheetTitle>Add transaction</SheetTitle>
+          <SheetDescription>
+            Record money that moved. Expense is the default. PHP only.
+          </SheetDescription>
+        </SheetHeader>
+        <form
+          onSubmit={submit}
+          noValidate
+          className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0"
+        >
+          <FieldGroup className="gap-6">
+            <Field>
+              <FieldLabel id="transaction-type-label">
+                Transaction type
+              </FieldLabel>
+              <ToggleGroup
+                aria-labelledby="transaction-type-label"
+                value={[type]}
+                onValueChange={(values) => {
+                  if (values[0])
+                    changeType(
+                      values[0] as "expense" | "income" | "transfer",
+                    );
+                }}
+                variant="outline"
+                disabled={activity.busy}
+                className="w-full"
+              >
+                <ToggleGroupItem value="expense" className="min-h-11 flex-1">
+                  Expense
+                </ToggleGroupItem>
+                <ToggleGroupItem value="income" className="min-h-11 flex-1">
+                  Income
+                </ToggleGroupItem>
+                <ToggleGroupItem value="transfer" className="min-h-11 flex-1">
+                  Transfer
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
+            <Field data-invalid={!!errors.amount}>
+              <FieldLabel htmlFor="transaction-amount">Amount (PHP)</FieldLabel>
+              <MoneyInput
+                ref={amountRef}
+                id="transaction-amount"
+                inputMode="decimal"
+                value={amount}
+                disabled={activity.busy}
+                placeholder="0.00"
+                onValueChange={(value) => setAmount(value)}
+                className="tabular-nums"
+                {...errorProps("amount")}
+              />
+              <FieldDescription>
+                Positive amount, with at most two decimal places.
+              </FieldDescription>
+              <FieldError id="error-amount">{errors.amount}</FieldError>
+            </Field>
+            {type === "expense" && <FinanceCashbackFields entry={entry} disabled={activity.busy} />}
+            <Field data-invalid={!!errors[accountKey]}>
+              <FieldLabel htmlFor={`transaction-${accountKey}`}>
+                {type === "transfer" ? "Source account" : "Account"}
+              </FieldLabel>
+              <NativeSelect
+                id={`transaction-${accountKey}`}
+                className="w-full"
+                value={accountId}
+                disabled={activity.busy}
+                onChange={(event) => setAccountId(event.target.value)}
+                {...errorProps(accountKey)}
+              >
+                <NativeSelectOption value="">
+                  Choose a money account
+                </NativeSelectOption>
+                {activity.accounts
+                  .filter(
+                    (account) => !account.archived && account.kind === "money",
+                  )
+                  .map((account) => (
+                    <NativeSelectOption key={account.id} value={account.id}>
+                      {account.name}
+                    </NativeSelectOption>
+                  ))}
+              </NativeSelect>
+              <FieldError id={`error-${accountKey}`}>
+                {errors[accountKey]}
+              </FieldError>
+            </Field>
+            {shortfall && (
+              <p role="alert" className="text-sm text-destructive">
+                {shortfall.message}
+              </p>
+            )}
+            {type === "transfer" && (
+              <FinanceTransferFields activity={activity} entry={entry} />
+            )}
+            <FieldGroup className="rounded-xl bg-muted/50 p-4">
+              <Field data-invalid={!!errors.transaction_date}>
+                <FieldLabel htmlFor="transaction-transaction_date">
+                  Transaction date
+                </FieldLabel>
+                <FinanceDateInput
+                  id="transaction-transaction_date"
+                  min="1000-01-01"
+                  max="9999-12-31"
+                  value={date}
+                  disabled={activity.busy}
+                  onChange={setDate}
+                  {...errorProps("transaction_date")}
+                />
+                <FieldError id="error-transaction_date">
+                  {errors.transaction_date}
+                </FieldError>
+              </Field>
+              <FieldDescription>
+                The calendar day money moved, not when you entered it.
+              </FieldDescription>
+            </FieldGroup>
+            {type !== "transfer" && (
+              <FinancePlanCategories
+                activity={activity}
+                type={type}
+                value={categoryId}
+                onChange={changeCategory}
+                subcategoryId={subcategoryId}
+                onSubcategoryChange={setSubcategoryId}
+                disabled={activity.busy}
+                id="transaction-category"
+              />
+            )}
+            {!activity.accounts.some(
+              (account) => !account.archived && account.kind === "money",
+            ) && (
+              <p className="text-sm text-muted-foreground">
+                Create a money account in Accounts before recording activity.
+              </p>
+            )}
+            <details className="rounded-xl border border-border p-4">
+              <summary className="cursor-pointer text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
+                Additional details
+              </summary>
+              <FieldGroup className="mt-4">
+                <Field>
+                  <FieldLabel htmlFor="transaction-text">
+                    Transaction text
+                  </FieldLabel>
+                  <Textarea
+                    id="transaction-text"
+                    value={text}
+                    maxLength={2000}
+                    disabled={activity.busy}
+                    onChange={(event) => setText(event.target.value)}
+                  />
+                </Field>
+                <FieldSet>
+                  <FieldLegend>Tags</FieldLegend>
+                  {activity.classifications
+                    .filter((item) => item.kind === "tag" && !item.archived)
+                    .map((tag) => (
+                      <label
+                        key={tag.id}
+                        className="flex min-h-7 items-center gap-2 text-xs"
+                      >
+                        <Checkbox
+                          checked={tagIds.includes(tag.id)}
+                          disabled={
+                            activity.busy ||
+                            (!tagIds.includes(tag.id) && tagIds.length >= 20)
+                          }
+                          onCheckedChange={(checked) =>
+                            setTagIds((current) =>
+                              checked
+                                ? [...current, tag.id]
+                                : current.filter((id) => id !== tag.id),
+                            )
+                          }
+                        />
+                        {tag.name}
+                      </label>
+                    ))}
+                  <FieldDescription>
+                    Manage tags in the Manage tab. Up to 20 per transaction.
+                  </FieldDescription>
+                </FieldSet>
+                <FieldSet>
+                  <FieldLegend>Optional Note links</FieldLegend>
+                  <FinanceNotePicker
+                    notes={notes}
+                    onChange={setNotes}
+                    disabled={activity.busy}
+                  />
+                </FieldSet>
+              </FieldGroup>
+            </details>
+            <FinanceOptionStatus activity={activity} />
+            {activity.saveError && (
+              <Alert>
+                <AlertDescription>
+                  {activity.saveError} Your entries are kept. Retry to safely
+                  reuse the same request.
+                </AlertDescription>
+              </Alert>
+            )}
+          </FieldGroup>
+          <div className={financeDrawerFooter}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={activity.busy}
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              name="another"
+              variant="outline"
+              disabled={activity.busy || !!shortfall}
+            >
+              Save and add another
+            </Button>
+            <Button
+              type="submit"
+              disabled={activity.busy || !!shortfall}
+            >
+              {activity.busy ? "Saving…" : "Save transaction"}
+            </Button>
+          </div>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}

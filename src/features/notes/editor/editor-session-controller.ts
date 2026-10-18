@@ -27,16 +27,19 @@ export interface EditorSessionEffects {
     patch: UpdateNoteInput,
     full: Omit<CreateNoteInput, "properties">,
   ): Promise<Note>;
-  onSaved(note: Note, created: boolean): void;
+  onSaved(note: Note, created: boolean, switching?: boolean): void;
   onError(error: unknown): void;
+  /** A switch away from a note was refused because its edits could not be saved. */
+  onSwitchBlocked?(noteTitle: string): void;
 }
 
 export interface EditorSessionController {
+  updateEffects(next: EditorSessionEffects): void;
   getSnapshot(): EditorSessionSnapshot;
   subscribe(listener: () => void): () => void;
   patch(patch: UpdateNoteInput): void;
   persist(): Promise<void>;
-  replaceDocument(note: Note | null): Promise<void>;
+  replaceDocument(note: Note | null, draft?: Partial<Omit<EditorDocument, "note">>): Promise<void>;
   refreshFromServer(note: Note): void;
   shouldBlockUnload(): boolean;
   dispose(): Promise<void>;
@@ -81,6 +84,10 @@ export function createEditorSessionController(
   let persistPromise: Promise<void> | null = null;
   let replacing = false;
   let disposed = false;
+  // Set when a switch away from a note could not be flushed. The next switch
+  // has to reach that note first, or the typed text is dropped by the server
+  // copy that loads in its place. Keyed by the note the text belongs to so a
+  // still-unsaved *draft* (no id yet) is held too.
   const listeners = new Set<() => void>();
   let snapshot: EditorSessionSnapshot = {
     ...document,
@@ -141,8 +148,10 @@ export function createEditorSessionController(
       document = { ...document, note: updated };
       dirty = Object.keys(pending).length > 0;
       setSaveState(dirty ? "unsaved" : "saved");
-      if (!replacing) try {
-        effects.onSaved(updated, current === null);
+      // A switch-flushed save still invalidates shared views. The adapter must
+      // not redirect a draft creation over the destination being selected.
+      try {
+        effects.onSaved(updated, current === null, replacing);
       } catch {
         // Navigation/toast side effects cannot invalidate a successful save.
       }
@@ -166,6 +175,9 @@ export function createEditorSessionController(
   }
 
   return {
+    updateEffects(next): void {
+      effects = next;
+    },
     getSnapshot(): EditorSessionSnapshot {
       return snapshot;
     },
@@ -186,26 +198,34 @@ export function createEditorSessionController(
 
     persist,
 
-    async replaceDocument(nextNote: Note | null): Promise<void> {
+    async replaceDocument(nextNote: Note | null, draft?: Partial<Omit<EditorDocument, "note">>): Promise<void> {
       if (disposed) return;
       replacing = true;
       try {
         try {
           await persist();
         } catch {
-          // The old session has been attempted; replacement must not carry its
-          // failed patch into the newly selected Note.
+          // Keep the pending patch: the retry path replays it instead of
+          // letting the next note's server copy overwrite local content.
+          saveState = "error";
+          publish();
+          try {
+            effects.onSwitchBlocked?.(document.title);
+          } catch {
+            // Reporting the refused switch must not mask the save failure.
+          }
+          return;
         }
       } finally {
-        version += 1;
-        pending = {};
-        inFlightPatch = null;
-        dirty = false;
-        document = documentFor(nextNote);
-        saveState = nextNote ? "saved" : "unsaved";
         replacing = false;
-        publish();
       }
+      version += 1;
+      pending = {};
+      inFlightPatch = null;
+      dirty = false;
+      document = documentFor(nextNote, draft);
+      saveState = nextNote ? "saved" : "unsaved";
+      publish();
     },
 
     refreshFromServer(serverNote: Note): void {

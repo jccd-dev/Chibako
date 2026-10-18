@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   createEditorSessionController,
   type EditorSessionController,
@@ -9,9 +9,11 @@ import {
 import type { Note } from "../../../lib/notes";
 import type { EditorDocument } from "./editor-session-controller";
 
-export interface NoteEditorSessionEffects extends EditorSessionEffects {
+export interface NoteEditorSessionEffects extends Omit<EditorSessionEffects, "onSwitchBlocked"> {
   onOrganized?(): void;
   onOrganizationError?(): void;
+  /** A switch was refused. `id` is null when the text belongs to an unsaved draft. */
+  onSwitchBlocked?(note: { id: string | null; title: string }): void;
 }
 
 export function useNoteEditorSession(
@@ -20,23 +22,41 @@ export function useNoteEditorSession(
   initialDraft?: Partial<Omit<EditorDocument, "note">>,
 ): ReturnType<EditorSessionController["getSnapshot"]> & Pick<EditorSessionController, "patch" | "persist" | "refreshFromServer" | "shouldBlockUnload"> {
   const effectsRef = useRef(effects);
-  effectsRef.current = effects;
-  const controllerRef = useRef<EditorSessionController | null>(null);
-  if (!controllerRef.current) {
-    controllerRef.current = createEditorSessionController(initial, {
-      save: (...args) => effectsRef.current.save(...args),
-      onSaved: (...args) => effectsRef.current.onSaved(...args),
-      onError: (error) => effectsRef.current.onError(error),
+  useLayoutEffect(() => { effectsRef.current = effects; }, [effects]);
+  const [controller] = useState(() => {
+    const session = createEditorSessionController(initial, {
+      save: effects.save,
+      onSaved: effects.onSaved,
+      onError: effects.onError,
+      onSwitchBlocked: (title) => {
+        // The controller still holds the note that kept the text; the route
+        // has to be put back on it.
+        const held = session.getSnapshot().note;
+        effects.onSwitchBlocked?.(held ? { id: held.id, title } : { id: null, title });
+      },
     }, initialDraft);
-  }
-  const controller = controllerRef.current;
+    return session;
+  });
+  useLayoutEffect(() => {
+    controller.updateEffects({
+      save: effects.save,
+      onSaved: effects.onSaved,
+      onError: effects.onError,
+      onSwitchBlocked: (title) => {
+        const held = controller.getSnapshot().note;
+        effects.onSwitchBlocked?.(held ? { id: held.id, title } : { id: null, title });
+      },
+    });
+  }, [controller, effects]);
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const previousInitialIdRef = useRef<string | null>(initial?.id ?? null);
+  const draftContent = initialDraft?.content;
+  const previousDraftContentRef = useRef(draftContent);
 
   useEffect(() => {
     const initialId = initial?.id ?? null;
     const currentId = controller.getSnapshot().note?.id ?? null;
-    if (initialId === currentId) {
+    if (initialId === currentId && (initialId !== null || previousDraftContentRef.current === draftContent)) {
       previousInitialIdRef.current = initialId;
       return;
     }
@@ -44,9 +64,12 @@ export function useNoteEditorSession(
     // server props. Do not erase that local document while the URL is still
     // transitioning from /new to the created note.
     if (initialId === null && currentId !== null && previousInitialIdRef.current === null) return;
+    // The controller owns the refusal decision: it either swaps the document
+    // or keeps the one holding unsaved text and reports onSwitchBlocked.
     previousInitialIdRef.current = initialId;
-    void controller.replaceDocument(initial);
-  }, [controller, initial]);
+    previousDraftContentRef.current = draftContent;
+    void controller.replaceDocument(initial, { content: draftContent });
+  }, [controller, initial, draftContent]);
 
   useEffect(() => {
     if (!snapshot.dirty) return;
@@ -93,13 +116,14 @@ export function useNoteEditorSession(
 
   const lifecycleRef = useRef(0);
   useEffect(() => {
-    const generation = ++lifecycleRef.current;
+    const lifecycle = lifecycleRef;
+    const generation = ++lifecycle.current;
     return () => {
       // React Strict Mode rehearses an effect cleanup/setup pair in
       // development. Delay disposal so that rehearsal does not permanently
       // disable the controller used by the real mount.
       queueMicrotask(() => {
-        if (lifecycleRef.current === generation) void controller.dispose().catch(() => {});
+        if (lifecycle.current === generation) void controller.dispose().catch(() => {});
       });
     };
   }, [controller]);

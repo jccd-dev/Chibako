@@ -3,6 +3,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { getNewPasswordError } from "../src/lib/password-policy";
+
+test("new passwords require length and reject the explicit common-password blocklist", () => {
+  for (const value of [undefined, null, 123, "", "x".repeat(14)]) {
+    assert.match(getNewPasswordError(value) ?? "", /at least 15/);
+  }
+  assert.equal(getNewPasswordError("unique phrase!!?"), null);
+  assert.equal(getNewPasswordError("x".repeat(1024)), null);
+  assert.match(getNewPasswordError("x".repeat(1025)) ?? "", /at most 1024/);
+  assert.match(getNewPasswordError("PasswordPassword") ?? "", /less common/);
+  assert.equal(getNewPasswordError("correct horse battery staple"), null);
+});
 
 test("password capability owns hashing and password persistence", async () => {
   const vault = mkdtempSync(join(tmpdir(), "chibako-password-test-"));
@@ -15,6 +27,7 @@ test("password capability owns hashing and password persistence", async () => {
     assert.equal(password.verifyPassword("correct horse battery staple", stored), true);
     assert.equal(password.verifyPassword("wrong", stored), false);
     assert.equal(password.verifyPassword("wrong", "not-a-password-hash"), false);
+    assert.equal(password.verifyPassword("legacy8!", password.hashPassword("legacy8!")), true, "legacy passwords still verify");
 
     password.initializePassword("correct horse battery staple");
     assert.equal(password.isSetup(), true);

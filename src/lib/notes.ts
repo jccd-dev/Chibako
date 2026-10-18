@@ -376,18 +376,21 @@ export function unlinkedMentions(id: string): UnlinkedMention[] {
   const note = getNote(id, true);
   if (!note || !note.title.trim()) return [];
   const title = note.title.trim();
+  const needle = title.toLowerCase();
+  // A note that already [[wikilinks]] this title can never be an unlinked
+  // mention. Excluding those in SQL (idx_links_target_nocase) means full
+  // content is only read for the remaining candidates, not for every note.
+  const contents = db
+    .prepare(`SELECT id, title, folder, content FROM notes WHERE deleted_at IS NULL AND id != ? AND id NOT IN (
+      SELECT source_id FROM links WHERE target_title = ? COLLATE NOCASE
+    )`)
+    .all(id, title) as Array<{ id: string; title: string; folder: string; content: string }>;
+
   const out: UnlinkedMention[] = [];
-  for (const n of listNotes()) {
-    if (n.id === id) continue;
-    const full = getNote(n.id);
-    if (!full) continue;
-    const body = stripFrontmatter(full.content);
-    if (body.toLowerCase().indexOf(title.toLowerCase()) === -1) continue;
-    const linked = db
-      .prepare(`SELECT 1 AS x FROM links WHERE source_id = ? AND target_title = ? COLLATE NOCASE`)
-      .get(n.id, title) as { x: number } | undefined;
-    if (linked) continue;
-    out.push({ id: n.id, title: n.title, folder: n.folder, snippet: snippetAround(body, title) });
+  for (const row of contents) {
+    const body = stripFrontmatter(row.content);
+    if (body.toLowerCase().indexOf(needle) === -1) continue;
+    out.push({ id: row.id, title: row.title, folder: row.folder, snippet: snippetAround(body, title) });
     if (out.length >= 20) break;
   }
   return out;

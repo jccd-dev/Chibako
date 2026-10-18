@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { withAuth } from "@/lib/api";
-import { listObservations, saveObservation, deleteObservation } from "@/lib/recall";
+import { listObservations, saveObservation } from "@/lib/recall";
 
 export const GET = withAuth("notes:read", async (req: NextRequest) => {
   const limit = Math.max(1, Math.min(500, Number(req.nextUrl.searchParams.get("limit") ?? 50)));
