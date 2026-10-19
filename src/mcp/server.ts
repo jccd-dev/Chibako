@@ -8,7 +8,7 @@ const scopes = configuredKey !== undefined ? principal?.scopes ?? [] : null;
 const financeActor = configuredKey === undefined
   ? { kind: "trusted-local" as const }
   : principal ? { kind: "api-key" as const, id: principal.id, scopes: principal.scopes } : undefined;
-const server = createMcpServer({ scopes, exposure: "local", financeActor });
+const server = createMcpServer({ scopes, exposure: "local", financeActor, memoryPrincipal: principal ?? undefined });
 
 await server.connect(new StdioServerTransport());
 process.stdin.resume();

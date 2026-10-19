@@ -1,0 +1,13 @@
+# Merge into the selected private Hermes profile only after confirming its version.
+# Requires the shell-hook API documented in Hermes Event Hooks.
+hooks:
+  pre_llm_call:
+    - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
+  pre_verify:
+    - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
+  on_session_end:
+    - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
+  agent_loop_stopped:
+    - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
+  post_compaction:
+    - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
