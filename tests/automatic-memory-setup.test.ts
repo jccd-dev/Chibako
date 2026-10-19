@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { load } from "js-yaml";
-import { after, test } from "node:test";
+import { after, test, type TestContext } from "node:test";
 import { validateMemoryStatus } from "../scripts/memory/connection";
 import { runControl } from "../scripts/memory/controls";
 import { applySetup, disconnect, prepareSetup, redactedPreview, setEnabled } from "../scripts/memory/setup";
@@ -15,6 +15,30 @@ import type { MemoryCall, Runtime } from "../scripts/memory/runtime";
 const root = mkdtempSync(join(tmpdir(), "chibako-memory-setup-test-"));
 after(() => rmSync(root, { recursive: true, force: true }));
 const scopes = ["notes:read", "schema:read", "memory:write"];
+
+function fakeCodex(t: TestContext, exitCode = 0): string {
+  const bin = mkdtempSync(join(root, "codex-bin-"));
+  const invocation = join(bin, "invocation.json");
+  writeFileSync(join(bin, "codex"), `#!${process.execPath}
+const assert = require("node:assert/strict");
+const { readFileSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+assert.deepEqual(process.argv.slice(2), ["mcp", "get", "chibako-memory", "--json"]);
+const home = process.env.CODEX_HOME;
+assert.ok(home);
+const config = readFileSync(join(home, "config.toml"), "utf8");
+assert.match(config, /\\[mcp_servers\\.chibako-memory\\]/);
+writeFileSync(${JSON.stringify(invocation)}, JSON.stringify({ home, config }));
+process.exit(${exitCode});
+`, { mode: 0o700 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${previousPath || ""}`;
+  t.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  return invocation;
+}
 
 function fixture(runtime: Runtime, name = "default") {
   const base = join(root, `${runtime}-${name}`);
@@ -51,10 +75,14 @@ test("setup validates the exact key scopes and server contract", () => {
   assert.throws(() => validateMemoryStatus({ ...base, enabled: false, area: null }), /disabled/);
 });
 
-test("preparation is read-only, probes status/schema/recall, and redacts the key", async () => {
+test("preparation is read-only, probes status/schema/recall, and redacts the key", async (t) => {
+  const invocation = fakeCodex(t);
   const target = input("codex", "cancelled");
   const calls: string[] = [];
   const preview = await prepareSetup(target, stub("profile-1", calls));
+  const checked = JSON.parse(readFileSync(invocation, "utf8"));
+  assert.equal(checked.config, preview.rendered.text);
+  assert.equal(existsSync(checked.home), false, "temporary Codex home is removed after validation");
   assert.deepEqual(calls, ["memory_status", "get_knowledge_schema", "recall"]);
   assert.equal(readFileSync(target.hostFile, "utf8"), target.original);
   assert.equal(await readProfile(target.directory), null);
@@ -64,7 +92,18 @@ test("preparation is read-only, probes status/schema/recall, and redacts the key
   assert.equal(summary.includes("test-secret-key"), false);
 });
 
-test("apply preserves unrelated host configuration for Codex, Claude and Hermes", async () => {
+test("Codex validation failure leaves host configuration and profile untouched", async (t) => {
+  const invocation = fakeCodex(t, 1);
+  const target = input("codex", "invalid-config");
+  await assert.rejects(() => prepareSetup(target, stub()), /Codex configuration validation failed/);
+  assert.equal(readFileSync(target.hostFile, "utf8"), target.original);
+  assert.equal(await readProfile(target.directory), null);
+  const checked = JSON.parse(readFileSync(invocation, "utf8"));
+  assert.equal(existsSync(checked.home), false, "temporary Codex home is removed after failure");
+});
+
+test("apply preserves unrelated host configuration for Codex, Claude and Hermes", async (t) => {
+  fakeCodex(t);
   for (const runtime of ["codex", "claude", "hermes"] as const) {
     const target = input(runtime, "preserve");
     const preview = await prepareSetup(target, stub());
