@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node --import tsx scripts/agent-memory.ts codex", "timeout": 15 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node --import tsx scripts/agent-memory.ts codex", "timeout": 15 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node --import tsx scripts/agent-memory.ts codex", "timeout": 15 }] }],
+    "PreCompact": [{ "hooks": [{ "type": "command", "command": "node --import tsx scripts/agent-memory.ts codex", "timeout": 15 }] }],
+    "Interrupt": [{ "hooks": [{ "type": "command", "command": "node --import tsx scripts/agent-memory.ts codex", "timeout": 3 }] }]
+  }
+}

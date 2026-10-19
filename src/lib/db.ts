@@ -13,6 +13,19 @@ export function dataDir(): string {
 let _db: Database.Database | null = null;
 
 const MIGRATIONS: string[] = [
+  `CREATE TABLE IF NOT EXISTS memory_records (
+    note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
+    folder TEXT NOT NULL, title TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('session','wiki','preference','overview')),
+    subject TEXT NOT NULL, owner_id TEXT NOT NULL,
+    UNIQUE (folder, role, subject, owner_id)
+  );
+  CREATE TABLE IF NOT EXISTS memory_requests (
+    actor_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+    note_id TEXT NOT NULL, revision TEXT NOT NULL, session_id TEXT NOT NULL,
+    confirmation_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY (actor_id, request_id)
+  );`,
   `CREATE TABLE IF NOT EXISTS auth_attempts (
     bucket TEXT PRIMARY KEY,
     window_started_at INTEGER NOT NULL,

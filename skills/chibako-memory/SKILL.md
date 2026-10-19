@@ -8,7 +8,9 @@ license: MIT
 
 Use the connected Chibako vault as durable context across chats. The user's
 instructions take precedence over this skill and the vault schema. Installing
-this skill does not configure MCP or automatically capture conversations.
+this skill does not configure MCP or automatically capture conversations. For
+opt-in automatic capture, use the packaged `chibako-memory-setup` workflow; its
+restricted memory scope does not grant general Note-write authority.
 
 ## Connect and load the contract
 
