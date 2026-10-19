@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/mcp/server.mjs",
     "mcp": "node dist/mcp/server.mjs",
-    "mcp:dev": "tsx src/mcp/server.ts"
+    "mcp:dev": "tsx src/mcp/server.ts",
+    "build:memory-plugins": "node scripts/build-memory-plugins.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -67,7 +68,8 @@
     "shadcn": "^4.22.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.13",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "js-yaml": "4.3.2"
   },
   "allowScripts": {
     "esbuild@0.25.12": true,

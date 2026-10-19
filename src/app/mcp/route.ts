@@ -68,6 +68,7 @@ export async function POST(request: Request) {
 
   const server = createMcpServer({
     scopes: principal.scopes,
+    memoryPrincipal: principal,
     exposure: "remote",
     financeActor: { kind: "api-key", id: principal.id, scopes: principal.scopes },
   });

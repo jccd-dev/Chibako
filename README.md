@@ -413,6 +413,30 @@ Self-hosters should edit `mcp.json` to point at their own `/mcp` URL before
 publishing a fork. IDE extensions do not support plugins; use the desktop app
 or Codex CLI.
 
+### Automatic memory plugin packages
+
+Automatic memory is opt-in. The standalone packages add a private terminal setup
+wizard, hooks and controls for Codex, Claude Code and Hermes. They use only
+`notes:read`, `schema:read` and `memory:write`; the server owner must first deploy
+the memory capability and configure an approved non-root area.
+
+The installable archives are built with `npm run build:memory-plugins` under
+`dist/plugins/`. End users extract the archive for their runtime and install that
+local plugin/marketplace through their client. Node.js 20+ is required; no Chibako
+checkout or npm install is needed on the client. These artifacts are not published
+by building them. Hook-bearing Codex packages currently use manual installation,
+not the official public plugin directory.
+
+Use the installed `chibako-memory-setup` skill to obtain the exact command for your
+own terminal. It hides the API-key input and previews private configuration before
+applying it. Never paste the key into agent chat. Installation, connection checks
+and proven autonomous capture are separate states.
+
+See the [automatic memory installation guide](integrations/agent-memory/INSTALL.md)
+for installation, controls, private-state paths, recovery and compatibility limits.
+The source-repository marketplace above continues to provide manual memory access;
+use a built archive for the bundled automatic setup workflow.
+
 ### Security audits on `npx skills add`
 
 The `skills` CLI prints a **Security Risk Assessments** table (Gen, Socket,
