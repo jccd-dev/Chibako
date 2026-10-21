@@ -10,6 +10,7 @@ export default defineConfig([
     ".scratch/**",
     "dist/**",
     "out/**",
+    "plugins/**",
     "build/**",
     "next-env.d.ts",
   ]),

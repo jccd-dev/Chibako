@@ -1,0 +1,13 @@
+{
+  "name": "chibako",
+  "version": "0.2.0",
+  "description": "Self-hosted second brain for AI agents: token-budgeted recall, Markdown notes, wikilinks, and backlinks.",
+  "author": {
+    "name": "JC",
+    "url": "https://github.com/jccd-dev/Chibako"
+  },
+  "license": "MIT",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {}
+}

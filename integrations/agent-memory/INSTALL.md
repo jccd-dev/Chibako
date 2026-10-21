@@ -1,7 +1,7 @@
 # Install automatic Chibako memory
 
-Status: local packages are available through the package build. They have not been
-published or activated on live clients. Node.js 20+ on macOS/Linux is required.
+Status: packages install from this repository through each runtime's plugin
+manager. Node.js 20+ on macOS/Linux is required.
 Bundles have been executed on Node 24; Node 20 execution remains a compatibility check.
 
 ## Prepare the server once
@@ -12,39 +12,34 @@ or native profile with exactly `notes:read`, `schema:read`, and `memory:write`.
 The setup wizard checks those scopes through `memory_status`; a broad existing key
 is rejected. It does not administer the server or issue keys.
 
-## Get a package
+## Install the package
 
-Maintainers run:
+The committed `plugins/<runtime>/` directories are the installable packages. Each
+contains a compiled runner, lifecycle hooks, both `chibako-memory` and
+`chibako-memory-setup` skills, and native plugin definitions; the web
+application, database bindings, tsx and node_modules are not required on the client.
 
-```sh
-npm run build:memory-plugins
-```
-
-The build produces `dist/plugins/chibako-codex-<version>.tar.gz`,
-`chibako-claude-<version>.tar.gz` and `chibako-hermes-<version>.tar.gz`.
-Each archive includes a compiled runner, skills and native plugin definitions.
-The web application, database bindings, tsx and node_modules are not required on
-the client. Building does not publish a release. End users receive an archive,
-extract it to a stable directory and install through their native plugin manager.
-Retain that directory while a local marketplace points to it.
-
-| Runtime | Install the extracted package |
+| Runtime | Install |
 | --- | --- |
-| Codex | `codex plugin marketplace add /absolute/path/to/extracted-codex`, then install Chibako through Plugins or `/plugins`. Review native hook trust through `/hooks`. A compatible Codex CLI on PATH is required for setup's isolated TOML validation. |
-| Claude Code | Add `/absolute/path/to/extracted-claude` with `/plugin marketplace add`, then `/plugin install chibako@chibako-plugins`. Review hook consent in the selected Code environment. |
-| Hermes | Install the extracted native plugin using the selected version's plugin manager, then enable/review its declared hooks through that profile's normal consent. Do not install the older shell-hook examples alongside it. Actual gateway version and local-package install support must be confirmed before activation. |
+| Codex | `codex plugin marketplace add jccd-dev/Chibako`, then `codex plugin add chibako@chibako-plugins` or install Chibako through `/plugins`. Review native hook trust through `/hooks`. A compatible Codex CLI on PATH is required for setup's isolated TOML validation. |
+| Claude Code | `/plugin marketplace add jccd-dev/Chibako`, then `/plugin install chibako@chibako-plugins`. Review hook consent in the selected Code environment. |
+| Hermes | `hermes plugins install jccd-dev/Chibako/plugins/hermes`, then enable/review its declared hooks through that profile's normal consent. Do not install the older shell-hook examples alongside it. Actual gateway version support must be confirmed before activation. |
 
-Codex hooks use manual/local marketplace installation. Hook-bearing packages are
-currently ineligible for the official public plugin directory. The source-repo
-marketplace still supports manual memory access; the built archive provides the
-standalone automatic setup workflow. Install only one Chibako package per host;
-replace/disable an old source package through the plugin manager before using its
-new bundled counterpart, rather than loading both.
+Hook-bearing packages are currently ineligible for the official public plugin
+directories. Install only one Chibako package per runtime profile; replace/disable an older
+package through the plugin manager before using a new one, rather than loading both.
+
+Maintainers regenerate `plugins/` with `npm run publish:memory-plugins` after
+changing the runner, skills or manifest; `tests/automatic-memory-package.test.ts`
+fails when the committed files differ from a fresh build. `npm run
+build:memory-plugins` still writes `dist/plugins/chibako-<runtime>-<version>.tar.gz`
+archives for offline installs: extract one to a stable directory and add that path
+as a local marketplace instead.
 
 ## Run private setup
 
 Ask the installed `chibako-memory-setup` skill for its installed command, or run
-this in your own terminal with the actual absolute extraction/install path:
+this in your own terminal with the actual absolute install path:
 
 ```sh
 node /absolute/path/to/plugin/bin/memory.mjs codex setup
@@ -162,7 +157,6 @@ Those checks do not prove a particular desktop host or remote gateway runs hooks
   scoped bearer connectivity remains a separate compatibility check.
 - Windows private-storage handling and a native keychain integration are deferred.
 
-No live installation, publication, server config, real write check or gateway
-restart is performed by the repository build/tests. The exact target and concrete
-configuration changes must be reviewed before activating the pilot. E2E and
-Playwright remain excluded from this implementation session.
+Builds and repository tests do not activate a client or change server configuration.
+Confirm the intended runtime profile and server before setup. A successful install
+or connection check is separate from a verified automatic save in a real session.

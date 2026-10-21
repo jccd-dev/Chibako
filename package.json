@@ -18,7 +18,8 @@
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/mcp/server.mjs",
     "mcp": "node dist/mcp/server.mjs",
     "mcp:dev": "tsx src/mcp/server.ts",
-    "build:memory-plugins": "node scripts/build-memory-plugins.mjs"
+    "build:memory-plugins": "node scripts/build-memory-plugins.mjs",
+    "publish:memory-plugins": "node scripts/build-memory-plugins.mjs --publish"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

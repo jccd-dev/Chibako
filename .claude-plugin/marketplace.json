@@ -1,0 +1,18 @@
+{
+  "name": "chibako-plugins",
+  "owner": {
+    "name": "JC",
+    "url": "https://github.com/jccd-dev/Chibako"
+  },
+  "metadata": {
+    "description": "Chibako self-hosted Markdown memory for AI agents."
+  },
+  "plugins": [
+    {
+      "name": "chibako",
+      "source": "./plugins/claude",
+      "description": "Automatic Chibako memory for Claude Code: bounded recall and thread checkpoints.",
+      "version": "0.2.0"
+    }
+  ]
+}
