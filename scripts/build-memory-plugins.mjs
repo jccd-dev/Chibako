@@ -38,8 +38,8 @@ export async function buildMemoryPlugins(output = join(root, "dist/plugins")) {
     const portable = structuredClone(manifest);
     if (runtime !== "hermes") {
       const variable = runtime === "codex" ? "PLUGIN_ROOT" : "CLAUDE_PLUGIN_ROOT";
-      const events = ["SessionStart", "UserPromptSubmit", "Stop", "PreCompact", ...(runtime === "codex" ? ["Interrupt"] : [])];
-      const hooks = { hooks: Object.fromEntries(events.map((event) => [event, [{ hooks: [{ type: "command", command: `node "\${${variable}}/bin/memory.mjs" ${runtime}`, timeout: event === "Interrupt" ? 3 : 15 }] }]])) };
+      const events = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", ...(runtime === "codex" ? ["Interrupt"] : [])];
+      const hooks = { hooks: Object.fromEntries(events.map((event) => [event, [{ hooks: [{ type: "command", command: `node "\${${variable}}/bin/memory.mjs" ${runtime}`, timeout: event === "Interrupt" || event === "PostToolUse" ? 3 : 15 }] }]])) };
       await mkdir(join(directory, "hooks"), { recursive: true });
       await writeFile(join(directory, "hooks/hooks.json"), json(hooks));
       if (runtime === "codex") {
@@ -53,7 +53,7 @@ export async function buildMemoryPlugins(output = join(root, "dist/plugins")) {
         await writeFile(join(directory, ".claude-plugin/marketplace.json"), json({ name: "chibako-plugins", owner: manifest.author, plugins: [{ name: manifest.name, source: "./", version: manifest.version }] }));
       }
     } else {
-      await writeFile(join(directory, "plugin.yaml"), `name: ${manifest.name}\nversion: "${manifest.version}"\ndescription: Chibako automatic memory\nprovides_hooks:\n  - pre_llm_call\n  - pre_verify\n  - on_session_end\n  - post_compaction\n  - agent_loop_stopped\n`);
+      await writeFile(join(directory, "plugin.yaml"), `name: ${manifest.name}\nversion: "${manifest.version}"\ndescription: Chibako automatic memory\nprovides_hooks:\n  - pre_llm_call\n  - post_tool_call\n  - pre_verify\n  - on_session_end\n  - post_compaction\n  - agent_loop_stopped\n`);
       await cp(join(root, "integrations/agent-memory/hermes-plugin.py"), join(directory, "__init__.py"));
     }
     await writeFile(join(directory, "plugin.json"), json(portable));

@@ -2,6 +2,7 @@ export const APPEARANCE_STORAGE_KEY = "chibako_appearance";
 
 export const FONT_OPTIONS = [
   { value: "dm-sans", label: "DM Sans" },
+  { value: "encode-sans", label: "Encode Sans" },
   { value: "questrial", label: "Questrial" },
   { value: "quicksand", label: "Quicksand" },
   { value: "existing", label: "Existing pairing" },

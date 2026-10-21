@@ -23,10 +23,16 @@ export function useNoteEditorSession(
 ): ReturnType<EditorSessionController["getSnapshot"]> & Pick<EditorSessionController, "patch" | "persist" | "refreshFromServer" | "shouldBlockUnload"> {
   const effectsRef = useRef(effects);
   useLayoutEffect(() => { effectsRef.current = effects; }, [effects]);
+  // Route payloads can come from Next's client router cache (prefetch, back/forward)
+  // and predate this tab's own saves; remember each note's last saved copy.
+  const [savedNotes] = useState(() => new Map<string, Note>());
   const [controller] = useState(() => {
     const session = createEditorSessionController(initial, {
       save: effects.save,
-      onSaved: effects.onSaved,
+      onSaved: (note, created, switching) => {
+        savedNotes.set(note.id, note);
+        effects.onSaved(note, created, switching);
+      },
       onError: effects.onError,
       onSwitchBlocked: (title) => {
         // The controller still holds the note that kept the text; the route
@@ -40,14 +46,17 @@ export function useNoteEditorSession(
   useLayoutEffect(() => {
     controller.updateEffects({
       save: effects.save,
-      onSaved: effects.onSaved,
+      onSaved: (note, created, switching) => {
+        savedNotes.set(note.id, note);
+        effects.onSaved(note, created, switching);
+      },
       onError: effects.onError,
       onSwitchBlocked: (title) => {
         const held = controller.getSnapshot().note;
         effects.onSwitchBlocked?.(held ? { id: held.id, title } : { id: null, title });
       },
     });
-  }, [controller, effects]);
+  }, [controller, effects, savedNotes]);
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const previousInitialIdRef = useRef<string | null>(initial?.id ?? null);
   const draftContent = initialDraft?.content;
@@ -68,8 +77,10 @@ export function useNoteEditorSession(
     // or keeps the one holding unsaved text and reports onSwitchBlocked.
     previousInitialIdRef.current = initialId;
     previousDraftContentRef.current = draftContent;
-    void controller.replaceDocument(initial, { content: draftContent });
-  }, [controller, initial, draftContent]);
+    const saved = initial ? savedNotes.get(initial.id) : undefined;
+    const latest = saved && initial && saved.updated_at >= initial.updated_at ? saved : initial;
+    void controller.replaceDocument(latest, { content: draftContent });
+  }, [controller, initial, draftContent, savedNotes]);
 
   useEffect(() => {
     if (!snapshot.dirty) return;

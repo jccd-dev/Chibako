@@ -12,6 +12,7 @@ test("knowledge schema reads the canonical fallback and preserves stored values"
   try {
     assert.match(schema.getKnowledgeSchema(), /^# Chibako Vault Schema \(AGENTS\.md\)/);
     assert.equal(schema.getKnowledgeSchema(), schema.DEFAULT_KNOWLEDGE_SCHEMA);
+    assert.match(schema.DEFAULT_KNOWLEDGE_SCHEMA, /## Agent memory[\s\S]*"Now"[\s\S]*\[\[Thread\]\]/);
 
     schema.setKnowledgeSchema("# Custom\nUse [[links]].");
     assert.equal(schema.getKnowledgeSchema(), "# Custom\nUse [[links]].");

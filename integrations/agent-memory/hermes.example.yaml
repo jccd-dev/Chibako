@@ -3,6 +3,8 @@
 hooks:
   pre_llm_call:
     - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
+  post_tool_call:
+    - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
   pre_verify:
     - command: "node --import tsx /path/to/chibako/integrations/agent-memory/hermes-hook.ts"
   on_session_end:

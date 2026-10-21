@@ -38,27 +38,27 @@ test("font controls apply separate choices immediately and restore them after re
 
   const initialInterfaceFamily = await page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily);
   await interfaceFont.click();
-  await expect(page.getByRole("option", { name: "Questrial" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Encode Sans" })).toBeVisible();
   const optionFamilies = await page.getByRole("option").evaluateAll((options) =>
     options.map((option) => getComputedStyle(option).fontFamily)
   );
-  expect(new Set(optionFamilies).size).toBe(4);
-  await page.getByRole("option", { name: "Questrial" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-interface-font", "questrial");
+  expect(new Set(optionFamilies).size).toBe(5);
+  await page.getByRole("option", { name: "Encode Sans" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-interface-font", "encode-sans");
   await expect.poll(() => page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily)).not.toBe(initialInterfaceFamily);
 
   await noteFont.click();
   await page.getByRole("option", { name: "Quicksand" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-note-font", "quicksand");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("chibako_appearance"))).toBe(
-    JSON.stringify({ interfaceFont: "questrial", noteFont: "quicksand" })
+    JSON.stringify({ interfaceFont: "encode-sans", noteFont: "quicksand" })
   );
 
   await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-interface-font", "questrial");
+  await expect(page.locator("html")).toHaveAttribute("data-interface-font", "encode-sans");
   await expect(page.locator("html")).toHaveAttribute("data-note-font", "quicksand");
   await page.getByRole("tab", { name: "Appearance" }).click();
-  await expect(page.getByRole("combobox", { name: "Interface font" })).toContainText("Questrial");
+  await expect(page.getByRole("combobox", { name: "Interface font" })).toContainText("Encode Sans");
   await expect(page.getByRole("combobox", { name: "Note font" })).toContainText("Quicksand");
 
   await page.evaluate(() => localStorage.setItem("chibako_appearance", "{\"interfaceFont\":\"obsolete\",\"noteFont\":\"obsolete\"}"));
@@ -75,7 +75,7 @@ test("the selected note font covers source, rich, and preview while code stays m
   await page.getByRole("tab", { name: "Appearance" }).click();
   const noteFont = page.getByRole("combobox", { name: "Note font" });
   await noteFont.click();
-  await page.getByRole("option", { name: "Questrial" }).click();
+  await page.getByRole("option", { name: "Encode Sans" }).click();
 
   const title = `Font coverage ${Date.now()}`;
   const response = await page.request.post("/api/notes", {
@@ -88,7 +88,7 @@ test("the selected note font covers source, rich, and preview while code stays m
   await page.goto(`/app/note/${note.id}`);
   const source = page.getByRole("textbox", { name: "Note content" });
   const expectedFamily = await page.locator("html").evaluate((element) =>
-    getComputedStyle(element).getPropertyValue("--font-questrial").replaceAll(/[\"']/g, "").trim()
+    getComputedStyle(element).getPropertyValue("--font-encode-sans").replaceAll(/[\"']/g, "").trim()
   );
   const sourceFamily = await source.evaluate((element) => getComputedStyle(element).fontFamily.replaceAll(/[\"']/g, ""));
   expect(sourceFamily).toContain(expectedFamily);

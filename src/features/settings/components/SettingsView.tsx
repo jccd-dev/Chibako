@@ -319,7 +319,7 @@ export function SettingsView() {
         <TabsContent value="properties" className="fade-in">
           <div className="flex flex-col gap-3 pt-3">
             <p className="text-sm text-muted-foreground">
-              Define the properties every note can carry (stored as YAML frontmatter, Obsidian-compatible). Typed, consistent
+              Define the properties every note can carry (stored as YAML frontmatter). Typed, consistent
               properties are what keep a vault searchable — the note editor renders them as inputs, and AI agents read this
               dictionary to set and filter by them.
             </p>

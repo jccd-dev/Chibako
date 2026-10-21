@@ -15,6 +15,14 @@ const dmSans = localFont({
   display: "swap",
   preload: true,
 });
+const encodeSans = localFont({
+  src: "../../public/fonts/EncodeSans.woff2",
+  weight: "100 900",
+  variable: "--font-encode-sans",
+  declarations: [{ prop: "font-stretch", value: "75% 125%" }],
+  display: "swap",
+  preload: false,
+});
 const questrial = localFont({
   src: "../../public/fonts/Questrial.woff2",
   weight: "400",
@@ -45,7 +53,7 @@ function AppearanceInitScript() {
 
 export const metadata: Metadata = {
   title: { default: "Chibako", template: "%s · Chibako" },
-  description: "Self-hosted Obsidian-like second brain with AI agent access.",
+  description: "Self-hosted second brain with AI agent access.",
   icons: {
     icon: [
       { url: "/favicon_io/favicon.ico" },
@@ -65,6 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={cn(
         "font-sans",
         dmSans.variable,
+        encodeSans.variable,
         questrial.variable,
         quicksand.variable,
         sourceSans3.variable,

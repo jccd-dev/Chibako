@@ -54,7 +54,7 @@ class Context:
  def register_skill(self,name,value): self.skills[name]=value
 c=Context()
 m.register(c)
-assert len(c.hooks)==5
+assert len(c.hooks)==6
 assert len(c.skills)==2
 assert all(p.exists() for p in c.skills.values())
 assert c.hooks['pre_llm_call'](session_id='fixture', user_message='hello', conversation_history=['private transcript']) == {}

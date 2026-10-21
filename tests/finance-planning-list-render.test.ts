@@ -14,6 +14,7 @@ import { useFinanceActivity } from "../src/features/finance/use-finance-activity
 import { useFinancePlanning } from "../src/features/finance/use-finance-planning";
 import { useFinanceRecurrence } from "../src/features/finance/use-finance-recurrence";
 import { FinancePlanCategories } from "../src/features/finance/components/FinancePlanCategories";
+import type { FinanceSchedule } from "../src/features/finance/recurrence-types";
 
 const item: PlanningItem = {
   kind: "schedule", id: "subscription", title: "TEST subscription", type: "expense", amount_cents: 112200,
@@ -66,6 +67,40 @@ test("new plan form starts recurring, monthly and manual while keeping the one-t
   assert.doesNotMatch(html, /Auto deduct<[^]*aria-checked="true"/);
 });
 
+const schedule: FinanceSchedule = {
+  id: "TEST schedule", type: "expense", account_id: "TEST account", account_name: "TEST account", currency: "PHP",
+  amount_cents: 112200, category_id: null, subcategory_id: null, category_name: null, obligation_id: null,
+  interval_count: 1, interval_unit: "month", start_date: "2026-10-21", end_date: null, paused: false,
+  handling: "manual", max_occurrences: null, total_limit_cents: null, logged_time: "09:00", timezone: "UTC",
+  automatic_error: null, version: 1, next_due_date: "2026-11-21", text: "TEST internet plan",
+};
+
+function ScheduleForm({ plan }: { plan: FinanceSchedule }) {
+  const activity = useFinanceActivity(async () => undefined);
+  const planning = useFinancePlanning("", async () => undefined);
+  const recurrence = useFinanceRecurrence(planning);
+  return createElement(FinancePlanningForm, {
+    activity, planning, recurrence, schedule: plan, occurrence: null, editSchedule: true, initialRecurring: true,
+    reminders: { obligations: [], loading: false, error: "", reload: () => undefined, hasMore: false, loadMore: () => undefined },
+    onClose: () => undefined, onRefresh: () => undefined, onBusyChange: () => undefined,
+  });
+}
+
+test("an edited plan keeps its name in the plan name field, asked before the amount", () => {
+  const html = renderToStaticMarkup(createElement(ScheduleForm, { plan: schedule }));
+  assert.match(html, /<label[^>]*for="schedule-text"[^>]*>Plan name \(optional\)<\/label>/);
+  assert.match(html, /placeholder="e\.g\. Monthly internet bill"/);
+  assert.match(html, /value="TEST internet plan"/);
+  assert.match(html, /maxLength="2000"/);
+  assert.ok(html.indexOf("schedule-text") < html.indexOf("schedule-amount"), "the plan name should be asked before the amount");
+  assert.doesNotMatch(html, /Note \(optional\)/);
+});
+
+test("an income plan suggests an income plan name", () => {
+  const html = renderToStaticMarkup(createElement(ScheduleForm, { plan: { ...schedule, type: "income" } }));
+  assert.match(html, /placeholder="e\.g\. Monthly salary"/);
+});
+
 function UncategorizedCategoryPicker() {
   const activity = useFinanceActivity(async () => undefined);
   return createElement(FinancePlanCategories, { activity, type: "expense", value: "", onChange: () => undefined, disabled: false, id: "test-category" });
@@ -115,7 +150,7 @@ test("recorded and skipped payments have no logging action", () => {
 });
 
 
-function InlinePayment({ plan, inline = true }: { plan: FinancePlan; inline?: boolean }) {
+function InlinePayment({ plan, inline = true }: { plan: FinancePlan | null; inline?: boolean }) {
   const activity = useFinanceActivity(async () => undefined);
   const planning = useFinancePlanning("", async () => undefined);
   return createElement(PlanPanel, {
@@ -124,6 +159,12 @@ function InlinePayment({ plan, inline = true }: { plan: FinancePlan; inline?: bo
     onClose: () => undefined, onFuture: () => undefined, onRefresh: () => undefined,
   });
 }
+
+test("the one-time plan editor labels its name field consistently", () => {
+  const html = renderToStaticMarkup(createElement(InlinePayment, { plan: null }));
+  assert.match(html, /<label[^>]*for="plan-text"[^>]*>Plan name \(optional\)<\/label>/);
+  assert.doesNotMatch(html, /Note \(optional\)/);
+});
 
 test("inline logging renders the existing confirmation form without a second drawer or extra plan actions", () => {
   for (const handling of ["manual", "automatic"] as const) {

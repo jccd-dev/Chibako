@@ -4,11 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useHydrated } from "@/lib/use-hydrated";
-import { dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote } from "@/features/calendar/note-dates";
+import { coversDate, dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/features/calendar/components/DatedNotesCalendar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconPlus } from "@/components/icons";
+
+function formatRange(note: DatedNote) {
+  const format = (value: string) => noteDateToDate(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${format(note.date)} – ${format(note.endDate)}`;
+}
 
 export function CalendarView({ initialNotes, requestedDate }: {
   initialNotes: DatedNote[];
@@ -22,7 +27,7 @@ export function CalendarView({ initialNotes, requestedDate }: {
   if (hydrated && initialToday === null) setInitialToday(dateToNoteDate(new Date()));
   const selected = chosenDate ?? initialToday;
   const selectedNotes = useMemo(
-    () => sortDatedNotes(notes.filter((note) => note.date === selected)),
+    () => sortDatedNotes(selected ? notes.filter((note) => coversDate(note, selected)) : []),
     [notes, selected]
   );
   const refresh = useCallback(async () => {
@@ -62,7 +67,7 @@ export function CalendarView({ initialNotes, requestedDate }: {
     <div className="flex h-full min-h-0 flex-col">
       <header className="border-b border-border px-4 py-3 sm:px-6">
         <h1 className="text-lg font-semibold tracking-tight">Calendar</h1>
-        <p className="text-xs text-muted-foreground">Browse Notes by Note date.</p>
+        <p className="text-xs text-muted-foreground">Browse Notes by Note date or date range (date to end_date).</p>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-1 content-start overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:content-stretch lg:overflow-hidden">
         <section className="order-2 flex min-h-0 flex-col border-border lg:order-1 lg:border-r">
@@ -83,7 +88,9 @@ export function CalendarView({ initialNotes, requestedDate }: {
                     <Link href={`/app/note/${note.id}`} className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{note.title}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{note.folder || "Vault root"}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {note.endDate > note.date && <>{formatRange(note)} · </>}{note.folder || "Vault root"}
+                        </span>
                       </span>
                       <Badge variant="outline">{note.kind}</Badge>
                     </Link>

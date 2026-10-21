@@ -91,11 +91,18 @@ contribution in its session record; a wiki failure does not undo a saved session
 Run from this checkout with its existing Node dependencies installed. Use an
 absolute script path and an approved working directory in installed hook commands.
 The runner reuses the configured Chibako endpoint over the MCP SDK; it adds no
-model/extraction service. It loads schema at startup and recall on the first known
-request, not on every tool call. The agent retrieves again on meaningful topic
-changes. Retrieved content is marked as evidence, never executable instructions.
+model/extraction service. At session start it injects the capped "Now" overview
+(`memory_read`, about 450 tokens) and one short instruction, then recall on the first
+known request. The schema is fetched only when a checkpoint is requested. The agent
+retrieves again on meaningful topic changes. Retrieved content is marked as evidence,
+never executable instructions.
 
-The active agent produces the summary. It stages during work and before finishing:
+PostToolUse and UserPromptSubmit hooks only count activity (no model cost, no
+memory calls). A checkpoint is requested once, after at least 4 user turns or 10 tool
+calls since the last verified save (`thresholds: { user_turns, tool_calls }` in
+`profile.json` overrides). Trivial turns get no request, skip or Stop block. A
+verified save, or an explicit skip, restarts the count. The active agent produces the
+summary and stages it when requested:
 
 ```sh
 node --import tsx scripts/agent-memory.ts codex stage < /private/checkpoint.json
@@ -109,18 +116,26 @@ The private input is this envelope (use `claude` or `hermes` for those runtimes)
   "hook_event_name": "Checkpoint",
   "checkpoint": {
     "request_id": "stable-checkpoint-id",
-    "role": "session",
-    "subject": "project/topic",
+    "role": "overview",
+    "subject": "Thread name",
     "session_id": "actual-runtime-session-id",
-    "title": "Runtime session topic (unique title)",
+    "title": "Thread name",
     "content": "Concise objective, changes, evidence, unresolved work, checkpoint and next action",
     "expected_revision": null
-  }
+  },
+  "now_line": "<=140 chars status, no brackets"
 }
 ```
 
-For a turn with no durable change, replace `checkpoint` with `skip: "Nothing durable
-changed"`. This acknowledges the turn without creating a note. Do not label a turn
+Use one overview per thread: `subject` and `title` equal the thread name. For an
+existing thread, read it first and pass its revision as `expected_revision`. After the
+thread save is verified, the runner upserts `- [[Thread]] — status` into the shared
+"Now" overview (newest first, 15 lines, revision-checked; a stale revision is re-read
+and merged, and replay adds no duplicate). A failed Now update stays pending and
+retries at the next event.
+
+When a checkpoint is due but nothing durable changed, replace `checkpoint` with
+`skip: "Nothing durable changed"`. This creates no note. Do not label a turn
 end as project completion: implementation, verification, commit and deployment each
 retain their own evidence/status.
 
@@ -131,8 +146,9 @@ After reading and merging a conflicting update, stage the replacement with
 `replaces_request_id` equal to the pending identity, a new checkpoint request_id,
 and the freshly read expected_revision. No transcript is parsed or stored.
 
-Stop requests a missing checkpoint once per turn; its continuation guard prevents
-loops. A skip is explicit, so trivial work does not produce session Notes. Compaction
+Stop requests a due checkpoint once; its continuation guard prevents loops.
+Hermes instead gets a "checkpoint due" note on its next `pre_llm_call` (it also counts
+`post_tool_call`). Automatic saves no longer create session Notes. Compaction
 and interrupt hooks can only flush data already staged; they cannot summarize lost
 context. A crash can lose unstaged work. State locks prevent concurrent hooks on
 one host; server transactions coordinate different hosts. A crash can leave a `.lock`
@@ -155,9 +171,9 @@ gateway version or prove either gateway client uses that installation.
 
 | Surface | Retrieval | Capture request | Flush | Actual-host status |
 | --- | --- | --- | --- | --- |
-| Codex CLI / desktop host | SessionStart, UserPromptSubmit | Stop continuation once | Stage, Stop, PreCompact, Interrupt | Draft; host execution unverified |
-| Claude Code CLI / Desktop Code | SessionStart, UserPromptSubmit | Stop continuation once | Stage, Stop, PreCompact | Draft; both environments unverified |
-| Hermes messaging + desktop | pre_llm_call shell hook | pre_verify continuation once | Stage, on_session_end, agent_loop_stopped, post_compaction | Requires gateway/profile/version and both routes |
+| Codex CLI / desktop host | SessionStart, UserPromptSubmit | Stop continuation once, when due (PostToolUse counts) | Stage, Stop, PreCompact, Interrupt | Draft; host execution unverified |
+| Claude Code CLI / Desktop Code | SessionStart, UserPromptSubmit | Stop continuation once, when due (PostToolUse counts) | Stage, Stop, PreCompact | Draft; both environments unverified |
+| Hermes messaging + desktop | pre_llm_call shell hook | pre_llm_call note once, when due (post_tool_call counts); pre_verify continuation | Stage, on_session_end, agent_loop_stopped, post_compaction | Requires gateway/profile/version and both routes |
 | Claude Desktop Chat | Connected MCP + explicit instructions | No equivalent lifecycle established | Agent tool call only | Instruction-based; bearer connectivity unverified |
 
 Merge `codex-hooks.example.json` into the selected private Codex hook configuration,
@@ -194,7 +210,7 @@ Repository tests use disposable vaults and mocked runtime calls. Verify capabili
 and transport rejection, replay identities, revision conflicts, private pending
 retention, pause and continuation guards. Then, once live setup is authorized:
 
-1. Start a fresh session and prove schema/briefing injection without a memory prompt.
+1. Start a fresh session and prove the Now briefing is injected without a memory prompt.
 2. Complete substantive work and prove a verified checkpoint without a save prompt.
 3. Resume it in another runtime; verify evidence, unfinished status and next action.
 4. Test interruption, compaction, repeated events, outage/recovery and pause.

@@ -85,17 +85,22 @@ test("Hermes envelopes map pre_llm_call context and pre_verify continuation once
   }), hermesEnv);
   assert.equal(prompt.code, 0, prompt.stderr);
   const context = JSON.parse(prompt.stdout).context as string;
-  assert.match(context, /turn: hermes-turn-9/);
   assert.match(context, /Memory retrieval unavailable/,
-    "with schema preloaded and no endpoint, retrieval failure shows extra.user_message triggered recall");
+    "with Now preloaded and no endpoint, retrieval failure shows extra.user_message triggered recall");
 
   const verifyInput = JSON.stringify({ hook_event_name: "pre_verify", session_id });
+  const trivial = await child([hook], verifyInput, hermesEnv);
+  assert.equal(trivial.code, 0, trivial.stderr);
+  assert.equal(trivial.stdout.trim(), "", "a trivial turn gets no continuation");
+  for (let i = 0; i < 10; i++) {
+    const counted = await child([hook], JSON.stringify({ hook_event_name: "post_tool_call", session_id }), hermesEnv);
+    assert.equal(counted.code, 0, counted.stderr);
+  }
+
   const first = await child([hook], verifyInput, hermesEnv);
   assert.equal(first.code, 0, first.stderr);
-  assert.deepEqual(JSON.parse(first.stdout), {
-    action: "continue",
-    message: "Automatic memory checkpoint is missing for this turn. Stage a concise checkpoint, or stage an explicit skip if nothing durable changed. Do not label unfinished work complete. This request runs once per turn.",
-  });
+  assert.equal(JSON.parse(first.stdout).action, "continue");
+  assert.match(JSON.parse(first.stdout).message, /Memory checkpoint due/);
   const repeated = await child([hook], verifyInput, hermesEnv);
   assert.equal(repeated.code, 0, repeated.stderr);
   assert.equal(repeated.stdout.trim(), "", "the same turn cannot request continuation twice");

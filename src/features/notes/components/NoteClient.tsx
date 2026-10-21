@@ -281,7 +281,8 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
 
   useEffect(() => {
     const id = note?.id ?? (!initial ? "new" : null);
-    if (!id) return;
+    // The session swaps documents asynchronously; don't re-announce the previous note mid-switch.
+    if (!id || (initial && id !== initial.id)) return;
     window.dispatchEvent(new CustomEvent("chibako:note-tab", {
       detail: { id, title: title.trim() || "Untitled" },
     }));
@@ -984,6 +985,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
             <DatedNotesCalendar
               notes={allNotes}
               selected={noteDate}
+              selectedEnd={isNoteDate(fm.props.end_date) ? fm.props.end_date : undefined}
               onSelect={(date) => router.push(`/app/calendar?date=${date}`)}
               compact
             />
