@@ -1,12 +1,16 @@
-# Automatic agent memory pilot
+# Automatic agent memory
 
-Status: repository implementation and standalone plugin packages. Live hooks are **not activated**.
+The Chibako plugin bundles a standalone Node.js runner, lifecycle hooks, and two
+skills: `chibako-memory` and `chibako-memory-setup`. Install it through your
+runtime's plugin manager, then configure the connection privately in your terminal.
 
-For the packaged setup wizard and controls, follow [INSTALL.md](INSTALL.md). The
-environment-only commands below document the earlier manual pilot workflow.
-The owner selected a new top-level private memory area and preparation of all three
-runtimes before activation. No personal endpoints, credentials or host paths belong
-in this public directory.
+Start with [INSTALL.md](INSTALL.md) for Claude Code, Codex, and Hermes installation,
+setup, controls, and recovery. Installing a package does not prove that its hooks
+run in your particular host; verify a fresh session and saved checkpoint.
+
+This page documents the protocol and advanced manual integration. Packaged installs
+do not need the environment variables or hook examples below. Do not enable both
+manual and packaged hooks for the same runtime profile.
 
 ## Shared contract
 
@@ -159,64 +163,27 @@ Metrics on stderr report MCP calls and elapsed milliseconds without checkpoint
 content or credentials. Added model usage/context tokens and summary quality still
 need real pilot measurement; no cost or reliability claim is made from fixtures.
 
-## Setup drafts and event map
+## Runtime events and verification
 
-Sources checked 2026-10-19: [Codex hooks](https://learn.chatgpt.com/docs/hooks),
-[Hermes hooks](https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks),
-[Claude Code hooks](https://code.claude.com/docs/en/hooks).
-Local read-only inventory found Codex CLI 0.163.0 and Claude Code 2.1.226.
-The Hermes wrapper could not report a version because its install lock is not
-writable. Local source exposes plugin hooks, but this does not identify the remote
-gateway version or prove either gateway client uses that installation.
+| Runtime | Retrieval | Checkpoint request | Flush staged data |
+| --- | --- | --- | --- |
+| Codex | SessionStart, UserPromptSubmit | Stop, after activity threshold | Stage, Stop, PreCompact, Interrupt |
+| Claude Code | SessionStart, UserPromptSubmit | Stop, after activity threshold | Stage, Stop, PreCompact |
+| Hermes | pre_llm_call | pre_llm_call; pre_verify for edited-code turns | Stage, on_session_end, agent_loop_stopped, post_compaction |
 
-| Surface | Retrieval | Capture request | Flush | Actual-host status |
-| --- | --- | --- | --- | --- |
-| Codex CLI / desktop host | SessionStart, UserPromptSubmit | Stop continuation once, when due (PostToolUse counts) | Stage, Stop, PreCompact, Interrupt | Draft; host execution unverified |
-| Claude Code CLI / Desktop Code | SessionStart, UserPromptSubmit | Stop continuation once, when due (PostToolUse counts) | Stage, Stop, PreCompact | Draft; both environments unverified |
-| Hermes messaging + desktop | pre_llm_call shell hook | pre_llm_call note once, when due (post_tool_call counts); pre_verify continuation | Stage, on_session_end, agent_loop_stopped, post_compaction | Requires gateway/profile/version and both routes |
-| Claude Desktop Chat | Connected MCP + explicit instructions | No equivalent lifecycle established | Agent tool call only | Instruction-based; bearer connectivity unverified |
+Packaged plugins register these events. The `*-hooks.example.json` and
+`hermes.example.yaml` files are for manual integration only. Preserve unrelated
+hooks when editing native settings. Use actual runtime session IDs, never display
+names. Ordinary Claude Desktop Chat does not inherit Claude Code hooks; T3 Code
+and Hermes gateway routes require their own host verification.
 
-Merge `codex-hooks.example.json` into the selected private Codex hook configuration,
-preserving existing hooks. It currently contains unrelated Impeccable hooks; do not
-replace the whole file. For Claude Code merge `claude-hooks.example.json` into private Claude Code settings.
-It uses the Claude runtime identity and omits Interrupt (no equivalent established). Confirm each exact host's supported
-hook output and permissions before activation. T3 Code is a separate host check.
+After setup, test the selected runtime:
 
-For Hermes, merge `hermes.example.yaml` into the selected private profile and use
-`hermes-hook.ts` as its envelope adapter. Official documentation supports shell-hook
-context injection and pre_verify continuation. This remains a draft until the actual
-gateway version, consent, profile separation and both client routes are verified.
-The installed local source describes `pre_verify` as a coding gate. Its coverage
-for research, planning and personal workflows is unproven: those turns depend on
-normal agent staging, with no reliable missing-checkpoint continuation established.
-Compaction is post-event best effort; it cannot recover unstaged pre-compaction work.
-Use actual runtime session IDs, never display names. Do not install both shell hooks
-and gateway directory hooks for the same capture events. If a target lacks this
-shell-hook API, report unsupported automatic capture; use instruction-based MCP
-capture temporarily rather than intercepting transcripts or adding another service.
+1. Start a fresh session and confirm the Now briefing loads without a memory prompt.
+2. Complete meaningful work and confirm a checkpoint receives a verified save receipt.
+3. Resume in another runtime and check the saved status and next action.
+4. Check pause, outage/retry, interruption, and compaction behavior.
 
-Claude Desktop Chat uses scoped bearer connectivity, while Chibako currently does
-not implement OAuth. Verify the client's available authentication path before
-calling it connected. Ordinary chat does not inherit Code hooks.
-
-## Activation review and verification
-
-Before editing live configuration, present the exact server deployment, Codex host,
-Hermes gateway/profile, Claude environments, runtime state paths and config diffs.
-The owner selected preparation of all three, not activation. Endpoint secrets and
-production deployment configuration stay in the private infrastructure repository.
-
-Repository tests use disposable vaults and mocked runtime calls. Verify capability
-and transport rejection, replay identities, revision conflicts, private pending
-retention, pause and continuation guards. Then, once live setup is authorized:
-
-1. Start a fresh session and prove the Now briefing is injected without a memory prompt.
-2. Complete substantive work and prove a verified checkpoint without a save prompt.
-3. Resume it in another runtime; verify evidence, unfinished status and next action.
-4. Test interruption, compaction, repeated events, outage/recovery and pause.
-5. Confirm both Hermes client routes share gateway policy without duplicate capture.
-6. Record actual calls, tokens, latency, skipped/failed checks and Chat limitations.
-
-No E2E or Playwright runs were authorized for the implementation session. Runtime
-pilot checks and activation remain pending. Broad README, vault-schema, AGENTS.md
-and installable-skill changes remain deferred until the pilot proves the behavior.
+Compaction and interrupt events flush staged data only; they cannot recover
+unstaged work. Repository fixtures verify protocol behavior, not live host hook
+execution or model costs. Measure calls, tokens, and latency during your own pilot.

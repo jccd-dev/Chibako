@@ -41,10 +41,6 @@ sequenceDiagram
     participant MCP as Chibako MCP
     participant DB as SQLite vault
 
-    Agent->>MCP: get_knowledge_schema()
-    MCP->>DB: Read vault instructions
-    DB-->>Agent: Knowledge Schema
-
     Agent->>MCP: recall(query, limit, budget)
     MCP->>DB: Rank matching notes
     DB-->>Agent: Titles and trimmed snippets
@@ -56,15 +52,19 @@ sequenceDiagram
     Note over Agent: Perform the task
 
     opt Durable knowledge was confirmed and saving is authorized
-        Agent->>MCP: memory_save(...) or update_note(...)
+        Agent->>MCP: get_knowledge_schema()
+        MCP-->>Agent: Vault writing rules
+        Agent->>MCP: memory_write(...) or authorized note write
         MCP->>DB: Persist for later chats
         DB-->>Agent: Saved result
     end
 ```
 
 The installable [`chibako-memory`](../skills/chibako-memory/SKILL.md) skill
-teaches compatible agents this workflow. The skill still requires a configured
-Chibako MCP connection.
+teaches compatible agents this workflow. The standalone skill requires a configured
+Chibako MCP connection. The automatic plugin bundles both this skill and
+`chibako-memory-setup`, plus lifecycle hooks. Follow the
+[installation guide](../integrations/agent-memory/INSTALL.md) to connect it.
 
 ## Automatic memory with hooks
 
@@ -126,32 +126,6 @@ when it exceeds the requested budget. Claims such as “exact token cap” or a
 specific percentage saved would require tokenizer-based measurements and a
 repeatable benchmark. The supported claim is: **Chibako lets callers target a
 context budget and avoids loading full note bodies during discovery.**
-
-## Where Chibako differs
-
-Chibako combines a human-owned note vault with an agent retrieval interface.
-That makes its tradeoffs different from dedicated memory platforms and from
-desktop note applications.
-
-| Approach | Typical memory model | Chibako difference |
-|---|---|---|
-| Dedicated agent memory, such as Mem0 | Extracted memories searched through semantic retrieval and filters | Canonical knowledge stays directly editable as Markdown; keyword retrieval works without an LLM, embeddings service, or vector database |
-| Persistent agent runtime, such as Letta | Memory blocks can remain in the agent's context | Chibako retrieves vault content on demand, so unrelated notes do not need to occupy every prompt |
-| Local note apps, such as Logseq | Human-first local vault or graph, with agent access added through integrations | Chibako ships a self-hosted web UI, scoped REST API, and MCP server against the same server-side vault |
-
-This is not a universal performance ranking. Mem0 provides richer memory
-extraction and filtering, Letta provides an agent runtime with persistent
-in-context memory, and established note apps have larger ecosystems. Chibako's
-advantage is the combination of inspectable Markdown, explicit wikilinks,
-self-hosted storage, scoped agent access, and budget-targeted retrieval.
-
-Primary references:
-
-- [Model Context Protocol tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
-- [Mem0 memory search](https://docs.mem0.ai/core-concepts/memory-operations/search)
-- [Mem0 open-source repository](https://github.com/mem0ai/mem0)
-- [Letta memory documentation](https://docs.letta.com/guides/agents/memory/)
-- [Logseq documentation](https://docs.logseq.com/)
 
 ## Access and ownership
 

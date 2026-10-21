@@ -1,0 +1,14 @@
+{
+  "name": "chibako-plugins",
+  "owner": {
+    "name": "JC",
+    "url": "https://github.com/jccd-dev/Chibako"
+  },
+  "plugins": [
+    {
+      "name": "chibako",
+      "source": "./",
+      "version": "0.2.0"
+    }
+  ]
+}

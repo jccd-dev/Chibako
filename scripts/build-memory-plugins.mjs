@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
-export async function buildMemoryPlugins(output = join(root, "dist/plugins")) {
+export async function buildMemoryPlugins(output = join(root, "dist/plugins"), { archives = true } = {}) {
   const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
   await mkdir(output, { recursive: true });
   for (const runtime of ["codex", "claude", "hermes"]) {
@@ -16,7 +16,7 @@ export async function buildMemoryPlugins(output = join(root, "dist/plugins")) {
     await mkdir(join(directory, "bin"), { recursive: true });
     await build({
       absWorkingDir: root,
-      entryPoints: { memory: "scripts/agent-memory.ts", "hermes-hook": "integrations/agent-memory/hermes-hook.ts" },
+      entryPoints: { memory: "scripts/agent-memory.ts", ...(runtime === "hermes" && { "hermes-hook": "integrations/agent-memory/hermes-hook.ts" }) },
       outdir: join(directory, "bin"), outExtension: { ".js": ".mjs" },
       bundle: true, platform: "node", format: "esm", target: "node20",
       banner: { js: 'import { createRequire as __chibakoRequire } from "node:module"; const require = __chibakoRequire(import.meta.url);' },
@@ -46,6 +46,7 @@ export async function buildMemoryPlugins(output = join(root, "dist/plugins")) {
         portable.extensions["com.openai"].hooks = "./hooks/hooks.json";
         await mkdir(join(directory, ".agents/plugins"), { recursive: true });
         const marketplace = JSON.parse(await readFile(join(root, ".agents/plugins/marketplace.json"), "utf8"));
+        marketplace.plugins[0].source.path = "./";
         await writeFile(join(directory, ".agents/plugins/marketplace.json"), json(marketplace));
       } else {
         await mkdir(join(directory, ".claude-plugin"), { recursive: true });
@@ -57,11 +58,14 @@ export async function buildMemoryPlugins(output = join(root, "dist/plugins")) {
       await cp(join(root, "integrations/agent-memory/hermes-plugin.py"), join(directory, "__init__.py"));
     }
     await writeFile(join(directory, "plugin.json"), json(portable));
-    await writeFile(join(directory, "README.md"), `# Chibako memory — ${runtime}\n\nRequires Node.js 20 or newer. Run the bundled chibako-memory-setup skill to configure a private connection. Automatic memory stays disabled until setup is approved. No repository checkout or npm installation is required.\n`);
-    execFileSync("tar", ["-czf", join(output, `chibako-${runtime}-${manifest.version}.tar.gz`), "-C", directory, "."]);
+    const install = { claude: "/plugin install chibako --marketplace jccd-dev/Chibako", codex: "codex plugin marketplace add jccd-dev/Chibako\ncodex plugin add chibako@chibako-plugins", hermes: "hermes plugins install jccd-dev/Chibako/plugins/hermes" }[runtime];
+    await writeFile(join(directory, "README.md"), `# Chibako memory — ${runtime}\n\nInstall:\n\n\`\`\`\n${install}\n\`\`\`\n\nRequires Node.js 20 or newer. Run the bundled chibako-memory-setup skill to configure a private connection. Automatic memory stays disabled until setup is approved. No repository checkout or npm installation is required.\n`);
+    if (archives) execFileSync("tar", ["-czf", join(output, `chibako-${runtime}-${manifest.version}.tar.gz`), "-C", directory, "."]);
   }
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  await buildMemoryPlugins(process.argv[2] ? resolve(process.argv[2]) : undefined);
+  // --publish refreshes the committed plugins/ directories that native marketplaces install from.
+  if (process.argv[2] === "--publish") await buildMemoryPlugins(join(root, "plugins"), { archives: false });
+  else await buildMemoryPlugins(process.argv[2] ? resolve(process.argv[2]) : undefined);
 }

@@ -31,7 +31,6 @@ agent can read and write your vault without blowing token budgets.
 - [The story](#-the-story)
 - [The name](#-the-name)
 - [Why Chibako?](#-why-chibako)
-- [How it compares](#-how-it-compares)
 - [Features](#-features)
 - [Quick start (local dev)](#-quick-start-local-dev)
 - [Deploy to your VPS](#-deploy-to-your-vps-docker-compose--nginx)
@@ -53,23 +52,9 @@ Chibako started as a personal project: a place for my own notes that could live
 on my VPS, and that I could also use as long-term memory — a "second brain" —
 for the AI agents I build (Hermes and anything else that speaks MCP).
 
-I wanted plain Markdown, `[[wikilinks]]`, backlinks and a graph of how ideas
-connect. Desktop note apps such as Logseq are wonderful **on the desktop**, and
-they're great as agent-controlled memory too. The problem is what happens when
-the vault should live on a remote server instead. Logseq *does* have an
-official web app and a Docker image, but they only serve the static app — your
-notes stay on the local machine and are opened through the browser's File
-System Access API, so the server never actually holds the vault.
-"Self-hosted web notes" is not the default experience.
-
-The usual workaround is a synced vault folder plus a mesh VPN like Tailscale so
-a desktop app can reach the server. That works, but it's a poor experience:
-install the desktop app on every device, keep sync healthy, and hope nothing
-drifts.
-
-**Chibako closes that gap.** It is a web app you self-host, so your notes are a
-browser tab away from anywhere — *and* it speaks to AI agents natively through a
-REST API and an MCP server. It's built remote-first and agent-first.
+I wanted Markdown notes, `[[wikilinks]]`, backlinks, and a graph of how ideas
+connect, accessible from any browser. Chibako keeps that vault on a server I
+control and gives my agents scoped REST and MCP access to the same knowledge.
 
 ## 🇯🇵 The name
 
@@ -85,18 +70,17 @@ what you know, that both you and your agents can reach.
 
 ## ⚡ Why Chibako?
 
-Most note apps are **local-first** and treat the server as an afterthought.
-Chibako is **server-first** and treats your agent as a first-class user.
+Chibako keeps your notes and agent memory together on your own server.
 
 - **A real web UI on your own server.** Log in from any browser, on any device.
-  No desktop app, no sync folder, no Tailscale dance.
+  No desktop installation or folder sync required.
 - **One file to back up.** The entire vault — notes, links, search index, keys,
   sessions — is `data/brain.db` (SQLite, WAL mode). Back it up with a single
   `VACUUM INTO` command.
 - **Runs on a tiny VPS.** 1 vCPU / 4 GB is plenty. No external services, no
   separate database, no vector DB required.
 - **Agent-native by construction.** Scoped, revocable API keys; a REST API that
-  mirrors every UI action; and an MCP stdio server with 21 tools.
+  mirrors every UI action; and remote or local MCP access.
 - **Token-efficient by design.** Notes are raw Markdown (no JSON block trees),
   list/links calls return titles and ids only, `ingest_note` packs a note +
   links + schema into one round trip, and `recall` returns ranked titles +
@@ -105,33 +89,6 @@ Chibako is **server-first** and treats your agent as a first-class user.
   [design and evidence](docs/AGENT-MEMORY.md#why-retrieval-uses-fewer-context-tokens).
 - **Markdown stays portable.** Your notes are plain text you can read, diff,
   and move. The database is an index, not a lock-in.
-
-## ⚖️ How it compares
-
-Chibako sits next to local-first note apps such as Logseq rather than replacing them outright.
-The difference is *where it runs* and *who it serves first*.
-
-| | Logseq | **Chibako** |
-|---|---|---|
-| Note model | Outliner / blocks, Markdown | Markdown + wikilinks |
-| Primary app | Desktop + mobile; web app reads local files | **Self-hosted web UI (server-first)** |
-| Official web app | Yes — but notes stay local via File System Access API | **Yes — notes live on your server** |
-| Reach a remote server | Sync folder + desktop app, or self-host the static web app | **Open a URL on your VPS from any browser** |
-| Agent access | Community MCP servers / plugins; no built-in agent API | **Built-in REST API + MCP server, scoped keys** |
-| Token efficiency for LLMs | Block-tree serialization | **Raw Markdown; titles+ids lists; token-budgeted `recall`** |
-| Storage | Files / graph DB | **One `brain.db` (SQLite)** |
-| Self-hosting | Desktop-first (server serves static app only) | **Docker + nginx on one VPS** |
-| License | Open source (AGPL-3.0) | **Open source (MIT)** |
-
-> Comparison reflects each project's public documentation at the time of
-> writing and may change. Chibako is an independent project, not affiliated
-> with or endorsed by Logseq. Verify specifics before relying on
-> them.
-
-The honest summary: if you want a sprawling plugin ecosystem and a polished
-native desktop app, local-first apps such as Logseq are excellent. If you want your notes
-**reachable over the web from a server you control** and **directly usable as AI
-agent memory**, that's the gap Chibako was built to fill.
 
 ## ✨ Features
 
@@ -152,6 +109,10 @@ agent memory**, that's the gap Chibako was built to fill.
 - **Full-text search** with `<mark>`-highlighted snippets
 - **Knowledge schema** — an `AGENTS.md`-format file (editable in Settings) that
   tells your agent how to run the raw → wiki → outputs "second brain" loop
+- **Finance** — accounts, income and expenses, transfers, budgets, goals, debts,
+  receivables, and one-time or recurring plans
+- **Automatic agent memory** — opt-in plugins for Claude Code, Codex, and Hermes;
+  bundled hooks and skills recall context and save thread checkpoints
 - **Agent access**
   - **REST API** — scoped, revocable API keys; every operation is an HTTP endpoint
   - **MCP server** — one stdio server with `list_notes`, `search_notes`,
@@ -344,15 +305,8 @@ exposed.
 Remote MCP exposes only tools allowed by the key. `notes:purge` is separate
 from ordinary writes, and embedding indexing is intentionally local-only.
 
-Finance access requires explicit scopes, even on wildcard keys: `finance:read`
-for balances and reports, `finance:write` for activity, and `finance:manage` for
-definitions and settings. Moving goal money requires both write and manage;
-Finance Note links also require `notes:read`. Start with `get_finance_overview`
-or `get_finance_attention`, then use filtered, paginated lists and request
-`include_details` only when needed. For mutations, reuse the same `request_id`
-when retrying an unchanged request and supply the current resource version
-where required. Local stdio does not run automatic schedules; those require
-the running Next.js server.
+Finance tools require explicit `finance:read`, `finance:write`, or
+`finance:manage` scopes. See `/app/agent` for operation-specific requirements.
 
 ### Advanced: local stdio MCP
 
@@ -375,184 +329,48 @@ curl -X POST https://your-domain.com/api/notes \
 
 See `/app/agent` in the UI for the full tool list and examples.
 
-### Install the memory skill
+### Install the automatic memory plugin
 
-The [Chibako Memory skill](skills/chibako-memory/SKILL.md) teaches compatible
-agents to read the "Now" index, recall relevant notes, and save a thread overview
-when meaningful work happened. The Knowledge Schema is fetched only before a write. Configure Chibako MCP
-first using the instructions above. With a scoped API key, use `schema:read`
-and `notes:read`; add `notes:write` if you want the agent to save knowledge.
-
-### Install as a Codex or ChatGPT plugin
-
-This repository is also a portable [Agent Plugins](https://agent-plugins.org)
-package. [`plugin.json`](plugin.json) bundles the `chibako-memory` skill and
-[`mcp.json`](mcp.json) points at the hosted Chibako MCP endpoint, so Codex and
-the ChatGPT desktop app can install both at once.
-
-```bash
-codex plugin marketplace add jccd-dev/Chibako
-```
-
-Then open **Plugins** (or run `/plugins` in Codex CLI) and install **Chibako**
-from your marketplace. In Codex CLI you can also press <kbd>Space</kbd> on the
-installed plugin to toggle it.
-
-The plugin ships no credential. Add your own key once, in your user config —
-never in this repository:
-
-```toml
-# ~/.codex/config.toml
-[mcp_servers.chibako]
-bearer_token_env_var = "CHIBAKO_API_KEY"
-```
-
-Self-hosters should edit `mcp.json` to point at their own `/mcp` URL before
-publishing a fork. IDE extensions do not support plugins; use the desktop app
-or Codex CLI.
-
-### Automatic memory plugin packages
-
-Automatic memory is opt-in. The standalone packages add a private terminal setup
-wizard, hooks and controls for Codex, Claude Code and Hermes. They use only
+Automatic memory is opt-in. The plugin adds hooks, a private terminal setup
+wizard and controls for Claude Code, Codex and Hermes. It uses only
 `notes:read`, `schema:read` and `memory:write`; the server owner must first deploy
 the memory capability and configure an approved non-root area.
 
-The installable archives are built with `npm run build:memory-plugins` under
-`dist/plugins/`. End users extract the archive for their runtime and install that
-local plugin/marketplace through their client. Node.js 20+ is required; no Chibako
-checkout or npm install is needed on the client. These artifacts are not published
-by building them. Hook-bearing Codex packages currently use manual installation,
-not the official public plugin directory.
+Install from this repository through your assistant's own plugin manager. No
+build, checkout or npm install is needed; Node.js 20+ is required.
 
-Use the installed `chibako-memory-setup` skill to obtain the exact command for your
-own terminal. It hides the API-key input and previews private configuration before
-applying it. Never paste the key into agent chat. Installation, connection checks
-and proven autonomous capture are separate states.
+| Runtime | Install |
+| --- | --- |
+| Claude Code | `/plugin marketplace add jccd-dev/Chibako`, then `/plugin install chibako@chibako-plugins` |
+| Codex | `codex plugin marketplace add jccd-dev/Chibako`, then `codex plugin add chibako@chibako-plugins` (or install from `/plugins`) and trust its hooks in `/hooks` |
+| Hermes | `hermes plugins install jccd-dev/Chibako/plugins/hermes`, then enable it |
 
-See the [automatic memory installation guide](integrations/agent-memory/INSTALL.md)
-for installation, controls, private-state paths, recovery and compatibility limits.
-The source-repository marketplace above continues to provide manual memory access;
-use a built archive for the bundled automatic setup workflow.
+The plugin ships no credential and stays disabled until setup. Ask the installed
+`chibako-memory-setup` skill for the exact command to run in your own terminal. It
+asks for your Chibako URL and API key without echo and previews private
+configuration before applying it. Never paste the key into agent chat.
+Installation, connection checks and proven autonomous capture are separate states.
 
-### Security audits on `npx skills add`
+The installed files are the committed [`plugins/`](plugins) directories, generated
+from source by `npm run publish:memory-plugins`; a test fails if they drift from a
+fresh build. See the [automatic memory installation guide](integrations/agent-memory/INSTALL.md)
+for controls, private-state paths, recovery and compatibility limits.
 
-The `skills` CLI prints a **Security Risk Assessments** table (Gen, Socket,
-Snyk). Those verdicts come from third-party scanners that run on a schedule
-against the GitHub repository — they are not a live scan of your local files,
-and the table is cached server-side, so it can lag your latest commits.
-[View the current verdicts for this repo](https://skills.sh/jccd-dev/Chibako).
-The skill does not install Chibako, configure MCP, or copy your vault.
+### Use the skill without automatic hooks
 
-Install from this public repository using the [skills CLI](https://github.com/vercel-labs/skills):
+For an instruction-based workflow with an existing MCP connection:
 
 ```bash
 npx skills add jccd-dev/Chibako --skill chibako-memory
 ```
 
-For Codex across all projects:
+Reload your agent's skills, then ask it to use `chibako-memory`. This standalone
+skill does not install hooks or configure MCP. Use `notes:read` and `schema:read`;
+add `notes:write` only if you authorize ordinary note saves. The automatic plugin
+already includes both memory and setup skills, so a separate skill install is
+unnecessary. Remove duplicate manual memory hooks before enabling the plugin.
 
-```bash
-npx skills add jccd-dev/Chibako --skill chibako-memory --agent codex --global
-```
-
-Restart or reload your agent's skills after installation. In Codex, invoke it
-with `$chibako-memory`, for example: "Use $chibako-memory to recall our
-authentication decisions before reviewing this change."
-
-Installation makes the skill available for selection; it is not a startup hook
-and does not guarantee execution in every chat. For automatic, low-cost memory
-in Codex, Claude Code and Hermes, install the hook plugins described in
-[integrations/agent-memory](integrations/agent-memory/README.md): they load a
-capped "Now" index at session start and request a checkpoint only after
-meaningful activity (default 4 user turns or 10 tool calls). Without hooks, add
-this to your agent's persistent instructions (for example, a project
-`AGENTS.md`, or user-level instructions for all projects):
-
-```markdown
-Use the chibako-memory skill once at the start of each session. Retrieve relevant
-context before working. Treat questions as read-only; save memory only when
-I request it or have explicitly authorized ongoing memory updates.
-```
-
-If you want routine saving too, explicitly add:
-
-```markdown
-After implementation tasks, you may save confirmed, reusable project decisions
-and lessons to Chibako. Skip secrets, raw transcripts, and temporary details.
-```
-
-**Settings → Knowledge schema** controls the vault's organization rules. The
-skill fetches those rules before writing; changes apply on the next fetch. After
-upgrading, apply the new "Agent memory" section with **Restore default → Save**
-(this replaces your customized schema, so merge any edits back first). Memory survives a
-new chat when its MCP connection accesses the same vault. `recall` searches
-notes, while `list_observations` retrieves recent observations separately.
-
-Contributors can check discovery before publishing without installing anything:
-
-```bash
-npx skills add ./skills --list
-```
-
-## Finance planning
-
-Finance → Planning uses one **Plans** list for recurring schedules and one-time
-plans. Filter by **All**, **Needs attention**, **Upcoming**, or **Paused**. Open a
-schedule to review its payments, log or match actual activity, skip a payment, or
-view recorded history. Use **Confirm** or **Confirm income** beside a pending payment
-to confirm actual activity inline in the same overview drawer, including early
-payments on automatic schedules. Recording or matching a recurring payment prepares
-the next payment automatically, including when paid early. Recorded payments are
-not posted again automatically. Due counts stay on the schedule instead
-of a separate queue. Payment history is shown newest first.
-
-Use **Edit plan** in the overview to change pending and future occurrences. **Delete plan**
-stops recurrence and cancels its pending payments while retaining recorded cash activity
-and audit history. Reverting recorded activity from a deleted schedule does not reopen
-its payments.
-
-Choose **Add plan**, then select income or expense. New plans default to recurring,
-monthly, and manual handling. Use **Set as recurring** to switch to a one-time plan,
-or choose a repeat preset or custom interval, handling, and ending controls.
-**Every 2 months** means exactly that; bi-weekly means every two weeks. The schedule preview shows the first and next dates before saving.
-
-Income and expense plans are expectations until posted or matched to actual activity.
-Recurring schedules support daily, weekly, monthly, and yearly intervals, plus custom
-interval counts. Month-end dates remain anchored: January 31 becomes February 28,
-then March 31. Plans and schedules store `logged_time` (`HH:mm`, default `00:00`),
-`timezone` (IANA, default `UTC`).
-
-Schedules default to `handling: "manual"`, including existing and imported schedules.
-Manual plans need confirmation before changing account balances. Opting into
-`handling: "automatic"` requires both `finance:manage` and `finance:write`.
-The running Next.js Node server checks automatic schedules at startup and every minute,
-even while the browser is closed. After downtime it catches up missed due dates in
-bounded batches. The server must stay running; static hosting, suspended/serverless
-processes, and the standalone MCP stdio process do not run this scheduler.
-Build and test phases do not start the runner. No external cron service is required.
-
-Handling belongs to each occurrence: editing "this and future" preserves earlier
-manual or automatic plans. The schedule handling sets the default for newly generated
-occurrences; each plan returns its own `handling`. Global pause stops all automatic
-occurrences of that schedule.
-
-Automatic plans post the expected amount/account once, on the schedule's local date
-and time. Paused schedules do not post. A skipped occurrence stays skipped; reverting
-a posted occurrence reopens it for manual review without automatic reposting. Failed
-posting leaves no partial financial effects, exposes `automatic_error` on its schedule,
-and retries on the next check. Linked debt/receivable reminders always use manual
-handling so principal and fees can be reviewed. Automatic posts use the trusted-local
-audit identity, and SQLite write transactions serialize competing server processes.
-
-Optional `max_occurrences` and `total_limit` (PHP decimal input, returned as
-`total_limit_cents`) cap scheduled slots, including skipped slots. A total allows only
-whole payments: PHP 25 at PHP 12 per slot creates two slots. It measures the planned
-budget at the current schedule amount, rather than actual posted spending. Changing
-the amount recalculates that slot budget; satisfied history stays unchanged. Cadence
-edits retain earlier consumed slots. Shortening limits cancels affected future pending
-slots; extending limits can restore boundary cancellations but never explicit skips.
-The inclusive `end_date` remains an additional boundary.
+See [how agent memory works](docs/AGENT-MEMORY.md) for retrieval, saving, and limits.
 
 ## 🔌 REST API reference
 

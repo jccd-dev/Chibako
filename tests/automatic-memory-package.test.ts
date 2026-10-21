@@ -89,3 +89,25 @@ assert calls[0]['env']['PLUGIN_ROOT'] == str(m._PLUGIN_ROOT)
     await rm(temporary, { recursive: true, force: true });
   }
 });
+
+test("committed marketplace plugins match a fresh build", async () => {
+  const temporary = await mkdtemp(path.join(tmpdir(), "chibako-published-"));
+  try {
+    const { buildMemoryPlugins } = await import(path.join(root, "scripts/build-memory-plugins.mjs"));
+    await buildMemoryPlugins(temporary, { archives: false });
+    const fresh = (await readdir(temporary, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => path.relative(temporary, path.join(entry.parentPath, entry.name))).sort();
+    const committed = (await readdir(path.join(root, "plugins"), { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => path.relative(path.join(root, "plugins"), path.join(entry.parentPath, entry.name))).sort();
+    assert.deepEqual(committed, fresh, "run npm run publish:memory-plugins");
+    for (const file of fresh) {
+      assert.ok((await readFile(path.join(root, "plugins", file))).equals(await readFile(path.join(temporary, file))), `${file} is stale; run npm run publish:memory-plugins`);
+    }
+    const claude = JSON.parse(await readFile(path.join(root, ".claude-plugin/marketplace.json"), "utf8"));
+    assert.equal(claude.plugins[0].source, "./plugins/claude");
+    const codex = JSON.parse(await readFile(path.join(root, ".agents/plugins/marketplace.json"), "utf8"));
+    assert.equal(codex.plugins[0].source.path, "./plugins/codex");
+    const bundled = JSON.parse(await readFile(path.join(root, "plugins/codex/.agents/plugins/marketplace.json"), "utf8"));
+    assert.equal(bundled.plugins[0].source.path, "./");
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
