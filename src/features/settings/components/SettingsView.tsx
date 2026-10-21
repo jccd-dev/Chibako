@@ -30,6 +30,7 @@ const parseOptions = (raw: string): string[] => raw.split(",").map((s) => s.trim
 const ALL_SCOPES = [
   "notes:read",
   "notes:write",
+  "memory:write",
   "notes:purge",
   "search:read",
   "schema:read",
