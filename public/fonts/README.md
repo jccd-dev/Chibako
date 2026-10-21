@@ -5,6 +5,7 @@ The WOFF2 files in this directory are redistributed under the SIL Open Font Lice
 Sources and attribution:
 
 - **DM Sans** — The DM Sans Project Authors; [upstream project](https://github.com/googlefonts/dm-fonts).
+- **Encode Sans** — The Encode Project Authors; [upstream project](https://github.com/thundernixon/Encode-Sans).
 - **Questrial** — The Questrial Project Authors; [upstream project](https://github.com/googlefonts/questrial).
 - **Quicksand** — The Quicksand Project Authors; [upstream project](https://github.com/andrew-paglinawan/QuicksandFamily).
 

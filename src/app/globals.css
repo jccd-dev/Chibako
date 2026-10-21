@@ -49,6 +49,10 @@
   --type-note-heading: var(--font-dm-sans);
 }
 
+html[data-interface-font="encode-sans"] {
+  --type-interface-body: var(--font-encode-sans);
+  --type-interface-heading: var(--font-encode-sans);
+}
 html[data-interface-font="questrial"] {
   --type-interface-body: var(--font-questrial);
   --type-interface-heading: var(--font-questrial);
@@ -60,6 +64,10 @@ html[data-interface-font="quicksand"] {
 html[data-interface-font="existing"] {
   --type-interface-body: var(--font-source-sans);
   --type-interface-heading: var(--font-figtree);
+}
+html[data-note-font="encode-sans"] {
+  --type-note-body: var(--font-encode-sans);
+  --type-note-heading: var(--font-encode-sans);
 }
 html[data-note-font="questrial"] {
   --type-note-body: var(--font-questrial);
@@ -74,6 +82,7 @@ html[data-note-font="existing"] {
   --type-note-heading: var(--font-figtree);
 }
 [data-font-preview="dm-sans"] { font-family: var(--font-dm-sans), system-ui, sans-serif; }
+[data-font-preview="encode-sans"] { font-family: var(--font-encode-sans), system-ui, sans-serif; }
 [data-font-preview="questrial"] { font-family: var(--font-questrial), system-ui, sans-serif; }
 [data-font-preview="quicksand"] { font-family: var(--font-quicksand), system-ui, sans-serif; }
 [data-font-preview="existing"] { font-family: var(--font-source-sans), system-ui, sans-serif; }

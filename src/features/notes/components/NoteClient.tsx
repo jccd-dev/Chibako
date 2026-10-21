@@ -985,6 +985,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
             <DatedNotesCalendar
               notes={allNotes}
               selected={noteDate}
+              selectedEnd={isNoteDate(fm.props.end_date) ? fm.props.end_date : undefined}
               onSelect={(date) => router.push(`/app/calendar?date=${date}`)}
               compact
             />

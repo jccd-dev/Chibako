@@ -21,6 +21,7 @@ async function authenticate(page: Page): Promise<void> {
 async function createDatedNote(page: Page, input: {
   title: string;
   date: string;
+  endDate?: string;
   folder?: string;
   kind?: "note" | "wiki" | "index";
   pinned?: boolean;
@@ -30,7 +31,7 @@ async function createDatedNote(page: Page, input: {
       title: input.title,
       folder: input.folder,
       kind: input.kind ?? "note",
-      properties: { date: input.date },
+      properties: input.endDate ? { date: input.date, end_date: input.endDate } : { date: input.date },
     },
   });
   expect(response.ok()).toBeTruthy();
@@ -68,6 +69,25 @@ test("Calendar groups valid Note dates and lists the selected day", async ({ pag
   await page.getByRole("button", { name: new RegExp(`February 4, ${year}, 1 Note`) }).click();
   await expect(page).toHaveURL(`/app/calendar?date=${year}-02-04`);
   await expect(page.getByTestId("calendar-note-list").getByText(`Other day ${suffix}`)).toBeVisible();
+});
+
+test("Calendar spans a Note across its inclusive date range", async ({ page }) => {
+  await authenticate(page);
+  const suffix = Date.now();
+  const year = 4000 + suffix % 1000;
+  await createDatedNote(page, { title: `Trip ${suffix}`, date: `${year}-03-30`, endDate: `${year}-04-02` });
+  await createDatedNote(page, { title: `Backwards ${suffix}`, date: `${year}-03-31`, endDate: `${year}-03-01` });
+
+  for (const day of [`${year}-03-30`, `${year}-03-31`, `${year}-04-02`]) {
+    await page.goto(`/app/calendar?date=${day}`);
+    await expect(page.getByTestId("calendar-note-list").getByText(`Trip ${suffix}`)).toBeVisible();
+  }
+  await expect(page.getByRole("button", { name: new RegExp(`March 31, ${year}, 2 Notes`) })).toBeVisible();
+
+  await page.goto(`/app/calendar?date=${year}-04-03`);
+  await expect(page.getByTestId("calendar-note-list").getByText(`Trip ${suffix}`)).toHaveCount(0);
+  await page.goto(`/app/calendar?date=${year}-03-01`);
+  await expect(page.getByTestId("calendar-note-list").getByText(`Backwards ${suffix}`)).toHaveCount(0);
 });
 
 test("Connections shows Calendar only for a dated Note and opens the selected day", async ({ page }) => {

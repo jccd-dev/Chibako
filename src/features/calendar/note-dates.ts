@@ -2,6 +2,8 @@ import type { NoteSummary } from "@/lib/notes";
 
 export interface DatedNote extends NoteSummary {
   date: string;
+  /** Inclusive last day; equals `date` for single-day Notes. */
+  endDate: string;
 }
 
 function localDate(year: number, month: number, day: number): Date {
@@ -33,8 +35,16 @@ export function noteDateToDate(value: string): Date {
 export function datedNotes(notes: NoteSummary[]): DatedNote[] {
   return notes.flatMap((note) => {
     const date = note.properties.date;
-    return isNoteDate(date) ? [{ ...note, date }] : [];
+    if (!isNoteDate(date)) return [];
+    const end = note.properties.end_date;
+    // ISO date strings compare chronologically; an invalid or earlier end falls back to one day.
+    const endDate = isNoteDate(end) && end > date ? end : date;
+    return [{ ...note, date, endDate }];
   });
+}
+
+export function coversDate(note: DatedNote, day: string): boolean {
+  return note.date <= day && day <= note.endDate;
 }
 
 export function sortDatedNotes(notes: DatedNote[]): DatedNote[] {
