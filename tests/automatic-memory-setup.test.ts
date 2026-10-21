@@ -66,11 +66,11 @@ function input(runtime: Runtime, name = "default") {
   return { runtime, name, ...fixture(runtime, name) };
 }
 
-test("setup validates the exact key scopes and server contract", () => {
+test("setup requires the memory key scopes and server contract", () => {
   const base = { contract_version: 1, principal_id: "profile-1", scopes, enabled: true, area: "Agent Memory" };
   assert.deepEqual(validateMemoryStatus(base), base);
   assert.throws(() => validateMemoryStatus({ ...base, scopes: ["notes:read", "schema:read"] }), /missing required/);
-  assert.throws(() => validateMemoryStatus({ ...base, scopes: [...scopes, "notes:write"] }), /excessive scopes/);
+  assert.equal(validateMemoryStatus({ ...base, scopes: [...scopes, "notes:write"] }).scopes.length, scopes.length + 1);
   assert.throws(() => validateMemoryStatus({ ...base, contract_version: 2 }), /contract is incompatible/);
   assert.throws(() => validateMemoryStatus({ ...base, enabled: false, area: null }), /disabled/);
 });

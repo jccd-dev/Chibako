@@ -8,9 +8,10 @@ Bundles have been executed on Node 24; Node 20 execution remains a compatibility
 
 The owner deploys the bounded memory capability and privately configures
 `CHIBAKO_MEMORY_FOLDER` to an approved non-root area. Create one API key per runtime
-or native profile with exactly `notes:read`, `schema:read`, and `memory:write`.
-The setup wizard checks those scopes through `memory_status`; a broad existing key
-is rejected. It does not administer the server or issue keys.
+or native profile with at least `notes:read`, `schema:read`, and `memory:write`.
+Extra scopes are allowed, but the key is stored in local private files, so grant
+only what that agent needs. Setup checks the required scopes through
+`memory_status`. It does not administer the server or issue keys.
 
 ## Install the package
 

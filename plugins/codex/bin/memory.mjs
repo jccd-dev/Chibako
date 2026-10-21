@@ -32385,8 +32385,7 @@ function validateMemoryStatus(raw) {
   const parsed = memoryStatusSchema.safeParse(raw);
   if (!parsed.success) throw new MemoryClientError("Server memory contract is incompatible. Deploy the current memory capability first.");
   const status = parsed.data;
-  if (requiredScopes.some((scope) => !status.scopes.includes(scope))) throw new MemoryClientError("Key is missing required memory/read scopes. Ask the owner for a restricted memory key.");
-  if (status.scopes.some((scope) => !requiredScopes.includes(scope))) throw new MemoryClientError("Key has excessive scopes. Create a key with only notes:read, schema:read and memory:write.");
+  if (requiredScopes.some((scope) => !status.scopes.includes(scope))) throw new MemoryClientError("Key is missing required memory/read scopes. Add notes:read, schema:read and memory:write to the key.");
   if (!status.enabled || !status.area) throw new MemoryClientError("Server memory is disabled. Ask the owner to configure a non-root memory area.");
   return status;
 }
