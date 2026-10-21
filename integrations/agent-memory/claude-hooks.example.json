@@ -22,6 +22,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --import tsx scripts/agent-memory.ts claude",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

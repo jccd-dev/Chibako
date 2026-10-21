@@ -331,19 +331,23 @@ export function filterByProperties<T extends NoteSummary>(notes: T[], filters: P
   return filters.length ? notes.filter((n) => filters.every((f) => matchProperty(n.properties, f.key, f.value))) : notes;
 }
 
-export function searchNotes(query: string, propertyFilters: PropertyFilter[] = []): SearchResult[] {
+// anyTerm: natural-sentence queries (recall) match notes containing any term, ranked by bm25; UI search keeps all-terms.
+export function searchNotes(query: string, propertyFilters: PropertyFilter[] = [], options: { anyTerm?: boolean } = {}): SearchResult[] {
   if (!query.trim() && !propertyFilters.length) return [];
   const db = getDb();
-  const clean = query.trim().replace(/[^A-Za-z0-9_\-\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af ]/g, " ").slice(0, 60);
+  const clean = query.trim().replace(/[^A-Za-z0-9_\-\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af ]/g, " ").slice(0, options.anyTerm ? 300 : 60);
   // The 60-char slice can land on whitespace and leave empty terms; a bare `*`
   // is an FTS5 syntax error, so drop empties before building the MATCH query.
-  const terms = clean.split(/\s+/).filter(Boolean);
+  const terms = clean.split(/\s+/).filter((t) => t && (!options.anyTerm || t.length > 1)).slice(0, options.anyTerm ? 24 : undefined);
   if (!terms.length && propertyFilters.length) {
     // Property-only filter: skip FTS and scan the property cache directly.
     return filterByProperties(listNotes(), propertyFilters).map((n) => ({ ...n, snippet: "", score: 0 }));
   }
   if (!terms.length) return [];
-  const q = terms.map((t) => `${t}*`).join(" AND ");
+  // Quoting keeps hyphens and FTS keywords (AND/OR/NOT/NEAR) literal in any-term mode.
+  const q = options.anyTerm
+    ? terms.map((t) => `"${t}"*`).join(" OR ")
+    : terms.map((t) => `${t}*`).join(" AND ");
   const rows = db
     .prepare(`
       SELECT id, bm25(notes_fts, 0.0, 2.0, 1.0, 0.5) AS score, snippet(notes_fts, 2, '<mark>', '</mark>', '…', 14) AS snippet

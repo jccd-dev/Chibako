@@ -6,10 +6,13 @@ import { z } from "zod";
 import { privateDirectory, readOptional, atomicPrivateWrite } from "./private-files";
 import type { Runtime } from "./runtime";
 
+export const defaultThresholds = { user_turns: 4, tool_calls: 10 };
+export type ActivityThresholds = typeof defaultThresholds;
 export const profileSchema = z.object({
   version: z.literal(1), runtime: z.enum(["codex", "claude", "hermes"]), name: z.string(),
   endpoint: z.string(), api_key: z.string(), principal_id: z.string(), area: z.string(),
   enabled: z.boolean(), connected_at: z.string(),
+  thresholds: z.object({ user_turns: z.number().int().min(1), tool_calls: z.number().int().min(1) }).strict().optional(),
   host: z.object({ file: z.string(), digest: z.string() }),
 }).strict();
 export type MemoryProfile = z.infer<typeof profileSchema>;

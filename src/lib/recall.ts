@@ -37,12 +37,13 @@ async function vectorSearch(query: string, limit: number): Promise<Array<{ id: s
 
 // ---------- RRF fusion ----------
 
-/** Reciprocal Rank Fusion over ranked id lists. Higher k = smoother. */
-function rrf(rankings: Array<Array<{ id: string }>>, k = 60): Array<{ id: string; score: number }> {
+/** Weighted Reciprocal Rank Fusion over ranked id lists. Higher k = smoother. */
+export function rrf(rankings: Array<Array<{ id: string }>>, weights: number[] = [], k = 60): Array<{ id: string; score: number }> {
   const scores = new Map<string, number>();
-  for (const list of rankings) {
-    list.forEach((item, idx) => {
-      scores.set(item.id, (scores.get(item.id) ?? 0) + 1 / (k + idx + 1));
+  for (const [list, ranking] of rankings.entries()) {
+    const weight = weights[list] ?? 1;
+    ranking.forEach((item, idx) => {
+      scores.set(item.id, (scores.get(item.id) ?? 0) + weight / (k + idx + 1));
     });
   }
   return [...scores.entries()]
@@ -112,7 +113,7 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
   const budget = opts.budget ?? 2000;
   const includeVectors = opts.includeVectors ?? true;
 
-  const bm25 = searchNotes(query).slice(0, 50).map((r) => ({ id: r.id }));
+  const bm25 = searchNotes(query, [], { anyTerm: true }).slice(0, 50).map((r) => ({ id: r.id }));
 
   let rankings = [bm25];
   let vectorScores: Map<string, number> | null = null;
@@ -135,7 +136,9 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
     }
   }
 
-  const fused = rrf(rankings);
+  // Any-term keyword hits are broad in large vaults: let them boost semantic
+  // matches, not displace them. shortcut: fixed 0.5 weight, tune from pilot recall samples.
+  const fused = rrf(rankings, [0.5, 1]);
   const byId = new Map<string, NoteSummary>(listNotes().map((n) => [n.id, n]));
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
 

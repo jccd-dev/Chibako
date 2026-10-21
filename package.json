@@ -2,7 +2,7 @@
   "name": "chibako",
   "version": "0.1.0",
   "private": true,
-  "description": "Self-hosted Obsidian-like second brain: markdown notes, wikilinks, backlinks, graph, and token-efficient AI agent access (REST + MCP).",
+  "description": "Self-hosted second brain: markdown notes, wikilinks, backlinks, graph, and token-efficient AI agent access (REST + MCP).",
   "overrides": {
     "braces": "^3.0.3"
   },

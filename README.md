@@ -5,7 +5,7 @@
   <img src="https://i.imgur.com/eGegh2T.png" alt="Chibako — the Knowledge Box" width="480">
 </picture>
 
-### A self-hosted, Obsidian-like second brain
+### A self-hosted second brain
 
 Plain Markdown notes connected by `[[wikilinks]]` — with automatic backlinks, a
 force-directed graph view, and a first-class **REST + MCP** layer so your own AI
@@ -53,15 +53,14 @@ Chibako started as a personal project: a place for my own notes that could live
 on my VPS, and that I could also use as long-term memory — a "second brain" —
 for the AI agents I build (Hermes and anything else that speaks MCP).
 
-I wanted the *feel* of Obsidian: plain Markdown, `[[wikilinks]]`, backlinks, a
-graph of how ideas connect. Obsidian and Logseq are wonderful **on the desktop**,
-and they're great as agent-controlled memory too. The problem is what happens
-when the vault should live on a remote server instead. Obsidian ships no
-official web app at all. Logseq *does* have an official web app and a Docker
-image, but they only serve the static app — your notes stay on the local machine
-and are opened through the browser's File System Access API, so the server never
-actually holds the vault. In both cases, "self-hosted web notes" is not the
-default experience.
+I wanted plain Markdown, `[[wikilinks]]`, backlinks and a graph of how ideas
+connect. Desktop note apps such as Logseq are wonderful **on the desktop**, and
+they're great as agent-controlled memory too. The problem is what happens when
+the vault should live on a remote server instead. Logseq *does* have an
+official web app and a Docker image, but they only serve the static app — your
+notes stay on the local machine and are opened through the browser's File
+System Access API, so the server never actually holds the vault.
+"Self-hosted web notes" is not the default experience.
 
 The usual workaround is a synced vault folder plus a mesh VPN like Tailscale so
 a desktop app can reach the server. That works, but it's a poor experience:
@@ -70,8 +69,7 @@ drifts.
 
 **Chibako closes that gap.** It is a web app you self-host, so your notes are a
 browser tab away from anywhere — *and* it speaks to AI agents natively through a
-REST API and an MCP server. It's inspired by Obsidian and Logseq, but built
-remote-first and agent-first.
+REST API and an MCP server. It's built remote-first and agent-first.
 
 ## 🇯🇵 The name
 
@@ -110,34 +108,34 @@ Chibako is **server-first** and treats your agent as a first-class user.
 
 ## ⚖️ How it compares
 
-Chibako sits next to Obsidian and Logseq rather than replacing them outright.
+Chibako sits next to local-first note apps such as Logseq rather than replacing them outright.
 The difference is *where it runs* and *who it serves first*.
 
-| | Obsidian | Logseq | **Chibako** |
-|---|---|---|---|
-| Note model | Markdown + wikilinks | Outliner / blocks, Markdown | Markdown + wikilinks |
-| Primary app | Desktop + mobile (local-first) | Desktop + mobile; web app reads local files | **Self-hosted web UI (server-first)** |
-| Official web app | None (Obsidian Publish is a read-only site) | Yes — but notes stay local via File System Access API | **Yes — notes live on your server** |
-| Reach a remote server | Sync folder + desktop app (Obsidian Sync or VPN/Tailscale) | Sync folder + desktop app, or self-host the static web app | **Open a URL on your VPS from any browser** |
-| Agent access | Community MCP servers / plugins; no built-in agent API | Community MCP servers / plugins; no built-in agent API | **Built-in REST API + MCP server, scoped keys** |
-| Token efficiency for LLMs | Whole note files | Block-tree serialization | **Raw Markdown; titles+ids lists; token-budgeted `recall`** |
-| Storage | Vault folder of files | Files / graph DB | **One `brain.db` (SQLite)** |
-| Self-hosting | Desktop-first | Desktop-first (server serves static app only) | **Docker + nginx on one VPS** |
-| License | Proprietary, free to use (closed source) | Open source (AGPL-3.0) | **Open source (MIT)** |
+| | Logseq | **Chibako** |
+|---|---|---|
+| Note model | Outliner / blocks, Markdown | Markdown + wikilinks |
+| Primary app | Desktop + mobile; web app reads local files | **Self-hosted web UI (server-first)** |
+| Official web app | Yes — but notes stay local via File System Access API | **Yes — notes live on your server** |
+| Reach a remote server | Sync folder + desktop app, or self-host the static web app | **Open a URL on your VPS from any browser** |
+| Agent access | Community MCP servers / plugins; no built-in agent API | **Built-in REST API + MCP server, scoped keys** |
+| Token efficiency for LLMs | Block-tree serialization | **Raw Markdown; titles+ids lists; token-budgeted `recall`** |
+| Storage | Files / graph DB | **One `brain.db` (SQLite)** |
+| Self-hosting | Desktop-first (server serves static app only) | **Docker + nginx on one VPS** |
+| License | Open source (AGPL-3.0) | **Open source (MIT)** |
 
 > Comparison reflects each project's public documentation at the time of
 > writing and may change. Chibako is an independent project, not affiliated
-> with or endorsed by Obsidian or Logseq. Verify specifics before relying on
+> with or endorsed by Logseq. Verify specifics before relying on
 > them.
 
 The honest summary: if you want a sprawling plugin ecosystem and a polished
-native desktop app, Obsidian and Logseq are excellent. If you want your notes
+native desktop app, local-first apps such as Logseq are excellent. If you want your notes
 **reachable over the web from a server you control** and **directly usable as AI
 agent memory**, that's the gap Chibako was built to fill.
 
 ## ✨ Features
 
-- **Obsidian-style notes** — plain Markdown, `[[wikilink]]` syntax, backlinks
+- **Linked Markdown notes** — plain Markdown, `[[wikilink]]` syntax, backlinks
   computed automatically, folders, note kinds (`note` / `wiki` / `index`)
 - **Live editor** — edit / split / preview / **write (WYSIWYG)** modes,
   autosave, toolbar, `⌘S`
@@ -380,8 +378,8 @@ See `/app/agent` in the UI for the full tool list and examples.
 ### Install the memory skill
 
 The [Chibako Memory skill](skills/chibako-memory/SKILL.md) teaches compatible
-agents to fetch your Knowledge Schema, recall relevant notes, inspect recent
-observations, and save durable knowledge when authorized. Configure Chibako MCP
+agents to read the "Now" index, recall relevant notes, and save a thread overview
+when meaningful work happened. The Knowledge Schema is fetched only before a write. Configure Chibako MCP
 first using the instructions above. With a scoped API key, use `schema:read`
 and `notes:read`; add `notes:write` if you want the agent to save knowledge.
 
@@ -463,12 +461,16 @@ with `$chibako-memory`, for example: "Use $chibako-memory to recall our
 authentication decisions before reviewing this change."
 
 Installation makes the skill available for selection; it is not a startup hook
-and does not guarantee execution in every chat. To require retrieval on each
-task, add this to your agent's persistent instructions (for example, a project
+and does not guarantee execution in every chat. For automatic, low-cost memory
+in Codex, Claude Code and Hermes, install the hook plugins described in
+[integrations/agent-memory](integrations/agent-memory/README.md): they load a
+capped "Now" index at session start and request a checkpoint only after
+meaningful activity (default 4 user turns or 10 tool calls). Without hooks, add
+this to your agent's persistent instructions (for example, a project
 `AGENTS.md`, or user-level instructions for all projects):
 
 ```markdown
-Use the chibako-memory skill at the start of every task. Retrieve relevant
+Use the chibako-memory skill once at the start of each session. Retrieve relevant
 context before working. Treat questions as read-only; save memory only when
 I request it or have explicitly authorized ongoing memory updates.
 ```
@@ -481,7 +483,9 @@ and lessons to Chibako. Skip secrets, raw transcripts, and temporary details.
 ```
 
 **Settings → Knowledge schema** controls the vault's organization rules. The
-skill fetches those rules; changes apply on the next fetch. Memory survives a
+skill fetches those rules before writing; changes apply on the next fetch. After
+upgrading, apply the new "Agent memory" section with **Restore default → Save**
+(this replaces your customized schema, so merge any edits back first). Memory survives a
 new chat when its MCP connection accesses the same vault. `recall` searches
 notes, while `list_observations` retrieves recent observations separately.
 
@@ -553,7 +557,7 @@ The inclusive `end_date` remains an additional boundary.
 ## 🔌 REST API reference
 
 | Method | Path | Scope | Description |
-|---|---|---|---|
+|---|---|---|
 | GET | `/api/notes` | `notes:read` | List all notes (summary only) |
 | POST | `/api/notes` | `notes:write` | Create a note |
 | GET | `/api/notes/:id` | `notes:read` | Full note |

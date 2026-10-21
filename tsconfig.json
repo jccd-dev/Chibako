@@ -45,7 +45,11 @@
     ".scratch/tarsi-finance/checks/e2e-build/dev/dev/types/**/*.ts",
     ".next/test-builds/password-routes/dev/dev/types/**/*.ts",
     ".scratch/chibako-overview-build/types/**/*.ts",
-    ".scratch/chibako-overview-build/dev/types/**/*.ts"
+    ".scratch/chibako-overview-build/dev/types/**/*.ts",
+    ".next/test-builds/browser-auth/types/**/*.ts",
+    ".next/test-builds/browser-auth/dev/types/**/*.ts",
+    ".next/test-builds/prod-repro/types/**/*.ts",
+    ".next/test-builds/prod-repro/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

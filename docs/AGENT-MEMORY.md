@@ -64,8 +64,24 @@ sequenceDiagram
 
 The installable [`chibako-memory`](../skills/chibako-memory/SKILL.md) skill
 teaches compatible agents this workflow. The skill still requires a configured
-Chibako MCP connection. Installation makes the workflow discoverable; persistent
-agent instructions can require it at the beginning of every task.
+Chibako MCP connection.
+
+## Automatic memory with hooks
+
+For Codex, Claude Code and Hermes, the
+[hook plugins](../integrations/agent-memory/README.md) make memory automatic
+while keeping its cost low:
+
+- **Session start:** one capped read of the shared "Now" overview (about 450
+  tokens), a one-time short instruction, and `recall` on the first prompt. The
+  Knowledge Schema is fetched only when a save is due.
+- **Activity gate:** hooks count user turns and tool calls locally. Trivial
+  sessions cost nothing extra. After 4 user turns or 10 tool calls since the
+  last save (configurable per profile), the agent is asked once to save.
+- **Thread-centric saves:** the agent saves one overview note per thread plus a
+  short status line. The runner upserts `- [[Thread]] — status` into "Now"
+  (newest first, at most 15 lines), so the next session in any runtime knows
+  where work stopped.
 
 ## Why retrieval uses fewer context tokens
 
@@ -91,9 +107,11 @@ Evidence in the implementation:
   note bodies. [`get_links`](../src/mcp/server.ts#L194) returns compact link
   targets and backlink identities.
 - [`recall`](../src/lib/recall.ts#L107) always ranks candidates with SQLite
-  full-text search and returns titles plus trimmed snippets. If embeddings are
-  configured, it fuses vector and keyword rankings; otherwise it stays local
-  and uses BM25 alone.
+  full-text search and returns titles plus trimmed snippets. Recall matches
+  any query term, so natural sentences find notes. If embeddings are
+  configured, it fuses vector and keyword rankings, weighting keywords at half
+  so they boost semantic matches rather than displace them; otherwise it stays
+  local and uses BM25 alone.
 - The caller supplies a retrieval budget. Chibako estimates token use from
   character count and stops adding results near that budget
   ([implementation](../src/lib/recall.ts#L140),
@@ -119,7 +137,7 @@ desktop note applications.
 |---|---|---|
 | Dedicated agent memory, such as Mem0 | Extracted memories searched through semantic retrieval and filters | Canonical knowledge stays directly editable as Markdown; keyword retrieval works without an LLM, embeddings service, or vector database |
 | Persistent agent runtime, such as Letta | Memory blocks can remain in the agent's context | Chibako retrieves vault content on demand, so unrelated notes do not need to occupy every prompt |
-| Local note apps, such as Obsidian or Logseq | Human-first local vault or graph, with agent access added through integrations | Chibako ships a self-hosted web UI, scoped REST API, and MCP server against the same server-side vault |
+| Local note apps, such as Logseq | Human-first local vault or graph, with agent access added through integrations | Chibako ships a self-hosted web UI, scoped REST API, and MCP server against the same server-side vault |
 
 This is not a universal performance ranking. Mem0 provides richer memory
 extraction and filtering, Letta provides an agent runtime with persistent
@@ -133,7 +151,6 @@ Primary references:
 - [Mem0 memory search](https://docs.mem0.ai/core-concepts/memory-operations/search)
 - [Mem0 open-source repository](https://github.com/mem0ai/mem0)
 - [Letta memory documentation](https://docs.letta.com/guides/agents/memory/)
-- [Obsidian help](https://help.obsidian.md/)
 - [Logseq documentation](https://docs.logseq.com/)
 
 ## Access and ownership

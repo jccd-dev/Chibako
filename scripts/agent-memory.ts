@@ -13,6 +13,7 @@ const inputSchema = z.object({
   session_id: z.string().min(1).max(200), hook_event_name: z.string(),
   turn_id: z.string().optional(), prompt: z.string().optional(), stop_hook_active: z.boolean().optional(),
 }).passthrough();
+let countingOnly = false;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 async function readInput(): Promise<unknown> {
   let bytes = 0;
@@ -48,14 +49,16 @@ async function main(): Promise<void> {
   if (profile && profile.runtime !== runtime) throw new Error("Runtime does not match the configured memory profile.");
   const payload = await readInput();
   const input = inputSchema.parse(payload);
+  // A skipped count (e.g. a parallel hook holds the lock) must not surface as a user-visible failure.
+  countingOnly = action === "hook" && input.hook_event_name === "PostToolUse";
   const connection = connectMemory(profile?.endpoint || process.env.CHIBAKO_MEMORY_MCP_URL || "", profile?.api_key || process.env.CHIBAKO_MEMORY_API_KEY || "", profile?.principal_id, profile?.area);
   const stateDirectory = profile ? path.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
   const start = Date.now();
   try {
     const execute = async () => {
       const call = connection.call;
-      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), skip: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
-      const options = { runtime, input, directory: stateDirectory, enabled: true, call,
+      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
+      const options = { runtime, input, directory: stateDirectory, enabled: true, call, ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
           stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)}` } : {}) };
       const result = await runMemoryEvent({ ...options, ...(staged ? { stage: staged } : {}) });
@@ -76,6 +79,7 @@ async function main(): Promise<void> {
   }
 }
 main().catch((error: unknown) => {
+  if (countingOnly) { process.stdout.write("{}\n"); return; }
   process.stdout.write(JSON.stringify({ systemMessage: error instanceof MemoryClientError ? error.message : "Chibako Memory operation failed. Check the selected profile, private permissions, server status and connection. Capture is unverified; no credentials or checkpoint content were logged." }) + "\n");
   process.exitCode = 1;
 });

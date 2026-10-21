@@ -105,7 +105,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
 
     const prompt = { session_id: "bundle-session", hook_event_name: "UserPromptSubmit", turn_id: "bundle-turn", prompt: "compiled transport test" };
     const started = await invoke(prompt);
-    assert.match(started.stdout, /Retrieved schema/);
+    assert.match(started.stdout, /Automatic memory:/);
     const checkpoint = {
       request_id: "bundle-request-1", role: "session", subject: "bundle-transport", session_id: "bundle-session",
       title: "Compiled runner checkpoint", content: "Saved through the MCP SDK HTTP transport", expected_revision: null,
@@ -121,6 +121,13 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       .get("Agent Memory Test", checkpoint.title) as { id: string; content: string } | undefined;
     assert.ok(note);
     assert.equal(note.content, checkpoint.content);
+    const overview = { request_id: "bundle-overview-1", role: "overview", subject: "Bundle thread", session_id: "bundle-session", title: "Bundle thread", content: "# Bundle thread\nNext: verify", expected_revision: null };
+    for (let i = 0; i < 2; i++) {
+      const result = JSON.parse((await invoke({ session_id: "bundle-session", hook_event_name: "Checkpoint", checkpoint: overview, now_line: "verifying transport" }, "stage")).stdout) as { saved: boolean; pending: boolean };
+      assert.deepEqual([result.saved, result.pending], [true, false]);
+    }
+    const now = getDb().prepare("SELECT content FROM notes WHERE folder = ? AND title = ?").get("Agent Memory Test", "Now") as { content: string } | undefined;
+    assert.equal(now?.content, "# Now\n\n- [[Bundle thread]] — verifying transport\n", "replay keeps one Now line");
     const status = JSON.parse((await invoke({}, "status")).stdout) as { pending: number; last_verified_save: string | null };
     assert.equal(status.pending, 0);
     assert.ok(status.last_verified_save);

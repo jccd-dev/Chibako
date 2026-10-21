@@ -22,7 +22,7 @@ async function main() {
   const script = fileURLToPath(new URL(compiled ? "./memory.mjs" : "../../scripts/agent-memory.ts", import.meta.url));
   const child = spawn(process.execPath, [...(compiled ? [] : ["--import", "tsx"]), script, "hermes"], { stdio: ["pipe", "pipe", "pipe"] });
   child.stdin.end(JSON.stringify({
-    session_id: input.session_id, hook_event_name: prompt ? "UserPromptSubmit" : input.hook_event_name === "pre_verify" ? "Stop" : "PreCompact",
+    session_id: input.session_id, hook_event_name: prompt ? "UserPromptSubmit" : input.hook_event_name === "pre_verify" ? "Stop" : input.hook_event_name === "post_tool_call" ? "PostToolUse" : "PreCompact",
     ...(input.extra?.turn_id ? { turn_id: input.extra.turn_id } : {}),
     ...(input.extra?.user_message ? { prompt: input.extra.user_message } : {}),
   }));

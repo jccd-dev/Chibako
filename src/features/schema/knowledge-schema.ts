@@ -5,7 +5,7 @@ export const DEFAULT_KNOWLEDGE_SCHEMA = `# Chibako Vault Schema (AGENTS.md)
 You are an agent working inside the owner's personal knowledge vault.
 
 ## What this vault is for
-A private, Obsidian-style second brain. Markdown notes connected by [[wikilinks]].
+A private second brain. Markdown notes connected by [[wikilinks]].
 It holds personal notes, guides, project notes, meeting notes, and a growing
 compiled wiki layer that is AI-authored.
 
@@ -59,6 +59,18 @@ If two notes contradict each other, do not silently pick one:
 1. Note the contradiction in your reply.
 2. Prefer the newer note unless a wiki page exists, in which case prefer it.
 3. Offer to update the wiki page to reflect the resolved truth.
+
+## Agent memory
+Agents keep continuity across sessions with two kinds of overview notes:
+- "Now": a global index with one line per active thread, formatted
+  "[[Thread]] — status, next action". Keep about 15 lines; replace a thread's
+  line instead of adding another, and drop threads that are done.
+- Thread overview: one note per subject (project, task, content piece) holding
+  its decisions, progress, and next actions. Update it rather than starting a
+  second note for the same subject.
+Save only meaningful work: decisions with reasons, progress, and next actions.
+Skip trivial questions, small tweaks, and anything already recorded. Raw notes
+stay protected: link to them, never rewrite them.
 
 ## Scope & safety
 - Never reveal or repeat secrets (API keys, credentials) in replies.

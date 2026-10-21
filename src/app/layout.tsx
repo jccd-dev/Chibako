@@ -45,7 +45,7 @@ function AppearanceInitScript() {
 
 export const metadata: Metadata = {
   title: { default: "Chibako", template: "%s · Chibako" },
-  description: "Self-hosted Obsidian-like second brain with AI agent access.",
+  description: "Self-hosted second brain with AI agent access.",
   icons: {
     icon: [
       { url: "/favicon_io/favicon.ico" },

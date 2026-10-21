@@ -118,7 +118,9 @@ export function NoteTabs() {
 
   // Drag-to-reorder lives in transient state; the dropped order persists through
   // the normal saveTabs effect and comes back in that order on restore.
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const draggedIndex = tabs.findIndex((tab) => tab.id === dragId);
+  const dragIndex = draggedIndex < 0 ? null : draggedIndex;
   const [dropIndex, setDropIndex] = useState<number | null>(null);
 
   function reorderTabs(from: number, to: number) {
@@ -134,7 +136,7 @@ export function NoteTabs() {
   }
 
   function endDrag() {
-    setDragIndex(null);
+    setDragId(null);
     setDropIndex(null);
   }
 
@@ -228,7 +230,7 @@ export function NoteTabs() {
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("text/plain", tab.id);
-                setDragIndex(index);
+                setDragId(tab.id);
               }}
               onDragOver={(event) => {
                 if (dragIndex === null) return;
@@ -261,6 +263,7 @@ export function NoteTabs() {
                 type="button"
                 role="tab"
                 aria-selected={active}
+                title={tab.title}
                 className="min-w-0 flex-1 truncate rounded-md px-3 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
                 onClick={() => router.push(`/app/note/${tab.id}`)}
               >

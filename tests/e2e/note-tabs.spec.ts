@@ -69,3 +69,33 @@ test("deleting an open note from the file manager removes its tab", async ({ pag
 
   await expect(tab).toBeHidden();
 });
+
+test("closing the active tab does not reopen it, also after reload", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now();
+  const ids: { id: string; title: string }[] = [];
+  for (const label of ["Close first", "Close second"]) {
+    const response = await page.request.post("/api/notes", {
+      data: { title: `${label} ${stamp}`, content: "body", kind: "note" },
+    });
+    expect(response.ok()).toBeTruthy();
+    ids.push((await response.json()).note as { id: string; title: string });
+  }
+  const [first, second] = ids;
+
+  await page.evaluate(() => localStorage.removeItem("chibako_note_tabs"));
+  await page.goto(`/app/note/${first.id}`);
+  await expect(page.getByRole("tab", { name: first.title })).toBeVisible();
+  await page.goto(`/app/note/${second.id}`);
+  await expect(page.getByRole("tab", { name: second.title })).toBeVisible();
+  await expect(page.getByRole("tab", { name: first.title })).toBeVisible();
+
+  await page.getByRole("button", { name: `Close ${second.title} tab` }).click();
+  await expect(page).toHaveURL(`/app/note/${first.id}`);
+  await page.waitForTimeout(1500);
+  await expect(page.getByRole("tab", { name: second.title })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("tab", { name: first.title })).toBeVisible();
+  await expect(page.getByRole("tab", { name: second.title })).toHaveCount(0);
+});
