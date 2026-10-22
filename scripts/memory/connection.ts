@@ -4,6 +4,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { z } from "zod";
 import type { MemoryCall } from "./runtime";
 
+const MEMORY_REQUEST_TIMEOUT_MS = 5000;
+
 export const requiredScopes = ["notes:read", "schema:read", "memory:write"];
 export const memoryStatusSchema = z.object({
   contract_version: z.literal(1), principal_id: z.string().min(1), scopes: z.array(z.string()),
@@ -38,7 +40,7 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
       try {
         await connecting.connect(new StreamableHTTPClientTransport(new URL(validateEndpoint(endpoint)), {
           requestInit: { headers: { Authorization: `Bearer ${key}` }, redirect: "error" },
-          fetch: (input, init) => fetch(input, { ...init, redirect: "error", signal: AbortSignal.timeout(2000) }),
+          fetch: (input, init) => fetch(input, { ...init, redirect: "error", signal: AbortSignal.timeout(MEMORY_REQUEST_TIMEOUT_MS) }),
         }));
         client = connecting;
       } catch {
@@ -48,7 +50,7 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
     }
     calls++;
     let result;
-    try { result = await client.callTool({ name, arguments: args }, undefined, { timeout: 2000 }); }
+    try { result = await client.callTool({ name, arguments: args }, undefined, { timeout: MEMORY_REQUEST_TIMEOUT_MS }); }
     catch { throw new MemoryClientError("Memory request failed. Check the connection and server status; pending checkpoints are retained."); }
     if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.");
     return z.record(z.string(), z.unknown()).parse(result.structuredContent);
