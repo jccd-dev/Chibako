@@ -8,6 +8,10 @@ process.env.CHIBAKO_SETUP_TOKEN = "e2e-only-setup-token-at-least-32-characters";
 const port = 3100;
 const dataDir = process.env.CHIBAKO_E2E_DATA_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), "chibako-e2e-"));
 process.env.CHIBAKO_E2E_DATA_DIR = dataDir;
+// Stand-in for the updater's channel: specs write status.json and read requests here.
+const updaterDir = process.env.CHIBAKO_E2E_UPDATER_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), "chibako-e2e-updater-"));
+process.env.CHIBAKO_E2E_UPDATER_DIR = updaterDir;
+for (const sub of ["in", "out"]) fs.mkdirSync(path.join(updaterDir, sub), { recursive: true });
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -26,6 +30,6 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 120_000,
-    env: { CHIBAKO_SETUP_TOKEN: process.env.CHIBAKO_SETUP_TOKEN, CHIBAKO_TRUST_PROXY: "true", CHIBAKO_DATA_DIR: dataDir, CHIBAKO_BUILD_DIR: ".next/test-builds/browser-auth" },
+    env: { CHIBAKO_SETUP_TOKEN: process.env.CHIBAKO_SETUP_TOKEN, CHIBAKO_TRUST_PROXY: "true", CHIBAKO_DATA_DIR: dataDir, CHIBAKO_UPDATER_DIR: updaterDir, CHIBAKO_VERSION: "0.1.1", CHIBAKO_BUILD_DIR: ".next/test-builds/browser-auth" },
   },
 });

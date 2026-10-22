@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { authenticateApiKey } from "../server/auth/api-key-authorization";
 import { isSetup as isPasswordSetup } from "../server/auth/password-authentication";
-import { getDb, now } from "./db";
+import { getDb, now, openReadOnlyDb } from "./db";
 
 const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days
 const SESSION_COOKIE = "chibako_session";
@@ -35,6 +35,21 @@ export function getSession(token: string | undefined | null): boolean {
     return false;
   }
   return true;
+}
+
+/** Recovery status can validate an existing session without cleanup writes or lazy migrations. */
+export function getSessionReadOnly(token: string | undefined | null): boolean {
+  if (!token) return false;
+  try {
+    const db = openReadOnlyDb();
+    try {
+      return !!db.prepare("SELECT 1 FROM sessions WHERE token = ? AND expires_at >= ?").get(token, now());
+    } finally {
+      db.close();
+    }
+  } catch {
+    return false;
+  }
 }
 
 export function destroySession(token: string): void {

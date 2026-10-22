@@ -24,8 +24,10 @@ window to release a fix before any public disclosure.
 ## Scope
 
 This project is a self-hosted application. Relevant reports include authentication
-and session handling, API key handling, SQL injection, path traversal, and
-server-side request handling in the REST API and MCP server.
+and session handling, API key handling, SQL injection, path traversal,
+server-side request handling in the REST API and MCP server, and the installer
+and companion updater's release validation, privileged Docker access, and
+request/status channel boundaries.
 
 Deployment misconfiguration (for example, exposing the app without TLS or
 committing a real `.env`) is out of scope.

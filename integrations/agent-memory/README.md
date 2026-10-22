@@ -21,9 +21,9 @@ CHIBAKO_MEMORY_FOLDER=<owner-selected non-root folder>
 ```
 
 Unset this variable to disable bounded writes and memory reads. There is no default
-area. Issue a separate API key per runtime/profile with exactly `notes:read`,
-`schema:read`, and `memory:write`. Do not add `notes:write`, purge, schema-write,
-key-management or Finance scopes. `memory:write` must be explicit, even on wildcard
+area. Issue a separate API key per runtime/profile with at least `notes:read`,
+`schema:read`, and `memory:write`. Extra scopes are allowed; avoid `keys:write`
+and `notes:purge` unless the agent needs them, since the key is stored locally. `memory:write` must be explicit, even on wildcard
 keys. Existing keys are not upgraded. The existing owner-only key creation API
 accepts the new scope; no settings UI changes are required for this pilot.
 

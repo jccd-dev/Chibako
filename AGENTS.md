@@ -7,6 +7,7 @@ Chibako is a self-hosted Markdown knowledge vault with wikilinks, backlinks, gra
 - Inspect the working tree, relevant callers, owning capability, and existing tests. Identify the requested behavior and affected boundaries before editing.
 - For architectural changes, read [ADR-0003](docs/adr/0003-capability-owned-data-access-and-thin-server-adapters.md). For MCP/auth transport changes, also read [ADR-0004](docs/adr/0004-dual-mcp-transports.md). For embeddings/Recall changes, read [ADR-0001](docs/adr/0001-embedding-freshness-strategy.md) and [ADR-0002](docs/adr/0002-whole-note-remote-embeddings-mvp.md).
 - For domain terminology, follow [domain guidance](docs/agents/domain.md) and `CONTEXT.md` when present. For requested tickets/specs, follow [the local issue tracker](docs/agents/issue-tracker.md) and [triage labels](docs/agents/triage-labels.md).
+- For installer, release, updater, adoption, or recovery changes, read [the update guide](docs/UPDATES.md) and check its commands against the owning scripts and Compose files.
 - Apply these rules to new code and the responsibility being changed. Existing violations are not permission to spread them. Keep broader cleanup separate unless required for the requested behavior.
 
 ## Stack and file ownership
@@ -22,6 +23,7 @@ Use the existing Next.js App Router, React 19, TypeScript strict mode, SQLite/`b
 | `src/lib/`                                    | Existing Notes/Markdown/embedding/Recall owners and genuinely shared infrastructure |
 | `src/lib/db.ts`                               | SQLite connection, pragmas, schema setup, and migrations                            |
 | `src/mcp/`                                    | Transport-neutral tool registration and the local stdio entry                       |
+| `src/features/updates/`, `updater/`            | App update channel/UI; companion deployment, snapshots, locking, and recovery       |
 | `src/components/layout/`, `providers/`, `ui/` | Shared shell, providers, and UI primitives                                          |
 | `tests/`, `tests/e2e/`                        | Node tests and Playwright user flows                                                |
 
@@ -38,6 +40,7 @@ Use the existing Next.js App Router, React 19, TypeScript strict mode, SQLite/`b
 - Remote `/mcp` authenticates every request and supplies a request-scoped principal to a fresh server/transport. Never change process environment variables to select a remote caller. Preserve the explicitly trusted local stdio mode.
 - The stdio import graph must remain free of `next/*` and Next-only auth/request adapters. Preserve `tests/architecture-boundaries.test.ts` and the independently runnable MCP bundle.
 - Keep meaningful client workflow policy in the owning hook/controller. Components consume that interface and handle presentation. Reuse the existing Notes editor-session controller for save policy.
+- Update requests require an owner session. Keep Docker access in the companion, targets host-owned, and release discovery separate from installation; publishing must not deploy automatically. Preserve shared update state and explicit reload confirmation so unsaved edits survive updates.
 - Use direct capability functions and SQLite transactions. Add repository interfaces, factories, or additional infrastructure only when a real requirement needs them.
 
 ## Code quality and growth
@@ -59,6 +62,7 @@ Use the existing Next.js App Router, React 19, TypeScript strict mode, SQLite/`b
 - Finance uses exact integer cents and existing money helpers. Preserve mutation idempotency, version/conflict checks, audit records, and atomic multi-record operations. Do not silently round or overwrite a concurrent edit.
 - Finance Note links need both applicable finance authorization and Notes read access; they do not mutate Notes. Creating a linked obligation while posting cash needs both `finance:manage` and `finance:write`.
 - Keep migrations compatible with existing vaults. For a requested destructive migration, explain its impact and recovery plan before applying it to user data. Keep remote calls outside SQLite transactions.
+- Reject newer `user_version` values before migrations; bump `SCHEMA_VERSION` for schema changes. Preserve the maintenance fence and shared deployment lock through recovery, and restore matching snapshots and images together. Update-status authentication may read during maintenance but must not bypass the mutation fence.
 
 ## Security review
 
@@ -82,6 +86,7 @@ Use `test-scope-triage` for code changes before deciding whether to add/change t
 | MCP factory or its dependency graph                 | Relevant protocol tests and `npm run test:mcp-stdio`                                             |
 | User-visible behavior                               | Relevant Playwright flow via `npm run test:e2e -- <spec>`; interactive checks for uncovered gaps |
 | Framework, packaging, or cross-boundary integration | `npm run build` in a test build directory with an isolated vault when data access is possible    |
+| Installer, updater, or container lifecycle           | Focused installer/updater tests and disposable `bash scripts/smoke-docker.sh` / `bash scripts/smoke-updates-docker.sh`; never use an existing vault |
 | Documentation only                                  | Check links, command accuracy, consistency, and the final diff; no runtime/browser suite         |
 
 - Before a code PR or merge, run the full `npm test` suite and typecheck, plus change-specific checks above. Inspect test environment/configuration before executing data-writing checks.

@@ -42,6 +42,10 @@ cleanup() {
   trap - EXIT INT TERM
 
   if (( status != 0 )) && (( started )); then
+    if [[ -f "$response_file" ]]; then
+      echo "Last HTTP response:" >&2
+      cat "$response_file" >&2
+    fi
     "${compose[@]}" logs --no-color >&2 || true
   fi
   if (( started )); then
@@ -115,6 +119,10 @@ wait_for_health() {
 
 wait_for_health
 
+# Packaged static files must be traversable by the unprivileged runtime user whatever the host umask was.
+"${compose[@]}" exec -T -u node chibako sh -c 'test -z "$(find /app/public \( -type d ! -perm -o=rx \) -o \( -type f ! -perm -o=r \) -print)"' \
+  || die "files under /app/public are not readable by the runtime user"
+
 password="SmokePass-12345!strong"
 setup_status="$(curl -sS --max-time 5 -o "$response_file" -w '%{http_code}' \
   -X POST "http://127.0.0.1:$port/api/setup" \
@@ -161,4 +169,47 @@ notes_status="$(curl -sS --max-time 5 -o "$response_file" -w '%{http_code}' \
 [[ "$notes_status" == "200" ]] || die "notes lookup after restart returned HTTP $notes_status"
 grep -Fq '"title":"Smoke persistence"' "$response_file" || die "note did not survive the container restart"
 
-echo "SMOKE PASSED: setup, login, SQLite write, restart persistence, Compose binding, and nginx syntax"
+# Update safety nets, exercised in the packaged runtime. The maintenance marker must fence
+# every vault accessor except health, so the updater can validate a new image without
+# accepting user writes. The marker is toggled from inside the container, as the updater does:
+# a host-side delete on a macOS bind mount can briefly lag inside the container, which would
+# make the resume check flaky without proving anything about the app.
+marker="/app/data/.chibako-maintenance"
+notes_status="$(curl -sS --max-time 5 -o "$response_file" -w '%{http_code}' "http://127.0.0.1:$port/api/notes" -b "$cookie_jar")"
+[[ "$notes_status" == "200" ]] || die "vault access before maintenance returned HTTP $notes_status"
+"${compose[@]}" exec -T -u node chibako touch "$marker" || die "could not create the maintenance marker"
+fenced_status="$(curl -sS --max-time 5 -o "$response_file" -w '%{http_code}' "http://127.0.0.1:$port/api/notes" -b "$cookie_jar")"
+[[ "$fenced_status" == "500" ]] || die "maintenance marker did not fence vault access (HTTP $fenced_status)"
+curl -fsS --max-time 5 "http://127.0.0.1:$port/api/health" | grep -Fq '"ok":true' || die "health must stay reachable during maintenance"
+"${compose[@]}" exec -T -u node chibako rm -f "$marker" || die "could not remove the maintenance marker"
+notes_status="$(curl -sS --max-time 5 -o "$response_file" -w '%{http_code}' "http://127.0.0.1:$port/api/notes" -b "$cookie_jar")"
+[[ "$notes_status" == "200" ]] || die "vault access did not resume after maintenance (HTTP $notes_status)"
+
+# A vault stamped by a newer release must be refused, not migrated or downgraded.
+"${compose[@]}" exec -T chibako node -e '
+  const Database = require("better-sqlite3");
+  const db = new Database("/app/data/brain.db");
+  db.pragma("wal_checkpoint(TRUNCATE)");
+  db.pragma("user_version = 99");
+  db.close();
+' || die "could not stamp the disposable vault"
+"${compose[@]}" restart chibako
+sleep 8
+guard_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/health")"
+[[ "$guard_status" == "500" ]] || die "a newer-schema vault must fail health (HTTP $guard_status)"
+"${compose[@]}" exec -T chibako node -e '
+  const Database = require("better-sqlite3");
+  const db = new Database("/app/data/brain.db", { readonly: true });
+  const version = db.pragma("user_version", { simple: true });
+  db.close();
+  if (version !== 99) process.exit(1);
+' || die "newer-schema vault was modified by the older release"
+
+# The updater image must carry every tool the update procedure shells out to.
+updater_image="chibako-smoke-updater:$project"
+docker build -q -f "$repo_dir/Dockerfile.updater" -t "$updater_image" "$repo_dir" >/dev/null || die "updater image failed to build"
+docker run --rm --entrypoint sh "$updater_image" -c 'docker --version && docker compose version && flock --version && node -e "require(\"node:sqlite\")"' >/dev/null \
+  || die "updater image is missing docker, compose, flock, or node:sqlite"
+docker image rm "$updater_image" >/dev/null 2>&1 || true
+
+echo "SMOKE PASSED: setup, login, SQLite write, restart persistence, Compose binding, nginx syntax, maintenance fence, schema guard, and updater image tooling"

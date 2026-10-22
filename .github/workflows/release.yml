@@ -16,6 +16,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/jccd-dev/chibako
+  UPDATER_IMAGE: ghcr.io/jccd-dev/chibako-updater
   TRIVY_VERSION: v0.74.0
 
 jobs:
@@ -48,11 +49,11 @@ jobs:
           NODE_ENV: test
 
   pull-request-image:
-    name: Build and scan pull request image
+    name: Build and scan pull request images
     if: github.event_name == 'pull_request'
     needs: [typecheck, test]
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -60,7 +61,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build pull request image
+      - name: Build pull request app image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -72,7 +73,18 @@ jobs:
           cache-from: type=gha,scope=pull-request-image
           cache-to: type=gha,mode=max,scope=pull-request-image
 
-      - name: Scan pull request image
+      - name: Build pull request updater image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.updater
+          platforms: linux/amd64
+          load: true
+          pull: true
+          push: false
+          tags: chibako-updater:pr-${{ github.event.pull_request.head.sha }}
+
+      - name: Scan pull request app image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           version: ${{ env.TRIVY_VERSION }}
@@ -83,24 +95,40 @@ jobs:
           vuln-type: os,library
           severity: HIGH,CRITICAL
 
+      - name: Scan pull request updater image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: chibako-updater:pr-${{ github.event.pull_request.head.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
   publish:
-    name: Publish production image
+    name: Build and scan release candidate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [typecheck, test]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: write
     outputs:
-      image: ${{ steps.image.outputs.image }}
-      digest: ${{ steps.build.outputs.digest }}
+      version: ${{ steps.version.outputs.version }}
+      app_digest: ${{ steps.app.outputs.digest }}
+      updater_digest: ${{ steps.updater.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve image name
-        id: image
-        run: echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+      # Monotonic without tagging or committing back: major.minor come from package.json,
+      # the patch is this workflow's run number (only ever increases).
+      - name: Compute version
+        id: version
+        run: |
+          base="$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")"
+          echo "version=${base}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -111,27 +139,56 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push production image
-        id: build
+      # Candidates are tagged by commit only. :latest and :vX.Y.Z move after the scans pass.
+      - name: Build and push app image
+        id: app
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           pull: true
           push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+          build-args: |
+            CHIBAKO_VERSION=${{ steps.version.outputs.version }}
+            CHIBAKO_COMMIT=${{ github.sha }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
           cache-from: type=gha,scope=production-image
           cache-to: type=gha,mode=max,scope=production-image
           provenance: mode=max
           sbom: true
 
-      - name: Scan production image
+      - name: Scan app image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           version: ${{ env.TRIVY_VERSION }}
-          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ env.IMAGE }}@${{ steps.app.outputs.digest }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - name: Build and push updater image
+        id: updater
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.updater
+          platforms: linux/amd64
+          pull: true
+          push: true
+          build-args: |
+            CHIBAKO_VERSION=${{ steps.version.outputs.version }}
+            CHIBAKO_COMMIT=${{ github.sha }}
+          tags: ${{ env.UPDATER_IMAGE }}:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Scan updater image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: ${{ env.UPDATER_IMAGE }}@${{ steps.updater.outputs.digest }}
           format: table
           exit-code: '1'
           ignore-unfixed: true
@@ -139,88 +196,91 @@ jobs:
           severity: HIGH,CRITICAL
 
   release:
-    name: Create GitHub Release
+    name: Promote scanned release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: publish
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: write
+      packages: write
     steps:
-      - name: Create production release
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 12
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release assets, then promote
         env:
           GH_TOKEN: ${{ github.token }}
-          IMAGE: ${{ needs.publish.outputs.image }}
-          DIGEST: ${{ needs.publish.outputs.digest }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          APP_DIGEST: ${{ needs.publish.outputs.app_digest }}
+          UPDATER_DIGEST: ${{ needs.publish.outputs.updater_digest }}
         run: |
-          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::Unexpected image digest: $DIGEST"
-            exit 1
-          fi
-
-          short_sha="${GITHUB_SHA:0:7}"
-          release_tag="production-${short_sha}"
-          immutable_ref="${IMAGE}@${DIGEST}"
-          release_body=$(cat <<EOF
-          ## Production image
-
-          Commit: \`${GITHUB_SHA}\`
-
-          Image:
-          \`${IMAGE}\`
-
-          Digest:
-          \`${DIGEST}\`
-
-          Immutable reference:
-          \`${immutable_ref}\`
-
-          ## Manual deployment
-
-          Use these values in \`chibako-infra → Actions → Deploy Chibako\`:
-
-          Image:
-          \`${IMAGE}\`
-
-          Digest:
-          \`${DIGEST}\`
-          EOF
-          )
-
-          printf '%s\n' "$release_body" >> "$GITHUB_STEP_SUMMARY"
-
-          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            printf '\nRelease `%s` already exists; creation skipped.\n' "$release_tag" >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          for digest in "$APP_DIGEST" "$UPDATER_DIGEST"; do
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Unexpected image digest: $digest"; exit 1; }
+          done
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Unexpected version: $VERSION"; exit 1; }
+          tag="v${VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx false; then
+            echo "Release ${tag} is already published; nothing to do."
             exit 0
           fi
 
-          gh release create "$release_tag" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Production ${short_sha}" \
-            --notes "$release_body"
+          # Runs are serialised by the concurrency group, so this read is race-free. A re-run of an
+          # older failed run is published under its own immutable tag but never becomes latest.
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if bash scripts/should-promote.sh "$latest_tag" "$VERSION"; then promote=true; else promote=false; fi
 
-  dispatch:
-    name: Trigger infra deploy
-    needs: publish
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check for INFRA_DISPATCH_TOKEN
-        id: guard
-        run: |
-          if [ -n "${{ secrets.INFRA_DISPATCH_TOKEN }}" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Token present, dispatching to infra."
+          mkdir -p assets
+          notes="$(git log -n 10 --pretty='- %s' | head -c 3500)"
+          jq -n \
+            --arg version "$VERSION" --arg commit "$GITHUB_SHA" \
+            --arg image "$IMAGE" --arg digest "$APP_DIGEST" \
+            --arg updater "$UPDATER_IMAGE" --arg updaterDigest "$UPDATER_DIGEST" \
+            --arg published "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg notes "$notes" \
+            --arg url "https://github.com/jccd-dev/chibako/releases/tag/${tag}" \
+            '{schema: 1, version: $version, commit: $commit, image: $image, digest: $digest,
+              updater: {image: $updater, digest: $updaterDigest}, minUpdaterProtocol: 1,
+              publishedAt: $published, notes: $notes, url: $url}' > assets/release.json
+          printf 'CHIBAKO_RELEASE_VERSION=%s\nCHIBAKO_IMAGE=%s@%s\nCHIBAKO_UPDATER_IMAGE=%s@%s\n' \
+            "$VERSION" "$IMAGE" "$APP_DIGEST" "$UPDATER_IMAGE" "$UPDATER_DIGEST" > assets/release.env
+          cp scripts/install.sh docker-compose.release.yml assets/
+
+          # Draft first: nothing is visible at releases/latest until every asset is attached.
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" assets/* --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+              --title "Chibako ${VERSION}" --notes "$notes"
           else
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "INFRA_DISPATCH_TOKEN not set — skipping infra deploy trigger."
+            gh release upload "$tag" assets/* --repo "$GITHUB_REPOSITORY" --clobber
           fi
 
-      - name: Dispatch immutable image digest
-        if: steps.guard.outputs.skip != 'true'
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
-          repository: jccd-dev/chibako-infra
-          event-type: chibako-image-built
-          client-payload: '{"image":"${{ needs.publish.outputs.image }}","digest":"${{ needs.publish.outputs.digest }}"}'
+          # Scans passed in the publish job: move the public tags, then make the release current.
+          for pair in "${IMAGE}@${APP_DIGEST}" "${UPDATER_IMAGE}@${UPDATER_DIGEST}"; do
+            repo="${pair%@*}"
+            if [[ "$promote" == true ]]; then
+              docker buildx imagetools create --tag "${repo}:latest" --tag "${repo}:${tag}" "$pair"
+            else
+              docker buildx imagetools create --tag "${repo}:${tag}" "$pair"
+            fi
+          done
+          if [[ "$promote" == true ]]; then
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          else
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+            echo "::notice::${tag} is older than the latest release ${latest_tag}; published without moving latest."
+          fi
+          printf 'Published %s (%s), latest moved: %s\n' "$tag" "$APP_DIGEST" "$promote" >> "$GITHUB_STEP_SUMMARY"
+
+# Publishing never installs anything: running deployments only learn about the new
+# release through their updater, and an owner clicks Update. The former infra
+# repository_dispatch job was removed so no pipeline can overwrite an adopted pin.

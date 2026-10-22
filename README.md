@@ -174,27 +174,25 @@ host nginx is the public entrypoint.
    The container entrypoint fixes the bind-mount ownership and runs the app as
    the unprivileged `node` user.
 
-   To use the published GHCR image instead of building locally:
+   Prefer the prebuilt image with in-app updates? Run the installer (or the
+   Docker-only commands) from [docs/UPDATES.md](docs/UPDATES.md):
 
    ```bash
-   docker compose -f docker-compose.release.yml pull
-   docker compose -f docker-compose.release.yml up -d
+   curl -fsSL https://github.com/jccd-dev/chibako/releases/latest/download/install.sh | bash
    ```
 
-   The release image tracks `latest` by default. Pin `CHIBAKO_IMAGE` to a
-   commit tag or digest when you need repeatable upgrades; the published image
+   Chibako then shows **Update available vX.Y.Z** and the owner clicks
+   **Update**. The updater takes a backup first and attempts to restore it if
+   the new version fails its health check. If recovery fails, writes stay
+   paused until an operator resolves it. After success, save pending edits and
+   confirm **Reload Chibako**. Existing release-image installs can be
+   adopted without moving their data; see the same guide. The published image
    currently targets `linux/amd64`.
 
-   For an existing release-image install, update it with:
-
-   ```bash
-   docker compose -f docker-compose.release.yml pull
-   docker compose -f docker-compose.release.yml up -d
-   ```
-
-   The `./data` bind mount is unchanged, so the SQLite vault survives image
-   replacement. Existing source-build installs remain on the source flow:
-   `git pull --ff-only && docker compose up -d --build`.
+   Existing source-build installs can stay on the source flow
+   (`git pull --ff-only && docker compose up -d --build`) or move to the managed
+   image with `install.sh migrate`, which keeps the checkout and vault in place
+   ([guide](docs/UPDATES.md#move-from-a-source-build)).
 
    Before using a real vault with the source-build path, run
    `./scripts/smoke-docker.sh` on a machine with Docker and a running daemon.
@@ -344,6 +342,12 @@ build, checkout or npm install is needed; Node.js 20+ is required.
 | Claude Code | `/plugin marketplace add jccd-dev/Chibako`, then `/plugin install chibako@chibako-plugins` |
 | Codex | `codex plugin marketplace add jccd-dev/Chibako`, then `codex plugin add chibako@chibako-plugins` (or install from `/plugins`) and trust its hooks in `/hooks` |
 | Hermes | `hermes plugins install jccd-dev/Chibako/plugins/hermes`, then enable it |
+
+To update, refresh the marketplace and update the plugin: in Claude Code
+`claude plugin marketplace update chibako-plugins` then
+`claude plugin update chibako@chibako-plugins`; in Codex
+`codex plugin marketplace upgrade` then `codex plugin add chibako@chibako-plugins`.
+See the install guide for Hermes. Your setup is kept.
 
 The plugin ships no credential and stays disabled until setup. Ask the installed
 `chibako-memory-setup` skill for the exact command to run in your own terminal. It

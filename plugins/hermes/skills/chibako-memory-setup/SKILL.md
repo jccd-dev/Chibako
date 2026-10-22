@@ -12,7 +12,7 @@ package instead of guessing a checkout path.
 
 ## Set up a connection
 
-Explain that setup needs the user's Chibako MCP URL and a key with exactly
+Explain that setup needs the user's Chibako MCP URL and a key with at least
 `notes:read`, `schema:read`, and `memory:write`. The server owner must already have
 enabled an approved non-root memory area. This skill does not administer the
 server, issue keys, restart gateways or adopt existing notes.

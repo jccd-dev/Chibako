@@ -13,7 +13,8 @@ import type { NoteBatchInput } from "@/features/organization/note-batch";
 import type { Bookmark } from "@/lib/bookmarks";
 import { financeTabs, financeTabLabel, isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
 import { cn } from "@/lib/utils";
-import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
+import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
+import { SettingsUpdateLink } from "@/features/updates/components/SettingsUpdateLink";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { NoteLink } from "@/components/NoteLink";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -831,17 +832,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       >
         <IconBot size={16} />
       </Link>
-      <Link
-        href="/app/settings"
-        aria-label="Settings"
-        title="Settings"
-        className={cn(
-          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          pathname === "/app/settings" && "bg-accent text-foreground"
-        )}
-      >
-        <IconGear size={16} />
-      </Link>
+      <SettingsUpdateLink active={pathname === "/app/settings"} />
     </nav>
   );
 

@@ -8,9 +8,10 @@ Bundles have been executed on Node 24; Node 20 execution remains a compatibility
 
 The owner deploys the bounded memory capability and privately configures
 `CHIBAKO_MEMORY_FOLDER` to an approved non-root area. Create one API key per runtime
-or native profile with exactly `notes:read`, `schema:read`, and `memory:write`.
-The setup wizard checks those scopes through `memory_status`; a broad existing key
-is rejected. It does not administer the server or issue keys.
+or native profile with at least `notes:read`, `schema:read`, and `memory:write`.
+Extra scopes are allowed, but the key is stored in local private files, so grant
+only what that agent needs. Setup checks the required scopes through
+`memory_status`. It does not administer the server or issue keys.
 
 ## Install the package
 
@@ -24,6 +25,16 @@ application, database bindings, tsx and node_modules are not required on the cli
 | Codex | `codex plugin marketplace add jccd-dev/Chibako`, then `codex plugin add chibako@chibako-plugins` or install Chibako through `/plugins`. Review native hook trust through `/hooks`. A compatible Codex CLI on PATH is required for setup's isolated TOML validation. |
 | Claude Code | `/plugin marketplace add jccd-dev/Chibako`, then `/plugin install chibako@chibako-plugins`. Review hook consent in the selected Code environment. |
 | Hermes | `hermes plugins install jccd-dev/Chibako/plugins/hermes`, then enable/review its declared hooks through that profile's normal consent. Do not install the older shell-hook examples alongside it. Actual gateway version support must be confirmed before activation. |
+
+To update after a new release:
+
+| Runtime | Update |
+| --- | --- |
+| Codex | `codex plugin marketplace upgrade`, then `codex plugin add chibako@chibako-plugins` |
+| Claude Code | `claude plugin marketplace update chibako-plugins`, then `claude plugin update chibako@chibako-plugins`; restart Claude Code |
+| Hermes | Re-run `hermes plugins install jccd-dev/Chibako/plugins/hermes` |
+
+Updates keep your private profile and key; setup does not need to be re-run.
 
 Hook-bearing packages are currently ineligible for the official public plugin
 directories. Install only one Chibako package per runtime profile; replace/disable an older
