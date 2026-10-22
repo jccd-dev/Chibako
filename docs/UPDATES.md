@@ -249,7 +249,10 @@ the installer's uninstall command does not manage custom adoption layouts.
 - GHCR packages must be public for installs and updates without registry login.
 - The restored database inherits the vault directory's owner and has mode 600.
   The app entrypoint also fixes vault ownership before starting as `node`.
-- The updater image embeds the Docker CLI and Compose plugin from `docker:28-cli`.
+- The updater image embeds the Docker CLI from `docker:29.9.2-cli`. Its Compose
+  plugin is built from checksum-pinned v5.6.1 source with Go 1.26.10 and
+  `golang.org/x/net` v0.60.0 to fix CVE-2026-78669, reported as
+  `v5.6.1-chibako.1`. Replace the rebuild with an official patched binary when available.
 - Version numbers skip when a pending run is superseded; they never decrease.
   If an older failed workflow run is retried after a newer release, its release
   is published under its own tag but never becomes `latest`.
