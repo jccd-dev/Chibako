@@ -32367,6 +32367,7 @@ var StreamableHTTPClientTransport = class {
 };
 
 // scripts/memory/connection.ts
+var MEMORY_REQUEST_TIMEOUT_MS = 5e3;
 var requiredScopes = ["notes:read", "schema:read", "memory:write"];
 var memoryStatusSchema = external_exports.object({
   contract_version: external_exports.literal(1),
@@ -32400,7 +32401,7 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
       try {
         await connecting.connect(new StreamableHTTPClientTransport(new URL(validateEndpoint(endpoint)), {
           requestInit: { headers: { Authorization: `Bearer ${key}` }, redirect: "error" },
-          fetch: (input2, init) => fetch(input2, { ...init, redirect: "error", signal: AbortSignal.timeout(2e3) })
+          fetch: (input2, init) => fetch(input2, { ...init, redirect: "error", signal: AbortSignal.timeout(MEMORY_REQUEST_TIMEOUT_MS) })
         }));
         client = connecting;
       } catch {
@@ -32412,7 +32413,7 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
     calls++;
     let result;
     try {
-      result = await client.callTool({ name, arguments: args }, void 0, { timeout: 2e3 });
+      result = await client.callTool({ name, arguments: args }, void 0, { timeout: MEMORY_REQUEST_TIMEOUT_MS });
     } catch {
       throw new MemoryClientError("Memory request failed. Check the connection and server status; pending checkpoints are retained.");
     }
