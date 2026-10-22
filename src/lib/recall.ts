@@ -7,6 +7,9 @@ import { freshEmbeddingIds, staleNoteIds, refreshNotes } from "./embedding-index
 
 // ---------- vector search ----------
 
+// MCP clients budget ~2s per call; a slow provider must fall back to keyword results instead.
+const QUERY_EMBED_TIMEOUT_MS = 1500;
+
 function cosine(a: number[], b: number[]): number {
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) {
@@ -22,7 +25,18 @@ function cosine(a: number[], b: number[]): number {
 async function vectorSearch(query: string, limit: number): Promise<Array<{ id: string; score: number }>> {
   const provider = getEmbeddingProvider();
   if (!provider) return [];
-  const [qvec] = await provider.embed([query]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let qvec: number[] | undefined;
+  try {
+    [qvec] = await Promise.race([
+      provider.embed([query]),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Query embedding timed out")), QUERY_EMBED_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!qvec) return [];
   const fresh = freshEmbeddingIds();
   const scored: Array<{ id: string; score: number }> = [];
