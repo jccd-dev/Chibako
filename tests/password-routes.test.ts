@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import Database from "better-sqlite3";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -69,6 +70,9 @@ test("setup, login, password change, and session invalidation preserve route con
   // so a per-run temp name would churn those tracked files on every test run.
   const buildDir = join(process.cwd(), ".next", "test-builds", "password-routes");
   mkdirSync(buildDir, { recursive: true });
+  const updaterDir = mkdtempSync(join(tmpdir(), "chibako-updater-channel-"));
+  mkdirSync(join(updaterDir, "in"));
+  mkdirSync(join(updaterDir, "out"));
   const port = 3200 + (process.pid % 700);
   const baseUrl = `http://127.0.0.1:${port}`;
   const server = spawn(
@@ -76,7 +80,7 @@ test("setup, login, password change, and session invalidation preserve route con
     [join(process.cwd(), "node_modules/next/dist/bin/next"), "dev", "--hostname", "127.0.0.1", "--port", String(port)],
     {
       cwd: process.cwd(),
-      env: { ...process.env, CHIBAKO_DATA_DIR: vault, CHIBAKO_BUILD_DIR: buildDir, CHIBAKO_SETUP_TOKEN: setupToken, CHIBAKO_TRUST_PROXY: "true" },
+      env: { ...process.env, CHIBAKO_DATA_DIR: vault, CHIBAKO_BUILD_DIR: buildDir, CHIBAKO_SETUP_TOKEN: setupToken, CHIBAKO_TRUST_PROXY: "true", CHIBAKO_UPDATER_DIR: updaterDir, CHIBAKO_VERSION: "0.1.1" },
       stdio: "ignore",
     },
   );
@@ -162,6 +166,37 @@ test("setup, login, password change, and session invalidation preserve route con
     assert.equal(login.status, 200);
     loginCookie = cookieFrom(login);
 
+    // Update channel: owner-session only, same-origin mutations, bounded strict requests.
+    const operationStatus = {
+      v: 1, protocol: 1, heartbeatAt: Date.now(), checkedAt: Date.now(), currentVersion: "0.1.1",
+      latest: { version: "0.1.2", notes: "Notes", publishedAt: "2026-10-21T00:00:00Z", url: "https://github.com/jccd-dev/chibako/releases/tag/v0.1.2" },
+      checkError: null, operation: null,
+    };
+    writeFileSync(join(updaterDir, "out", "status.json"), JSON.stringify(operationStatus));
+    const sameOrigin = { Cookie: loginCookie, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" };
+    const postUpdate = (body: unknown, headers: Record<string, string>) =>
+      fetch(`${baseUrl}/api/updates`, { method: "POST", headers, body: typeof body === "string" ? body : JSON.stringify(body) });
+    assert.equal((await fetch(`${baseUrl}/api/updates`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/updates`, { headers: { Authorization: `Bearer ${writeKey}` } })).status, 401, "API keys cannot read update status");
+    const available = await fetch(`${baseUrl}/api/updates`, { headers: { Cookie: loginCookie } });
+    assert.equal(available.status, 200);
+    assert.deepEqual({ state: (await available.json()).state }, { state: "available" });
+    assert.equal((await postUpdate({ version: "0.1.2" }, { Authorization: `Bearer ${writeKey}`, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" })).status, 401, "bearer callers cannot start updates");
+    assert.equal((await postUpdate({ version: "0.1.2" }, { ...sameOrigin, "Sec-Fetch-Site": "cross-site" })).status, 403);
+    assert.equal((await postUpdate({ version: "0.1.2" }, { Cookie: loginCookie, "Content-Type": "application/json" })).status, 403, "no browser provenance is refused");
+    assert.equal((await postUpdate({ version: "0.1.2", image: "evil" }, sameOrigin)).status, 400);
+    assert.equal((await postUpdate("x".repeat(400), sameOrigin)).status, 413);
+    assert.equal((await postUpdate({ version: "0.1.9" }, sameOrigin)).status, 409, "stale version is not queued");
+    assert.deepEqual(readdirSync(join(updaterDir, "in")), [], "denied and malformed requests wrote nothing");
+    const queued = await postUpdate({ version: "0.1.2" }, sameOrigin);
+    assert.equal(queued.status, 202);
+    const files = readdirSync(join(updaterDir, "in"));
+    assert.equal(files.length, 1);
+    assert.deepEqual(JSON.parse(readFileSync(join(updaterDir, "in", files[0]), "utf8")), { v: 1, id: (await queued.json()).requestId, action: "update", version: "0.1.2" });
+    assert.equal((await postUpdate({ version: "0.1.2" }, sameOrigin)).status, 409, "a second click does not queue a duplicate");
+    assert.equal(readdirSync(join(updaterDir, "in")).length, 1);
+    assert.ok(existsSync(join(updaterDir, "out", "status.json")));
+
     const notesBeforeChange = await fetch(`${baseUrl}/api/notes`, { headers: { Cookie: loginCookie } });
     assert.equal(notesBeforeChange.status, 200);
     assert.deepEqual((await notesBeforeChange.json()).notes.map((note: { title: string }) => note.title), [
@@ -202,8 +237,47 @@ test("setup, login, password change, and session invalidation preserve route con
     assert.ok(Number(limitedChange.headers.get("Retry-After")) > 0);
     assert.equal((await fetch(`${baseUrl}/api/notes`, { headers: { Cookie: loginCookie } })).status, 200, "rejected changes preserve the current session");
     assert.equal((await post(baseUrl, "/api/login", { password: nextPassword }, undefined, "unchanged-password")).status, 200);
+
+    // Recovery status must authenticate without migrations, expired-session cleanup, or a write bypass.
+    const db = new Database(join(vault, "brain.db"));
+    const marker = join(vault, ".chibako-maintenance");
+    try {
+      db.prepare("INSERT INTO sessions (token, created_at, expires_at) VALUES (?, 0, 0)").run("expired-test-session");
+      db.pragma("user_version = 0");
+      const before = db.serialize();
+      writeFileSync(marker, "test-recovery-operation");
+      const operation = {
+        id: "11111111-1111-4111-8111-111111111111", phase: "needs_attention",
+        from: "0.1.1", to: "0.1.2", updatedAt: Date.now(), error: "Rollback needs operator recovery.",
+      };
+      writeFileSync(join(updaterDir, "out", "status.json"), JSON.stringify({ ...operationStatus, heartbeatAt: Date.now(), operation }));
+      const recovery = await fetch(`${baseUrl}/api/updates`, { headers: { Cookie: loginCookie } });
+      assert.equal(recovery.status, 200, "owner can read recovery status through the real maintenance fence");
+      assert.deepEqual((await recovery.json()).operation, {
+        id: operation.id, phase: operation.phase, to: operation.to, error: operation.error, updatedAt: operation.updatedAt,
+      });
+      const deniedHeaders: Record<string, string>[] = [
+        {}, { Cookie: "chibako_session=invalid-test-session" }, { Cookie: setupCookie },
+        { Cookie: "chibako_session=expired-test-session" }, { Authorization: `Bearer ${writeKey}` },
+      ];
+      for (const headers of deniedHeaders) {
+        const denied = await fetch(`${baseUrl}/api/updates`, { headers });
+        assert.equal(denied.status, 401, "missing, invalid, revoked, expired, and bearer credentials are refused");
+        assert.deepEqual(await denied.json(), { error: "Unauthorized" });
+      }
+      const inboxBefore = readdirSync(join(updaterDir, "in"));
+      assert.equal((await postUpdate({ version: "0.1.2" }, sameOrigin)).status, 500, "even valid owner mutations remain fenced");
+      assert.equal((await postUpdate({ version: "0.1.2" }, { ...sameOrigin, "Sec-Fetch-Site": "cross-site" })).status, 500);
+      assert.equal((await post(baseUrl, "/api/notes", { title: "Fenced test note", content: "Must not persist" }, loginCookie)).status, 500);
+      assert.deepEqual(readdirSync(join(updaterDir, "in")), inboxBefore, "maintenance cannot queue another update");
+      assert.deepEqual(db.serialize(), before, "status auth and denied writes leave the database byte-for-byte unchanged, including schema and expired sessions");
+    } finally {
+      rmSync(marker, { force: true });
+      db.close();
+    }
   } finally {
     await stopServer(server);
     rmSync(vault, { recursive: true, force: true });
+    rmSync(updaterDir, { recursive: true, force: true });
   }
 });

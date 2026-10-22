@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useHydrated } from "@/lib/use-hydrated";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
+import { UpdateNotice } from "@/features/updates/components/UpdateNotice";
+import { UpdatesProvider } from "@/features/updates/use-updates";
 
 function subscribeMobile(onChange: () => void) {
   const media = matchMedia("(max-width: 767px)");
@@ -37,11 +39,12 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       return !value;
     });
   }
-  return <>
+  return <UpdatesProvider>
     <Sidebar collapsed={collapsed} mobile={mobile} mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} onExpand={toggleSidebar} />
     <div className="flex min-w-0 flex-1 flex-col">
       <TopBar sidebarOpen={mobile ? mobileOpen : !collapsed} onToggleSidebar={toggleSidebar} />
+      <UpdateNotice />
       <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
     </div>
-  </>;
+  </UpdatesProvider>;
 }

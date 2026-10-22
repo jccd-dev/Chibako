@@ -11,6 +11,34 @@ export function dataDir(): string {
 }
 
 let _db: Database.Database | null = null;
+let _dbFile: string | null = null;
+let _dbIdentity: string | null = null;
+
+/**
+ * Schema compatibility stamp (PRAGMA user_version). Bump it in the same change
+ * as any migration an older image cannot run against, so downgrades are refused
+ * before any write. Images that predate the stamp cannot enforce it.
+ */
+export const SCHEMA_VERSION = 1;
+
+export class SchemaTooNewError extends Error {
+  constructor(public found: number) {
+    super(`This vault uses schema ${found}, newer than this Chibako release supports (${SCHEMA_VERSION}). Update Chibako instead of downgrading.`);
+    this.name = "SchemaTooNewError";
+  }
+}
+
+export class MaintenanceError extends Error {
+  constructor() {
+    super("Chibako is being updated. Try again in a moment.");
+    this.name = "MaintenanceError";
+  }
+}
+
+/** The updater creates this file to fence every writer (HTTP and local stdio MCP) while it snapshots or validates an update. */
+export function maintenanceMarkerPath(): string {
+  return path.join(dataDir(), ".chibako-maintenance");
+}
 
 const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS memory_records (
@@ -380,11 +408,63 @@ const MIGRATIONS: string[] = [
   `,
 ];
 
+/** Existing-vault reads only: no creation, migrations, or writable handle during recovery. */
+export function openReadOnlyDb(): Database.Database {
+  return new Database(path.join(dataDir(), "brain.db"), { readonly: true, fileMustExist: true });
+}
+
 export function getDb(): Database.Database {
-  if (_db) return _db;
+  if (fs.existsSync(maintenanceMarkerPath())) throw new MaintenanceError();
+  return openDb();
+}
+
+function fileIdentity(file: string): string | null {
+  try {
+    const stat = fs.statSync(file);
+    return `${stat.dev}:${stat.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+function dropDb(): void {
+  try { _db?.close(); } catch { /* already closed */ }
+  _db = null;
+  _dbFile = null;
+  _dbIdentity = null;
+}
+
+/**
+ * A long-lived process (the local stdio MCP) can outlive a restore or migration that happened while it
+ * never observed the maintenance marker. Reuse the cached connection only while it is still the same
+ * database file at a schema this release supports; otherwise reopen, which re-runs the schema checks.
+ */
+function reusableDb(file: string): Database.Database | null {
+  if (!_db) return null;
+  if (_db.open && _dbFile === file && _dbIdentity === fileIdentity(file)) {
+    const stamped = _db.pragma("user_version", { simple: true }) as number;
+    if (stamped === SCHEMA_VERSION) return _db;
+    dropDb();
+    if (stamped > SCHEMA_VERSION) throw new SchemaTooNewError(stamped);
+    return null;
+  }
+  dropDb();
+  return null;
+}
+
+function openDb(): Database.Database {
   const dir = dataDir();
+  const file = path.join(dir, "brain.db");
+  const reusable = reusableDb(file);
+  if (reusable) return reusable;
   fs.mkdirSync(dir, { recursive: true });
-  const db = new Database(path.join(dir, "brain.db"));
+  const db = new Database(file);
+  // Refuse a newer vault before any pragma or migration can mutate it.
+  const stamped = db.pragma("user_version", { simple: true }) as number;
+  if (stamped > SCHEMA_VERSION) {
+    db.close();
+    throw new SchemaTooNewError(stamped);
+  }
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
@@ -519,18 +599,25 @@ export function getDb(): Database.Database {
       const parts = folder.split("/").filter(Boolean);
       for (let i = 1; i <= parts.length; i++) insertFolder.run(parts.slice(0, i).join("/"));
     }
+    if (stamped < SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
   }
   _db = db;
+  _dbFile = file;
+  _dbIdentity = fileIdentity(file);
   return db;
 }
 
-/** Execute the minimal probe used by the health adapter. */
+/**
+ * Minimal probe used by the health adapter. It deliberately ignores the
+ * maintenance marker: the updater validates a new image through health, which
+ * runs migrations, while every other writer stays fenced.
+ */
 export function checkDatabase(): void {
-  getDb().prepare("SELECT 1").get();
+  openDb().prepare("SELECT 1").get();
 }
 
 export function now(): number {

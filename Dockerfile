@@ -13,6 +13,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+# Static files keep the host checkout's modes through COPY (a 0700 directory on a developer machine
+# would be unreadable to the runtime `node` user), so normalise them here without touching the source tree.
+RUN chmod -R u=rwX,go=rX public
 RUN npm run build
 
 # ---- production dependencies ----
@@ -36,6 +39,14 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+
+# Release identity: the app reports it and the updater verifies it after pulling.
+ARG CHIBAKO_VERSION=0.0.0
+ARG CHIBAKO_COMMIT=unknown
+ENV CHIBAKO_VERSION=$CHIBAKO_VERSION
+LABEL org.opencontainers.image.source="https://github.com/jccd-dev/chibako" \
+      org.opencontainers.image.version=$CHIBAKO_VERSION \
+      org.opencontainers.image.revision=$CHIBAKO_COMMIT
 
 # gosu lets the entrypoint fix bind-mount ownership as root, then drop to `node`.
 RUN apt-get update \

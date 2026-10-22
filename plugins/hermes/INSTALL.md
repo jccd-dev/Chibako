@@ -26,6 +26,16 @@ application, database bindings, tsx and node_modules are not required on the cli
 | Claude Code | `/plugin marketplace add jccd-dev/Chibako`, then `/plugin install chibako@chibako-plugins`. Review hook consent in the selected Code environment. |
 | Hermes | `hermes plugins install jccd-dev/Chibako/plugins/hermes`, then enable/review its declared hooks through that profile's normal consent. Do not install the older shell-hook examples alongside it. Actual gateway version support must be confirmed before activation. |
 
+To update after a new release:
+
+| Runtime | Update |
+| --- | --- |
+| Codex | `codex plugin marketplace upgrade`, then `codex plugin add chibako@chibako-plugins` |
+| Claude Code | `claude plugin marketplace update chibako-plugins`, then `claude plugin update chibako@chibako-plugins`; restart Claude Code |
+| Hermes | Re-run `hermes plugins install jccd-dev/Chibako/plugins/hermes` |
+
+Updates keep your private profile and key; setup does not need to be re-run.
+
 Hook-bearing packages are currently ineligible for the official public plugin
 directories. Install only one Chibako package per runtime profile; replace/disable an older
 package through the plugin manager before using a new one, rather than loading both.

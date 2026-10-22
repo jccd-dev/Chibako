@@ -1,20 +1,59 @@
-# Prebuilt GHCR image deployment. Source builds remain in docker-compose.yml.
-# Pin CHIBAKO_IMAGE to a commit tag or digest for deterministic upgrades.
+# managed-by: chibako-installer
+# Prebuilt-image deployment with in-app updates. Install with install.sh, or save
+# this file as compose.yml and follow "Docker-only install" in docs/UPDATES.md.
+# The updater owns the image pin in pin.env, so routine updates never edit this file.
+# Source builds remain in docker-compose.yml.
 services:
+  # Creates the data/backup/channel directories and the updater config once.
+  init:
+    image: ${CHIBAKO_UPDATER_IMAGE:?run install.sh so pin.env exists}
+    command: ["init"]
+    restart: "no"
+    environment:
+      - CHIBAKO_HOME=${CHIBAKO_HOME:?}
+      - CHIBAKO_DATA_VOLUME=${CHIBAKO_DATA_VOLUME:-}
+    volumes:
+      - ${CHIBAKO_HOME:?}:${CHIBAKO_HOME:?}
+      - ${CHIBAKO_DATA_VOLUME:-${CHIBAKO_HOME}/data}:${CHIBAKO_DATA_VOLUME:-${CHIBAKO_HOME}/data}
+
   chibako:
-    image: ${CHIBAKO_IMAGE:-ghcr.io/jccd-dev/chibako:latest}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    image: ${CHIBAKO_IMAGE:?run install.sh so pin.env exists}
     restart: unless-stopped
     environment:
       - DATA_DIR=/app/data
       - SITE_NAME=${SITE_NAME:-Chibako}
       - CHIBAKO_SETUP_TOKEN=${CHIBAKO_SETUP_TOKEN:-}
       - CHIBAKO_TRUST_PROXY=${CHIBAKO_TRUST_PROXY:-false}
+      - CHIBAKO_UPDATER_DIR=/app/updater
     volumes:
       - ${CHIBAKO_DATA_VOLUME:-./data}:/app/data
+      # The app may only drop requests and read the status the updater publishes.
+      - ./updater/channel/in:/app/updater/in
+      - ./updater/channel/out:/app/updater/out:ro
     networks:
       - chibako
     ports:
       - "127.0.0.1:${CHIBAKO_PORT:-3000}:3000"
+
+  updater:
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    image: ${CHIBAKO_UPDATER_IMAGE:?run install.sh so pin.env exists}
+    restart: unless-stopped
+    # No ports and no network listener. The Docker socket is host-root equivalent: see README.
+    environment:
+      - CHIBAKO_UPDATER_CONFIG=${CHIBAKO_HOME:?}/updater/config.json
+    volumes:
+      - ${CHIBAKO_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      # Same absolute path inside and outside so Compose paths resolve on the host.
+      - ${CHIBAKO_HOME:?}:${CHIBAKO_HOME:?}
+      - ${CHIBAKO_DATA_VOLUME:-${CHIBAKO_HOME}/data}:${CHIBAKO_DATA_VOLUME:-${CHIBAKO_HOME}/data}
+    networks:
+      - chibako
 
 networks:
   chibako:

@@ -7,6 +7,7 @@ import { useAppearance } from "@/components/providers/AppearanceProvider";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { IconCheck, IconKey, IconPlus, IconTrash, IconX } from "@/components/icons";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UpdatesPanel } from "@/features/updates/components/UpdatesPanel";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -67,7 +68,7 @@ interface EmbeddingStatus {
 export function SettingsView() {
   const router = useRouter();
   const { appearance, setFont } = useAppearance();
-  const [tab, setTab] = useState<"appearance" | "schema" | "properties" | "keys" | "recall" | "password">("schema");
+  const [tab, setTab] = useState<"appearance" | "schema" | "properties" | "keys" | "recall" | "password" | "updates">("schema");
   const [schema, setSchema] = useState("");
   const [schemaSaved, setSchemaSaved] = useState(false);
   const [propDefs, setPropDefs] = useState<PropDefDraft[]>([]);
@@ -239,6 +240,7 @@ export function SettingsView() {
             <TabsTrigger value="keys">API keys</TabsTrigger>
             <TabsTrigger value="recall">Recall</TabsTrigger>
             <TabsTrigger value="password">Password</TabsTrigger>
+            <TabsTrigger value="updates">Updates</TabsTrigger>
           </TabsList>
         </div>
 
@@ -520,6 +522,9 @@ export function SettingsView() {
             </FieldGroup>
             <div><Button type="submit">Update password</Button></div>
           </form>
+        </TabsContent>
+        <TabsContent value="updates" className="fade-in">
+          <UpdatesPanel />
         </TabsContent>
       </Tabs>
 
