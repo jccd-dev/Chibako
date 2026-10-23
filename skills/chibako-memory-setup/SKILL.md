@@ -83,6 +83,13 @@ objective, decisions, evidence, unresolved work and next action. Keep implementa
 verification, commit and deployment statuses separate. Preference writes require an
 explicit confirmation source and scope. Never stage secrets or transcripts.
 
+Set the checkpoint title explicitly and start its body with a short introduction
+or `##` sections, since Chibako displays the title above the body. Keep meaningful
+source, event, and verification dates labeled in the content; distinguish them
+from save time and leave unknown dates unresolved. Checkpoints have no properties
+field and stay in the configured memory folder; use the main `chibako-memory`
+skill for authorized general Note organization, not as an automatic-write bypass.
+
 Staged means privately retained. Only a validated save receipt establishes saving.
 An outage retains the pending checkpoint under the same identity. A conflict needs
 a fresh read and supported merge, not an old body with a new revision. Follow the

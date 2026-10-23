@@ -277,3 +277,20 @@ test("cmd-click multi-select purges several trashed files at once", async ({ pag
     return ids.some(id => trashedIds.includes(id));
   }).toBe(false);
 });
+
+test("opening a nested note reveals it and Collapse folders closes the tree", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  const outer = `Reveal ${stamp}`;
+  const inner = `${outer}/Inner`;
+  const note = await createNote(page.request, `Deep ${stamp}`, inner);
+  await page.goto(`/app/note/${note.id}`);
+
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+  await expect(sidebar.getByRole("button", { name: outer, exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.getByRole("button", { name: "Inner", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.getByRole("navigation").locator('[aria-current="page"]').last()).toBeInViewport();
+
+  await sidebar.getByRole("button", { name: "Collapse folders" }).click();
+  await expect(sidebar.getByRole("button", { name: outer, exact: true })).toHaveAttribute("aria-expanded", "false");
+});

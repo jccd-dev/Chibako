@@ -5,8 +5,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { IconCalendarMonth, IconChartPie, IconCreditCard, IconDotsVertical, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
+import { IconCalendarMonth, IconChartPie, IconCreditCard, IconDotsVertical, IconFold, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
+import { useRevealActiveNote } from "./use-reveal-active-note";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import { notifyOrganizationChanged as notifyChanged, requestOrganizationChange as request } from "@/features/organization/organization-client";
 import type { NoteBatchInput } from "@/features/organization/note-batch";
@@ -89,6 +90,9 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkPurgeOpen, setBulkPurgeOpen] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+
+  useRevealActiveNote(pathname, notes, setExpanded, treeRef);
 
   const treeCache = useMemo(() => noteTreeCache(async () => {
     const response = await fetch("/api/notes");
@@ -503,7 +507,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       <div data-accented={(dropTarget === path || selectedFolder === path) || undefined} className={cn("group/sidebar-row flex items-center rounded-md", (dropTarget === path || selectedFolder === path) && "bg-accent", dropTarget === path && "ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
         <ContextMenu>
           <ContextMenuTrigger className="flex min-w-0 flex-1">
-            <button className="tree-item min-w-0 flex-1" aria-expanded={open} aria-pressed={selectedFolder === path} onClick={() => {
+            <button className="tree-item min-w-0 flex-1" title={path} aria-expanded={open} aria-pressed={selectedFolder === path} onClick={() => {
               setSelectedFolder(path);
               clearSelection();
               setExpanded(prev => {
@@ -631,11 +635,14 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
         {notes.some(n => n.is_pinned) && <details><summary className="tree-item">Pinned</summary>{notes.filter(n => n.is_pinned).map(noteRow)}</details>}
         <details><summary className="tree-item">Recent</summary>{[...notes].sort((a,b) => b.updated_at - a.updated_at).slice(0,5).map(noteRow)}</details>
-        <div {...dropProps("")} className="min-h-16 flex-1" onClick={e => { if (e.target === e.currentTarget) { clearSelection(); setSelectedFolder(null); } }}>
-          <button type="button" aria-pressed={selectedFolder === ""} onClick={() => { setSelectedFolder(""); clearSelection(); }}
-            className={cn("tree-item my-1", (dropTarget === "" || selectedFolder === "") && "bg-accent", dropTarget === "" && "ring-1 ring-primary")}>
-            <IconFolder size={14} />Files
-          </button>
+        <div ref={treeRef} {...dropProps("")} className="min-h-16 flex-1" onClick={e => { if (e.target === e.currentTarget) { clearSelection(); setSelectedFolder(null); } }}>
+          <div className="group/sidebar-row my-1 flex items-center">
+            <button type="button" aria-pressed={selectedFolder === ""} onClick={() => { setSelectedFolder(""); clearSelection(); }}
+              className={cn("tree-item min-w-0 flex-1", (dropTarget === "" || selectedFolder === "") && "bg-accent", dropTarget === "" && "ring-1 ring-primary")}>
+              <IconFolder size={14} />Files
+            </button>
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Collapse folders" title="Collapse folders" onClick={() => setExpanded(new Set())}><IconFold /></Button>
+          </div>
           {folders.filter(f => !parentOf(f)).map(folderRow)}
           {notes.filter(n => !n.folder).map(noteRow)}
         </div>

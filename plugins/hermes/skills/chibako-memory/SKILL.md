@@ -1,6 +1,6 @@
 ---
 name: chibako-memory
-description: Retrieve and preserve shared knowledge through Chibako MCP. Use when starting or continuing work that needs prior decisions, user preferences, project context, or saved notes; when asked to remember something; or when standing instructions require Chibako memory for each task.
+description: Retrieve, organize, and preserve shared knowledge through Chibako MCP. Use for prior decisions, preferences, project context, authorized memory saves, or organizing notes by folder, topic, date, properties, and title.
 license: MIT
 ---
 
@@ -62,6 +62,10 @@ Installing this skill alone does not authorize writes. For read-only questions,
 save nothing from the conversation unless the user asks for it; offer a useful
 memory only if warranted.
 
+For Note writes, follow the organization, title, and date conventions below.
+Use them within the vault schema and the authorized scope; a skill upgrade does
+not authorize reorganizing existing notes or changing the schema.
+
 - Save confirmed, reusable preferences, decisions with reasons, or lessons.
   Skip temporary status, repeated facts, guesses, raw transcripts, credentials,
   and sensitive information the user has not asked to retain.
@@ -85,6 +89,68 @@ memory only if warranted.
 - Inspect the write result before reporting success. If a write times out or
   its outcome is uncertain, inspect recent observations or the target note
   before retrying to avoid duplicates. Report unresolved failures clearly.
+
+## Organize notes for retrieval
+
+- Search the topic before creating a note. Read the closest canonical note and
+  inspect its folder and related notes; reuse that location and naming pattern.
+  Browse with `list_notes` only as needed to find the relevant branch.
+- Choose the folder from the content's primary project or subject. Reuse an
+  existing broad area; add a subfolder only for a distinct collection that needs
+  it. Keep one canonical note for a topic and link related topics with wikilinks.
+- Use topic folders for durable guides, decisions, and reference material. Use
+  date-based folders or title prefixes for chronological collections such as
+  meetings and logs, following the collection's existing period format. A date
+  mentioned in a guide does not make it a journal entry.
+- Reuse applicable properties for layer, type, status, category, and cross-cutting
+  tags from `get_property_defs`. Select them from the content, rather than
+  attaching every available property. Preserve existing unrelated values.
+- When asked to reorganize existing notes, read each affected note before
+  changing it, preserve its ID and content, and use supported folder/title fields.
+  Resolve ambiguous destinations or collisions before moving; keep raw source
+  bodies protected unless their editing is explicitly requested.
+
+## Titles and body headings
+
+- Set `title` explicitly when creating a note. Use a readable, stable subject
+  name with enough project context to distinguish it in links and search; follow
+  existing naming patterns. In Chibako this title is the filename identity and
+  the heading displayed above the body; omit a `.md` suffix.
+- Start authored bodies with a short introduction or a `##` section. Omit a
+  leading `#` heading that repeats the title: Chibako already displays it.
+  For example, title `Project Atlas - Authentication` can have a body beginning
+  `## Access rules`, followed by its content.
+- Within an authorized edit of an existing authored note, remove an opening H1
+  only when it duplicates the displayed title. Preserve distinct headings,
+  quoted source titles, and raw source formatting. Avoid a vault-wide cleanup
+  unless requested.
+
+## Dates and provenance
+
+- Preserve source/event/effective dates when they matter to a fact, decision,
+  meeting, or reporting period. Distinguish them from the note's automatic
+  `created_at` and `updated_at`: editing a note does not make its claims current.
+- Check `get_property_defs` for an existing property with the right meaning and
+  type. For supported general Note writes, set a known day as `YYYY-MM-DD` in
+  that date property through `create_note`, `update_note`, or `set_properties`.
+  Use the vault's key, rather than inventing synonyms or changing definitions.
+- If no suitable property exists, retain a labeled date in the body and propose
+  a property only if useful for the requested workflow. A date in prose is still
+  useful context; schema changes need their own authorization.
+- Preserve partial dates and uncertainty in prose. Resolve relative dates only
+  from a known source date and relevant timezone; otherwise keep the wording and
+  flag ambiguity. Never substitute today's date for an unknown event date.
+- `memory_save` observations support content, source, and note_id, not arbitrary
+  properties. Include meaningful dates and provenance in their content.
+  Restricted automatic `memory_write` checkpoints also have no properties field:
+  keep dates in their content and stay in the configured memory folder. Do not
+  use general Note tools to bypass those restrictions.
+- For dated retrieval, use `search_notes` with topic terms and, when applicable,
+  `prop_key`/`prop_value`; `list_notes` also supports folder/property filters.
+  Property matching is substring-based, not date-range comparison. Read matches
+  to verify date meaning, source, and superseding decisions; the most recently
+  edited note is not necessarily the most recent evidence. Recall alone does
+  not guarantee a date-filtered result.
 
 With automatic memory, saving is activity-gated: the hook counts work since the
 last save (defaults: 4 user turns or 10 tool calls). Trivial turns need no

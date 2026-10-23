@@ -26,6 +26,19 @@
   --warning: oklch(0.68 0.12 75);
   --graph-wiki: var(--success);
   --graph-index: var(--warning);
+  --galaxy-0: oklch(0.74 0.16 78);
+  --galaxy-1: oklch(0.64 0.2 38);
+  --galaxy-2: oklch(0.54 0.24 350);
+  --galaxy-3: oklch(0.48 0.22 295);
+  --galaxy-4: oklch(0.52 0.17 255);
+  --graph-cluster-0: oklch(0.72 0.16 75);
+  --graph-cluster-1: oklch(0.62 0.2 32);
+  --graph-cluster-2: oklch(0.55 0.22 350);
+  --graph-cluster-3: oklch(0.52 0.2 295);
+  --graph-cluster-4: oklch(0.58 0.15 250);
+  --graph-cluster-5: oklch(0.6 0.12 190);
+  --graph-cluster-center: oklch(0.32 0.03 135);
+  --graph-cluster-orphan: oklch(0.68 0.02 135);
   --border: oklch(0.86 0.012 135);
   --input: oklch(0.86 0.012 135);
   --ring: var(--primary);
@@ -109,6 +122,19 @@ html[data-note-font="existing"] {
   --warning: oklch(0.82 0.13 80);
   --graph-wiki: var(--success);
   --graph-index: var(--warning);
+  --galaxy-0: oklch(0.9 0.13 88);
+  --galaxy-1: oklch(0.8 0.15 50);
+  --galaxy-2: oklch(0.72 0.21 345);
+  --galaxy-3: oklch(0.68 0.19 295);
+  --galaxy-4: oklch(0.72 0.14 250);
+  --graph-cluster-0: oklch(0.86 0.14 85);
+  --graph-cluster-1: oklch(0.78 0.16 40);
+  --graph-cluster-2: oklch(0.72 0.21 350);
+  --graph-cluster-3: oklch(0.7 0.18 295);
+  --graph-cluster-4: oklch(0.74 0.13 250);
+  --graph-cluster-5: oklch(0.78 0.11 190);
+  --graph-cluster-center: oklch(0.95 0.01 135);
+  --graph-cluster-orphan: oklch(0.6 0.02 135);
   --border: #343437;
   --input: #343437;
   --ring: var(--primary);
@@ -276,6 +302,14 @@ textarea.font-mono { font-family: var(--font-mono); }
 .graph-root text.label {
   transition: opacity 0.25s ease, stroke 0.2s ease, stroke-width 0.2s ease;
 }
+.graph-root text.label {
+  font-size: calc(11px / var(--graph-k, 1));
+  fill: var(--foreground);
+  stroke: var(--background);
+  stroke-width: calc(3px / var(--graph-k, 1));
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
 @media (prefers-reduced-motion: reduce) {
   .graph-root circle.node,
   .graph-root line.link,
@@ -296,6 +330,7 @@ textarea.font-mono { font-family: var(--font-mono); }
   cursor: pointer;
   user-select: none;
 }
+.tree-item > svg { flex-shrink: 0; }
 .tree-item:hover { background: var(--muted); color: var(--foreground); }
 .tree-item.active { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 550; }
 .group\/sidebar-row[data-accented] .tree-item:hover,
