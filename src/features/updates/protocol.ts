@@ -36,6 +36,14 @@ export const updateRequestSchema = z.object({
 }).strict();
 export type UpdateRequest = z.infer<typeof updateRequestSchema>;
 
+/** Asks the updater to refetch the release manifest now; never installs. Companions without it drop the file unread. */
+export const checkRequestSchema = z.object({
+  v: z.literal(1),
+  id: z.string().regex(UUID),
+  action: z.literal("check"),
+}).strict();
+export const inboxRequestSchema = z.union([updateRequestSchema, checkRequestSchema]);
+
 export const REQUEST_FILE = /^request-[0-9a-f-]{36}\.json$/;
 
 /** Published beside every release (release.json); fetched by the updater only. */
@@ -73,6 +81,8 @@ export const statusSchema = z.object({
     url: z.string().max(300),
   }).nullable(),
   checkError: z.string().max(300).nullable(),
+  /** Id of the last manual check the updater finished; absent from companions that predate manual checks. */
+  checkAck: z.string().regex(UUID).nullable().optional(),
   operation: z.object({
     id: z.string().regex(UUID),
     phase: z.enum(OPERATION_PHASES),
@@ -91,4 +101,6 @@ export interface UpdateView {
   latest: { version: string; notes: string; publishedAt: string; url: string } | null;
   operation: { id: string; phase: OperationPhase; to: string; error: string | null; updatedAt: number } | null;
   message: string | null;
+  /** Last finished manual check request id, so the browser can tell its own check completed. */
+  checkAck: string | null;
 }

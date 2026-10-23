@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withOwnerSession } from "@/lib/api";
 import { versionSchema } from "@/features/updates/protocol";
-import { UpdateError, getUpdateView, requestUpdate } from "@/features/updates/updates";
+import { UpdateError, getUpdateView, requestCheck, requestUpdate } from "@/features/updates/updates";
 
 export const runtime = "nodejs";
 
-const requestBody = z.object({ version: versionSchema }).strict();
+const requestBody = z.union([
+  z.object({ version: versionSchema }).strict(),
+  z.object({ action: z.literal("check") }).strict(),
+]);
 
 export const GET = withOwnerSession(async () => NextResponse.json(getUpdateView()));
 
@@ -18,7 +21,7 @@ export const POST = withOwnerSession(async (req) => {
   const parsed = requestBody.safeParse(json);
   if (!parsed.success) return NextResponse.json({ error: "Invalid update request." }, { status: 400 });
   try {
-    return NextResponse.json(requestUpdate(parsed.data.version), { status: 202 });
+    return NextResponse.json("action" in parsed.data ? requestCheck() : requestUpdate(parsed.data.version), { status: 202 });
   } catch (e) {
     if (e instanceof UpdateError) return NextResponse.json({ error: e.message }, { status: e.status });
     throw e;

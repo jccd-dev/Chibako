@@ -27,8 +27,13 @@ GitHub release ──release.json──► updater container ◄──request/st
   It has no network listener and acts only on a host-owned config file the app
   cannot see. It fetches the manifest itself, accepts only the fixed image
   repository and a `sha256` digest, and runs Docker with argument vectors.
-- The **app** can only drop a bounded request file (`update to 0.1.2`) and read
-  a status file published read-only. A compromised app cannot choose an image,
+- The updater checks GitHub for a new release every 3 hours, and the owner can
+  choose **Check for updates** to refetch immediately. A manual check only
+  refreshes the status; it never installs. An updater older than this feature
+  ignores the request, and the app reports that it did not answer (re-run the
+  installer to refresh it).
+- The **app** can only drop a bounded request file (`update to 0.1.2`, or a
+  manifest refresh) and read a status file published read-only. A compromised app cannot choose an image,
   path, or command.
 - **Docker socket warning:** the updater can control Docker, which is
   equivalent to root on the host. That is the price of one-click updates. If you

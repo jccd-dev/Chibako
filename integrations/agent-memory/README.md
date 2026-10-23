@@ -112,24 +112,28 @@ summary and stages it when requested:
 node --import tsx scripts/agent-memory.ts codex stage < /private/checkpoint.json
 ```
 
-The private input is this envelope (use `claude` or `hermes` for those runtimes):
+The hook's stage command already carries `--session <id>`; pipe only the thread
+(use `claude` or `hermes` for those runtimes):
 
 ```json
 {
-  "session_id": "actual-runtime-session-id",
-  "hook_event_name": "Checkpoint",
   "checkpoint": {
-    "request_id": "stable-checkpoint-id",
     "role": "overview",
     "subject": "Thread name",
-    "session_id": "actual-runtime-session-id",
     "title": "Thread name",
-    "content": "Concise objective, changes, evidence, unresolved work, checkpoint and next action",
-    "expected_revision": null
+    "content": "Concise objective, changes, evidence, unresolved work, checkpoint and next action"
   },
   "now_line": "<=140 chars status, no brackets"
 }
 ```
+
+`session_id`, `hook_event_name`, `request_id` and `expected_revision` are filled in
+(a new thread gets `expected_revision: null`). If the thread already exists, staging
+is rejected with its current revision: read it, merge your update, and restage with
+`"expected_revision": "<revision>"` in the checkpoint. Without `--session`, or for
+full legacy payloads, supply the top-level `session_id` and `hook_event_name:
+"Checkpoint"` and every checkpoint field (`request_id`, matching `session_id`,
+`expected_revision`) yourself.
 
 Use one overview per thread: `subject` and `title` equal the thread name. For an
 existing thread, read it first and pass its revision as `expected_revision`. After the
