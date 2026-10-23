@@ -18,6 +18,7 @@ import { PUT as allocate } from "../../src/app/api/finance/goals/[id]/allocation
 import { GET as accounts } from "../../src/app/api/finance/goals/accounts/route";
 import { POST as remote } from "../../src/app/mcp/route";
 import type { FinanceActor } from "../../src/features/finance/types";
+import type { FinanceGoal } from "../../src/features/finance/goal-types";
 
 const vault = mkdtempSync(join(tmpdir(), "chibako-goals-"));
 process.env.CHIBAKO_DATA_DIR = vault;
@@ -64,10 +65,62 @@ test("goal allocations move cash, preserve total money, and require a zero balan
   assert.deepEqual(getFinanceSummary(owner), totals);
 });
 
+test("linked creation reserves existing positive cents without moving cash or double counting reservations", () => {
+  const a = account("20.25"), b = account("100");
+  const totals = getFinanceSummary(owner), activity = getActivityTotals(owner, { month: "2026-10" });
+  const input = { request_id: randomUUID(), name: "Linked seed", target: "10", linked_account_id: a.id };
+  const created = createGoal(owner, input);
+  assert.equal(created.goal.saved_cents, 2025);
+  assert.equal(created.goal.achieved, true);
+  assert.equal(created.goal.allocations[0].account_id, a.id);
+  assert.equal(created.goal.allocations[0].amount_cents, 2025);
+  assert.deepEqual(createGoal(owner, input), created);
+  assert.throws(() => createGoal(owner, { ...input, target: "11" }), { code: "request_conflict" });
+  assert.equal(getAccount(owner, a.id).balance_cents, 2025);
+  assert.deepEqual(getFinanceSummary(owner), totals);
+  assert.deepEqual(getActivityTotals(owner, { month: "2026-10" }), activity);
+  assert.deepEqual(getDb().prepare("SELECT COUNT(*) AS count FROM finance_goal_movements").get(), { count: 0 });
+  const counts = getDb().prepare("SELECT (SELECT COUNT(*) FROM finance_goals) AS goals, (SELECT COUNT(*) FROM finance_audit) AS audits, (SELECT COUNT(*) FROM finance_requests) AS requests").get();
+  assert.throws(() => createGoal(owner, { ...input, request_id: randomUUID() }), { code: "insufficient_funds" });
+  assert.deepEqual(getDb().prepare("SELECT (SELECT COUNT(*) FROM finance_goals) AS goals, (SELECT COUNT(*) FROM finance_audit) AS audits, (SELECT COUNT(*) FROM finance_requests) AS requests").get(), counts);
+  assert.equal(listGoalAccounts(owner).accounts.find(row => row.account_id === a.id)?.reserved_cents, 2025);
+  const before = getGoal(owner, created.goal.id);
+  const movementCount = getDb().prepare("SELECT COUNT(*) AS count FROM finance_goal_movements").get();
+  for (const direction of ["deposit", "withdrawal"]) {
+    assert.throws(() => moveGoalMoney(owner, before.id, { ...action(before.version), direction, account_id: a.id, amount: "1" }), { code: "invalid_account" });
+  }
+  assert.throws(() => setAmount(before.id, a.id, "19.25"), { code: "invalid_account" });
+  assert.deepEqual(getGoal(owner, before.id), before);
+  assert.deepEqual(getDb().prepare("SELECT COUNT(*) AS count FROM finance_goal_movements").get(), movementCount);
+  assert.deepEqual(getDb().prepare("SELECT (SELECT COUNT(*) FROM finance_goals) AS goals, (SELECT COUNT(*) FROM finance_audit) AS audits, (SELECT COUNT(*) FROM finance_requests) AS requests").get(), counts);
+  const deposit = { ...action(before.version), direction: "deposit", account_id: b.id, amount: "5.10" };
+  const deposited = moveGoalMoney(owner, before.id, deposit);
+  assert.deepEqual(moveGoalMoney(owner, before.id, deposit), deposited);
+  assert.equal(deposited.goal.saved_cents, 2535);
+  assert.equal(getAccount(owner, a.id).balance_cents, 2535);
+  assert.equal(getAccount(owner, b.id).balance_cents, 9490);
+  const withdrawal = { ...action(deposited.goal.version), direction: "withdrawal", account_id: b.id, amount: "25.35" };
+  const withdrawn = moveGoalMoney(owner, before.id, withdrawal);
+  assert.deepEqual(moveGoalMoney(owner, before.id, withdrawal), withdrawn);
+  assert.equal(withdrawn.goal.saved_cents, 0);
+  assert.equal(getAccount(owner, a.id).balance_cents, 0);
+  assert.equal(getAccount(owner, b.id).balance_cents, 12025);
+  assert.deepEqual(getFinanceSummary(owner), totals);
+  assert.deepEqual(getActivityTotals(owner, { month: "2026-10" }), activity);
+  for (const balance of ["0", "-1.25"]) {
+    const cash = account(balance);
+    const empty: FinanceGoal = createGoal(owner, { ...input, request_id: randomUUID(), linked_account_id: cash.id }).goal;
+    assert.equal(empty.saved_cents, 0);
+    assert.equal(empty.allocations.length, 0);
+    assert.equal(getAccount(owner, cash.id).balance_cents, balance === "0" ? 0 : -125);
+  }
+});
+
 test("linked goal shortfalls warn after spending, and movements preserve holdings through account changes", () => {
   const a = account("20"), b = account("100");
-  const g = createGoal(owner, { request_id: randomUUID(), name: "Linked goal", target: "100", linked_account_id: a.id }).goal;
+  const g = goal();
   setAmount(g.id, b.id, "80");
+  updateGoal(owner, g.id, { ...action(getGoal(owner, g.id).version), linked_account_id: a.id });
   assert.equal(getAccount(owner, a.id).balance_cents, 10000);
   assert.equal(getAccount(owner, b.id).balance_cents, 2000);
   const posted = expense(a.id, "30");
@@ -91,10 +144,13 @@ test("linked goal shortfalls warn after spending, and movements preserve holding
   assert.equal(reconciled.allocation_shortfalls?.[0].shortfall_cents, 1000);
   revertActivity(owner, reconciled.transaction.id, action());
   const plan = createPlan(owner, { request_id: randomUUID(), account_id: a.id, amount: "30", due_date: "2026-10-06" }).plan;
-  assert.equal(postPlan(owner, plan.id, { ...action(), account_id: a.id, amount: "30", transaction_date: "2026-10-06" }).allocation_shortfalls?.[0].shortfall_cents, 1000);
+  const planned = postPlan(owner, plan.id, { ...action(), account_id: a.id, amount: "30", transaction_date: "2026-10-06" });
+  assert.equal(planned.allocation_shortfalls?.[0].shortfall_cents, 1000);
   assert.throws(() => setAmount(g.id, b.id, "0"), { code: "insufficient_funds" });
-  assert.equal(moveGoalMoney(owner, g.id, { ...action(getGoal(owner, g.id).version), direction: "withdrawal", account_id: a.id, amount: "75" }).goal.saved_cents, 0);
-  assert.equal(getAccount(owner, a.id).balance_cents, 6500);
+  assert.throws(() => moveGoalMoney(owner, g.id, { ...action(getGoal(owner, g.id).version), direction: "withdrawal", account_id: a.id, amount: "75" }), { code: "invalid_account" });
+  revertActivity(owner, planned.transaction.id, action());
+  assert.equal(moveGoalMoney(owner, g.id, { ...action(getGoal(owner, g.id).version), direction: "withdrawal", account_id: b.id, amount: "75" }).goal.saved_cents, 0);
+  assert.equal(getAccount(owner, a.id).balance_cents, 2000);
   updateAccount(owner, a.id, { ...action(), archived: true });
   assert.throws(() => setAmount(g.id, b.id, "1"), { code: "invalid_account" });
 });

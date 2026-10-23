@@ -121,11 +121,16 @@ export function createGoal(actor: FinanceActor, input: unknown): { goal: Finance
   const targetCents = decimalCents(payload.target);
   if (targetCents <= 0) throw new FinanceError("Use a target above PHP 0.00", 400, "invalid_input");
   return mutateGoal(actor, request_id, "goal.create", payload, () => {
-    if (payload.linked_account_id) activeMoneyAccount(payload.linked_account_id);
+    const linked = payload.linked_account_id ? activeMoneyAccount(payload.linked_account_id) : null;
+    const initialCents = linked ? Math.max(0, linked.balance_cents) : 0;
+    if (linked && initialCents > 0) {
+      requireSufficientFunds(BigInt(linked.balance_cents) - BigInt(reservedAccountCents(linked.id)), initialCents);
+    }
     const id = randomUUID();
     const timestamp = now();
     getDb().prepare("INSERT INTO finance_goals (id, name, target_cents, saved_cents, due_date, linked_account_id, archived, version, created_at, updated_at) VALUES (?,?,?,?,?,?,0,1,?,?)")
       .run(id, payload.name, targetCents, 0, payload.due_date ?? null, payload.linked_account_id ?? null, timestamp, timestamp);
+    if (linked && initialCents > 0) writeAllocation(id, linked.id, initialCents);
     return { before: null, after: readGoal(id) };
   });
 }
@@ -168,6 +173,9 @@ function activeMoneyAccount(id: string) {
 }
 
 function recordGoalMovement(goal: FinanceGoal, type: "deposit" | "withdrawal" | "relocation", sourceId: string | null, destinationId: string | null, amount: number) {
+  if (type === "withdrawal" && sourceId !== null && sourceId === destinationId) {
+    throw new FinanceError("Choose a destination different from the goal's linked account", 400, "invalid_account");
+  }
   if (sourceId !== destinationId) {
     if (sourceId) {
       const source = readAccountBalance(sourceId);

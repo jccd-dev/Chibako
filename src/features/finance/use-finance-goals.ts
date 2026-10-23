@@ -96,11 +96,11 @@ export function useFinanceGoals() {
 
   function selectLinkedAccount(id: string) {
     setLinkedAccount(id);
-    if (id && direction === "deposit" && accountId === id) setAccountId("");
+    if (id && accountId === id) setAccountId("");
   }
   function selectDirection(next: "deposit" | "withdrawal") {
     setDirection(next); setAmount("");
-    if (next === "deposit" && editing?.linked_account_id && accountId === editing.linked_account_id) setAccountId("");
+    if (editing?.linked_account_id && accountId === editing.linked_account_id) setAccountId("");
   }
   function selectAccount(id: string) { setAccountId(id); }
 
@@ -132,8 +132,8 @@ export function useFinanceGoals() {
   }
   async function moveMoney() {
     if (!editing) return;
-    if (direction === "deposit" && editing.linked_account_id && accountId === editing.linked_account_id) {
-      setSaveError("Choose a source account other than the linked account."); return;
+    if (editing.linked_account_id && accountId === editing.linked_account_id) {
+      setSaveError("Choose an account other than the linked account."); return;
     }
     const input = { version: editing.version, direction, account_id: accountId, amount };
     const validation = moveGoalMoneySchema.safeParse({ ...input, request_id: "validate" });
@@ -156,9 +156,7 @@ export function useFinanceGoals() {
           ? goal.linked_account_id
             ? `Added ${amountText} to the linked account ${linkedName}.`
             : `Added ${amountText} to ${goal.name}.`
-          : goal.linked_account_id && accountId === goal.linked_account_id
-            ? `Withdrew ${amountText} from this goal. The money stays in ${destination}; its account balance is unchanged.`
-            : `Moved ${amountText} into ${destination}.`,
+          : `Moved ${amountText} into ${destination}.`,
       );
     }
   }
