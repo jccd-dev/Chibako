@@ -54,7 +54,7 @@ owner action. Do not claim installed or connected proves autonomous capture.
 ## Automatic work after setup
 
 Automatic mode is enabled explicitly in setup or through resume. Keep source
-notes protected. Use the restricted connection and `memory_read`/`memory_write`
+notes protected. Use the restricted connection and `memory_session`
 for automatic maintenance; never fall back to general Note writes, deletion,
 schema writes or Finance mutations when restricted memory rejects an operation.
 Startup reads the "Now" overview. Fetch the schema only before a write. Treat
@@ -63,25 +63,34 @@ topic change.
 
 Saving is activity-gated: the hook counts user turns and tool calls since the
 last verified save (defaults 4 and 10). Trivial turns need no checkpoint and no
-skip. Stage only when the hook says a checkpoint is due, once per request.
+skip. Stage a progress checkpoint only when due, once per request. Explicit
+completion may be staged below the threshold when an existing checkpoint needs
+cleanup or new lasting knowledge needs preserving. `Stop` ends a response, not
+the host session; app closure alone is not evidence that the work is complete.
 
 The hook context supplies an installed stage command that already carries the
 session ID. Pipe a concise JSON payload to it on stdin, for example a shell
 heredoc with a quoted delimiter. No payload file is required. The payload is either
-`{"checkpoint": {"role": "overview", "subject": ..., "title": ..., "content": ...}, "now_line": ...}`
+`{"checkpoint": {"title": ..., "content": ...}, "now_line": ...}`
 or `{"skip": "No durable change"}` when the work was not meaningful. The command
-fills in the session, request ID and revision.
+fills in the runtime, session and request ID. It reads the revision for a new
+checkpoint; existing active memory must be read and merged before an update.
 
-The checkpoint uses the `overview` role, the thread as subject, the thread's
-overview title and concise content. `now_line` is plain status text for that thread
+The server derives checkpoint identity from the authenticated key, runtime and
+host session ID. Task/label changes update the same note. `now_line` is plain status text
 (one line, at most 140 characters, no brackets); the runtime renders and upserts
-`- [[Thread]] — status` in "Now". The thread title must not contain `[`, `]` or `|`.
-A new thread needs nothing more. If the thread already exists, staging is rejected
-with its current revision: read it, merge your update, and restage with
-`"expected_revision": "<revision>"` in the checkpoint. Overview content includes
+`- [[Session title]] — status` in "Now". Titles must not contain `[`, `]` or `|`.
+The first title is kept with a unique suffix; later labels do not rename the note.
+If session memory already exists, staging returns its revision: read it with
+`memory_session({"action":"read","runtime":"claude","session_id":"..."})`,
+merge your update, and restage with
+`"expected_revision": "<revision>"` in the checkpoint. Content includes
 objective, decisions, evidence, unresolved work and next action. Keep implementation,
 verification, commit and deployment statuses separate. Preference writes require an
 explicit confirmation source and scope. Never stage secrets or transcripts.
+Successful staging returns a verified `receipt` with the revision. Reuse it for
+the next update while that content remains in context; after a resume or conflict,
+read the current note before merging. This avoids a redundant read after each save.
 
 Set the checkpoint title explicitly and start its body with a short introduction
 or `##` sections, since Chibako displays the title above the body. Keep meaningful
@@ -90,10 +99,29 @@ from save time and leave unknown dates unresolved. Checkpoints have no propertie
 field and stay in the configured memory folder; use the main `chibako-memory`
 skill for authorized general Note organization, not as an automatic-write bypass.
 
+When no work remains, stage `{"finish":{"expected_revision":"<revision>"}}`.
+The server removes this session's Now entry and moves its temporary note to Trash.
+To keep lasting knowledge, include one `retain` object inside `finish` with
+`role` (`wiki` or `preference`), `subject`, `title`, concise `content`, and
+`expected_revision` (null for creation, current `memory_read` revision for a merge).
+Preferences also need `confirmation` with source and scope. Search/read the
+canonical topic first; preserve useful decisions and reasons, not the activity
+log. Retention, Now cleanup and session disposal commit together or all roll back.
+An unchanged checkpoint is skipped locally. Finishing a trivial session creates
+no temporary note. Existing source notes, other sessions and legacy overviews
+are outside automatic cleanup. Trash follows the vault's 30-day expiry policy.
+Resuming the same session restores its own completed checkpoint while it remains
+in Trash; after purge, a fresh checkpoint can be created under the same identity.
+
 Staged means privately retained. Only a validated save receipt establishes saving.
 An outage retains the pending checkpoint under the same identity. A conflict needs
 a fresh read and supported merge, not an old body with a new revision. Follow the
 runtime's guarded replacement mechanism; do not discard pending contributions.
+If a pending save cannot proceed because its checkpoint was manually trashed,
+read the session's current revision and decide whether any pending knowledge
+deserves retention. Stage finish with that revision and `replaces_request_id`
+identifying the pending save. The original pending content stays private until
+the replacement finish receives a verified receipt; a skip cannot erase it.
 Report unsaved status. Hermes missing-checkpoint prompting outside coding and
 actual-host hook delivery remain compatibility checks, not guaranteed behavior.
 

@@ -65,7 +65,7 @@ async function setupWizard(runtime: Runtime, directory: string, name: string): P
       const receipt = await writeConnectionCheck(connection.call);
       process.stdout.write(JSON.stringify(receipt) + "\n");
     }
-    if ((await ask("Enable automatic memory for this profile? [y/N] ")).trim().toLowerCase() === "y") await setEnabled(directory, true, connection.call);
+    if ((await ask("Enable automatic session memory (completed temporary checkpoints go to Trash)? [y/N] ")).trim().toLowerCase() === "y") await setEnabled(directory, true, connection.call);
     return localStatus(directory);
   } finally { readline.close(); await connection?.close(); }
 }

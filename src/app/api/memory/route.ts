@@ -1,5 +1,6 @@
 import { authenticateApiKey } from "@/server/auth/api-key-authorization";
 import { readMemory, writeMemory } from "@/features/memory/memory";
+import { sessionMemory } from "@/features/memory/session-memory";
 import { MemoryError } from "@/features/memory/types";
 import type { ApiKeyPrincipal } from "@/server/auth/api-key-authorization";
 
@@ -40,7 +41,9 @@ export async function POST(request: Request): Promise<Response> {
     let body: unknown;
     try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
     catch { throw new MemoryError("Invalid JSON body", 400, "invalid_input"); }
-    return writeMemory(principal, body);
+    return typeof body === "object" && body !== null && "action" in body
+      ? sessionMemory(principal, body)
+      : writeMemory(principal, body);
   });
 }
 

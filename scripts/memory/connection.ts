@@ -10,6 +10,7 @@ export const requiredScopes = ["notes:read", "schema:read", "memory:write"];
 export const memoryStatusSchema = z.object({
   contract_version: z.literal(1), principal_id: z.string().min(1), scopes: z.array(z.string()),
   enabled: z.boolean(), area: z.string().nullable(),
+  session_lifecycle: z.literal(1).optional(),
 });
 export type MemoryStatus = z.infer<typeof memoryStatusSchema>;
 export function validateEndpoint(raw: string): string {
@@ -32,6 +33,7 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
 } {
   let client: Client | undefined;
   let verified = false;
+  let status: MemoryStatus | undefined;
   let calls = 0;
   const invoke: MemoryCall = async (name, args) => {
     if (!key) throw new MemoryClientError("A restricted Chibako API key is required.");
@@ -52,6 +54,12 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
     let result;
     try { result = await client.callTool({ name, arguments: args }, undefined, { timeout: MEMORY_REQUEST_TIMEOUT_MS }); }
     catch { throw new MemoryClientError("Memory request failed. Check the connection and server status; pending checkpoints are retained."); }
+    if (result.isError && name === "memory_session") {
+      const content = z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough()).safeParse(result.content);
+      const message = content.success ? content.data.find(item => item.type === "text")?.text : undefined;
+      if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.");
+      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError("Session memory changed. Read memory_session with action read, merge current content, and restage with its expected_revision and replaces_request_id identifying the pending request.");
+    }
     if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.");
     return z.record(z.string(), z.unknown()).parse(result.structuredContent);
   };
@@ -59,9 +67,13 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
     get calls() { return calls; },
     call: async (name, args) => {
       if (expectedPrincipal && !verified) {
-        const status = validateMemoryStatus(await invoke("memory_status", {}));
+        status = validateMemoryStatus(await invoke("memory_status", {}));
         if (status.principal_id !== expectedPrincipal || (expectedArea && status.area !== expectedArea)) throw new MemoryClientError("Connection identity changed. Keep pending work with its original profile and run setup again.");
         verified = true;
+      }
+      if (name === "memory_session") {
+        status ??= validateMemoryStatus(await invoke("memory_status", {}));
+        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.");
       }
       return invoke(name, args);
     },

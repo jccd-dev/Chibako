@@ -29,7 +29,7 @@ async function rpc(key: string, name: string) {
 test("memory status requires memory:write and returns only the bounded status contract", () => {
   const principal: ApiKeyPrincipal = { id: "profile-7", scopes: ["memory:write", "notes:read", "schema:read"] };
   assert.deepEqual(getMemoryStatus(principal), {
-    contract_version: 1, principal_id: "profile-7", scopes: ["memory:write", "notes:read", "schema:read"],
+    contract_version: 1, session_lifecycle: 1, principal_id: "profile-7", scopes: ["memory:write", "notes:read", "schema:read"],
     enabled: true, area: "Agent Memory",
   });
   assert.throws(() => getMemoryStatus({ ...principal, scopes: ["notes:read", "schema:read"] }),
@@ -39,7 +39,7 @@ test("memory status requires memory:write and returns only the bounded status co
   delete process.env.CHIBAKO_MEMORY_FOLDER;
   try {
     assert.deepEqual(getMemoryStatus(principal), {
-      contract_version: 1, principal_id: "profile-7", scopes: principal.scopes, enabled: false, area: null,
+      contract_version: 1, session_lifecycle: 1, principal_id: "profile-7", scopes: principal.scopes, enabled: false, area: null,
     });
   } finally { process.env.CHIBAKO_MEMORY_FOLDER = configured; }
 });
@@ -48,7 +48,7 @@ test("remote MCP exposes memory_status to the memory principal without revealing
   const key = createApiKey("Restricted memory status test", ["memory:write", "notes:read", "schema:read"]);
   const status = await rpc(key.key, "memory_status");
   assert.deepEqual(status.structuredContent, {
-    contract_version: 1, principal_id: key.id, scopes: ["memory:write", "notes:read", "schema:read"],
+    contract_version: 1, session_lifecycle: 1, principal_id: key.id, scopes: ["memory:write", "notes:read", "schema:read"],
     enabled: true, area: "Agent Memory",
   });
   assert.equal(JSON.stringify(status.structuredContent).includes("content"), false);

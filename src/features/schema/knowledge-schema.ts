@@ -61,20 +61,25 @@ If two notes contradict each other, do not silently pick one:
 3. Offer to update the wiki page to reflect the resolved truth.
 
 ## Agent memory
-Agents keep continuity across sessions with two kinds of overview notes:
-- "Now": a global index with one line per active thread, formatted
-  "[[Thread]] — status, next action". Keep about 15 lines; replace a thread's
-  line instead of adding another, and drop threads that are done.
-- Thread overview: one note per subject (project, task, content piece) holding
-  its decisions, progress, and next actions. Update it rather than starting a
-  second note for the same subject.
-Save only meaningful work: decisions with reasons, progress, and next actions.
-Skip trivial questions, small tweaks, and anything already recorded. Raw notes
-stay protected: link to them, never rewrite them.
+Automatic memory keeps one temporary checkpoint per authenticated agent, runtime
+and host session, updated across task or title changes. "Now" is a shared index
+with at most 15 active entries: "[[Session title]] — status, next action".
+A response ending or app closing does not prove completion; leave unfinished work active.
+When no work remains, the agent decides whether anything has lasting value:
+- Keep confirmed decisions, reasons and reusable lessons in canonical topic
+  wiki/preference notes, merging existing knowledge rather than duplicating it.
+- Use memory_session finish to atomically retain that knowledge, remove the
+  session's Now entry and trash its temporary checkpoint. If nothing is useful,
+  finish without retention. Trivial sessions need no temporary note.
+Only registered checkpoints owned by this caller/session are eligible for this
+cleanup; source notes, other sessions and legacy topic overviews stay protected.
+Save meaningful work only, skipping repeated facts, activity logs and transcripts.
+Resuming the same host session reuses its checkpoint while it still exists.
 
 ## Scope & safety
 - Never reveal or repeat secrets (API keys, credentials) in replies.
-- You may create notes when asked, but never delete notes without confirmation.
+- Create notes within the owner's authorized scope. General Note deletion needs
+  confirmation; configured automatic session cleanup is limited as described above.
 - This is a single vault today. Multi-vault support is planned; keep the three
   layers self-contained so the structure stays portable across vaults.
 `;
