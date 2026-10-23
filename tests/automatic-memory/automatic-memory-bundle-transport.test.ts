@@ -9,6 +9,8 @@ import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { POST as remote } from "../../src/app/mcp/route";
 import { getDb } from "../../src/lib/db";
+import { sessionMemory } from "../../src/features/memory/session-memory";
+import { deleteNote, getNote } from "../../src/lib/notes";
 import { createApiKey } from "../../src/server/auth/api-key-authorization";
 import { saveProfile } from "../../scripts/memory/profile";
 import { digest } from "../../scripts/memory/host-config";
@@ -27,6 +29,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
   const hostHome = path.join(root, "codex-home");
   const hostFile = path.join(hostHome, "config.toml");
   const profileDirectory = path.join(root, "private-profile");
+  let advertiseLifecycle = true;
 
   const server = createServer(async (incoming, outgoing) => {
     try {
@@ -44,7 +47,12 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       assert.ok(listener && typeof listener !== "string");
       const request = new Request(`http://127.0.0.1:${listener.port}${incoming.url || "/mcp"}`, { method, headers, ...(body ? { body } : {}) });
       const response = await remote(request);
-      const responseBody = Buffer.from(await response.arrayBuffer());
+      let responseBody = Buffer.from(await response.arrayBuffer());
+      if (!advertiseLifecycle && body && JSON.parse(body.toString()).params?.name === "memory_status") {
+        const payload = JSON.parse(responseBody.toString());
+        delete payload.result.structuredContent.session_lifecycle;
+        responseBody = Buffer.from(JSON.stringify(payload));
+      }
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       outgoing.end(responseBody);
     } catch (error) {
@@ -117,17 +125,18 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     const stopped = await invoke({ session_id: "bundle-session", hook_event_name: "Stop" });
     assert.doesNotMatch(stopped.stdout, /UNSAVED|failed/);
 
-    const note = getDb().prepare("SELECT id, content FROM notes WHERE folder = ? AND title = ?")
-      .get("Agent Memory Test", checkpoint.title) as { id: string; content: string } | undefined;
-    assert.ok(note);
+    const principal = { id: key.id, scopes: ["memory:write", "notes:read"] };
+    const current = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "bundle-session" });
+    assert.ok("note" in current && current.note);
+    const note = current.note;
     assert.equal(note.content, checkpoint.content);
-    const overview = { request_id: "bundle-overview-1", role: "overview", subject: "Bundle thread", session_id: "bundle-session", title: "Bundle thread", content: "# Bundle thread\nNext: verify", expected_revision: null };
+    const overview = { request_id: "bundle-overview-1", role: "overview", subject: "Bundle thread", session_id: "bundle-session", title: "Bundle thread", content: "Next: verify", expected_revision: current.revision };
     for (let i = 0; i < 2; i++) {
       const result = JSON.parse((await invoke({ session_id: "bundle-session", hook_event_name: "Checkpoint", checkpoint: overview, now_line: "verifying transport" }, "stage")).stdout) as { saved: boolean; pending: boolean };
       assert.deepEqual([result.saved, result.pending], [true, false]);
     }
     const now = getDb().prepare("SELECT content FROM notes WHERE folder = ? AND title = ?").get("Agent Memory Test", "Now") as { content: string } | undefined;
-    assert.equal(now?.content, "# Now\n\n- [[Bundle thread]] — verifying transport\n", "replay keeps one Now line");
+    assert.equal(now?.content, `- [[${note.title}]] — verifying transport\n`, "a task change and replay keep one session entry");
     const status = JSON.parse((await invoke({}, "status")).stdout) as { pending: number; last_verified_save: string | null };
     assert.equal(status.pending, 0);
     assert.ok(status.last_verified_save);
@@ -135,9 +144,40 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     const replay = JSON.parse((await invoke({ session_id: "bundle-session", hook_event_name: "PostToolUse", checkpoint }, "stage")).stdout) as { saved: boolean; pending: boolean };
     assert.equal(replay.saved, true, "the same request identity returns its original verified receipt");
     assert.equal(replay.pending, false);
-    const count = (getDb().prepare("SELECT COUNT(*) AS count FROM notes WHERE folder = ? AND title = ?")
-      .get("Agent Memory Test", checkpoint.title) as { count: number }).count;
+    const count = (getDb().prepare("SELECT COUNT(*) AS count FROM memory_records WHERE folder = ? AND role = 'session'")
+      .get("Agent Memory Test") as { count: number }).count;
     assert.equal(count, 1, "a repeated Stop must not create a duplicate note");
+    const latest = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "bundle-session" });
+    assert.ok("note" in latest);
+    assert.equal(latest.note?.id, note.id);
+    const finished = JSON.parse((await invoke({ session_id: "bundle-session", hook_event_name: "Checkpoint", finish: { expected_revision: latest.revision } }, "stage")).stdout);
+    assert.equal(finished.saved, true);
+    const closed = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "bundle-session" });
+    assert.ok("note" in closed);
+    assert.equal(closed.note, null);
+    assert.equal(closed.closed, true);
+
+    advertiseLifecycle = false;
+    await invoke({ session_id: "old-server-session", hook_event_name: "UserPromptSubmit", turn_id: "old-server-turn" });
+    const unsupported = JSON.parse((await invoke({ session_id: "old-server-session", hook_event_name: "Checkpoint", checkpoint: { title: "Old server fixture", content: "Retain this pending contribution", expected_revision: null } }, "stage")).stdout);
+    assert.equal(unsupported.pending, true);
+    assert.match(unsupported.systemMessage, /Upgrade the Chibako server/);
+    advertiseLifecycle = true;
+    const retried = JSON.parse((await invoke({ session_id: "old-server-session", hook_event_name: "Checkpoint" })).stdout);
+    assert.equal(retried.saved, true);
+    assert.equal(retried.pending, false);
+    const trashState = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "old-server-session" });
+    assert.ok("note" in trashState && trashState.note);
+    deleteNote(trashState.note.id);
+    const trashed = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "old-server-session" });
+    assert.ok("note" in trashed);
+    const blocked = JSON.parse((await invoke({ session_id: "old-server-session", hook_event_name: "Checkpoint", checkpoint: { request_id: "trash-pending", title: "Manual trash fixture", content: "Preserve pending work until resolved", expected_revision: trashed.revision } }, "stage")).stdout);
+    assert.equal(blocked.pending, true);
+    assert.match(blocked.systemMessage, /explicitly finish a trashed checkpoint/);
+    const resolved = JSON.parse((await invoke({ session_id: "old-server-session", hook_event_name: "Checkpoint", finish: { expected_revision: trashed.revision }, replaces_request_id: "trash-pending" }, "stage")).stdout);
+    assert.equal(resolved.saved, true);
+    assert.equal(resolved.pending, false);
+    assert.equal(getNote(trashState.note.id), null);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

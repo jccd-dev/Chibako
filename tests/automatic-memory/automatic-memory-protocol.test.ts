@@ -52,6 +52,7 @@ test("REST and remote MCP share memory data, receipts, validation, and tool scop
     const tools = (await rpc(key, "tools/list")).tools as Array<{ name: string; annotations?: object }>;
     assert.equal(tools.some((tool) => tool.name === "memory_write"), canWrite);
     assert.equal(tools.some((tool) => tool.name === "memory_read"), canRead);
+    assert.equal(tools.some((tool) => tool.name === "memory_session"), canRead);
     const restWrite = await postMemory(rest(key, "POST", scopedInput));
     assert.equal(restWrite.status, canWrite ? 200 : 403);
     const mcpWrite = await rpc(key, "tools/call", "memory_write", { ...scopedInput, subject: `${scopedInput.subject}-mcp`, title: `${scopedInput.title} MCP`, request_id: randomUUID() });
@@ -74,4 +75,26 @@ test("REST and remote MCP share memory data, receipts, validation, and tool scop
   const invalid = { ...input, request_id: randomUUID(), expected_revision: "stale" };
   assert.equal((await postMemory(rest(full.key, "POST", invalid))).status, 400);
   assert.match((await rpc(full.key, "tools/call", "memory_write", invalid)).content[0].text, /Input validation error/);
+});
+
+test("REST and MCP session lifecycle share identity, completion and scope rejection", async () => {
+  const key = createApiKey("Session fixture", ["memory:write", "notes:read"]);
+  const other = createApiKey("Other session fixture", ["memory:write", "notes:read"]);
+  const writeOnly = createApiKey("No session reads", ["memory:write"]);
+  const input = { action: "save", runtime: "codex", session_id: "fixture-session", request_id: randomUUID(), title: "Protocol session", content: "Useful work", now_line: "Continue", expected_revision: null };
+  const response = await postMemory(rest(key.key, "POST", input));
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  assert.deepEqual((await rpc(key.key, "tools/call", "memory_session", input)).structuredContent, receipt);
+  const read = { action: "read", runtime: "codex", session_id: input.session_id };
+  const current = (await rpc(key.key, "tools/call", "memory_session", read)).structuredContent;
+  assert.equal(current.note.id, receipt.note_id);
+  assert.equal((await rpc(other.key, "tools/call", "memory_session", read)).structuredContent.note, null);
+  assert.equal((await postMemory(rest(writeOnly.key, "POST", input))).status, 403);
+  assert.equal((await rpc(writeOnly.key, "tools/call", "memory_session", input)).isError, true);
+  const finish = { action: "finish", runtime: "codex", session_id: input.session_id, request_id: randomUUID(), expected_revision: receipt.revision };
+  const done = (await rpc(key.key, "tools/call", "memory_session", finish)).structuredContent;
+  assert.equal(done.closed, true);
+  assert.deepEqual(await (await postMemory(rest(key.key, "POST", finish))).json(), done);
+  assert.equal((await rpc(key.key, "tools/call", "memory_session", read)).structuredContent.note, null);
 });

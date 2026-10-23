@@ -19,7 +19,7 @@ let _dbIdentity: string | null = null;
  * as any migration an older image cannot run against, so downgrades are refused
  * before any write. Images that predate the stamp cannot enforce it.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export class SchemaTooNewError extends Error {
   constructor(public found: number) {
@@ -41,6 +41,11 @@ export function maintenanceMarkerPath(): string {
 }
 
 const MIGRATIONS: string[] = [
+  `CREATE TABLE IF NOT EXISTS memory_session_requests (
+    actor_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+    receipt_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY (actor_id, request_id)
+  );`,
   `CREATE TABLE IF NOT EXISTS memory_records (
     note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
     folder TEXT NOT NULL, title TEXT NOT NULL,
@@ -472,6 +477,8 @@ function openDb(): Database.Database {
   db.exec("BEGIN");
   try {
     for (const m of MIGRATIONS) db.exec(m);
+    const memoryColumns = db.prepare("PRAGMA table_info(memory_records)").all() as Array<{ name: string }>;
+    if (!memoryColumns.some(column => column.name === "closed_at")) db.exec("ALTER TABLE memory_records ADD COLUMN closed_at INTEGER");
     // Additive column migrations (CREATE IF NOT EXISTS can't add columns,
     // so guard with PRAGMA — this block re-runs safely on every boot).
     const cols = db.prepare(`PRAGMA table_info(notes)`).all() as Array<{ name: string }>;

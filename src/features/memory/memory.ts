@@ -18,14 +18,14 @@ export interface MemoryReceipt {
 }
 
 export function getMemoryStatus(principal: ApiKeyPrincipal): {
-  contract_version: 1; principal_id: string; scopes: string[]; enabled: boolean; area: string | null;
+  contract_version: 1; session_lifecycle: 1; principal_id: string; scopes: string[]; enabled: boolean; area: string | null;
 } {
   if (!principal.id || !principal.scopes.includes("memory:write")) {
     throw new MemoryError("Forbidden: missing memory:write scope", 403, "forbidden");
   }
   const configured = process.env.CHIBAKO_MEMORY_FOLDER;
   const area = configured ? normalizeFolder(configured) : null;
-  return { contract_version: 1, principal_id: principal.id, scopes: [...principal.scopes], enabled: Boolean(area), area: area || null };
+  return { contract_version: 1, session_lifecycle: 1, principal_id: principal.id, scopes: [...principal.scopes], enabled: Boolean(area), area: area || null };
 }
 
 function authorize(principal: ApiKeyPrincipal): string {
@@ -43,7 +43,7 @@ function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function revision(note: Note): string {
+export function memoryRevision(note: Note): string {
   return hash([note.id, note.title, note.folder, note.content, note.kind, note.is_pinned]);
 }
 
@@ -76,7 +76,7 @@ export function readMemory(principal: ApiKeyPrincipal, raw: unknown): { note: No
     const record = findRecord(folder, input.role, input.subject, owner(principal, input));
     if (!record) return { note: null, revision: null };
     const note = eligibleNote(record);
-    return { note, revision: revision(note) };
+    return { note, revision: memoryRevision(note) };
   })();
 }
 
@@ -106,7 +106,7 @@ function persist(principal: ApiKeyPrincipal, folder: string, input: MemoryWriteI
   if (record) {
     const existing = eligibleNote(record);
     if (input.title !== existing.title) throw new MemoryError("Automatic memory cannot rename notes", 409, "ineligible_note");
-    if (revision(existing) !== input.expected_revision) throw new MemoryError("Reload current memory and merge before retrying", 409, "revision_conflict");
+    if (memoryRevision(existing) !== input.expected_revision) throw new MemoryError("Reload current memory and merge before retrying", 409, "revision_conflict");
     note = existing.content === input.content ? existing : updateNote(existing.id, { content: input.content })!;
   } else {
     if (input.expected_revision !== null) throw new MemoryError("Memory does not exist", 409, "revision_conflict");
@@ -117,7 +117,7 @@ function persist(principal: ApiKeyPrincipal, folder: string, input: MemoryWriteI
     db.prepare("INSERT INTO memory_records (note_id, folder, title, role, subject, owner_id) VALUES (?,?,?,?,?,?)")
       .run(note.id, folder, note.title, input.role, input.subject, ownerId);
   }
-  const result: MemoryReceipt = { note_id: note.id, revision: revision(note), request_id: input.request_id, saved: true };
+  const result: MemoryReceipt = { note_id: note.id, revision: memoryRevision(note), request_id: input.request_id, saved: true };
   db.prepare("INSERT INTO memory_requests (actor_id, request_id, fingerprint, note_id, revision, session_id, confirmation_json, created_at) VALUES (?,?,?,?,?,?,?,?)")
     .run(principal.id, input.request_id, fingerprint, note.id, result.revision, input.session_id, JSON.stringify(input.confirmation ?? null), now());
   return result;

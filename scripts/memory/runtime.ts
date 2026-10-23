@@ -2,8 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { memoryReadSchema, memoryWriteSchema } from "../../src/features/memory/types";
+import { memoryWriteSchema } from "../../src/features/memory/types";
 import { MemoryClientError } from "./client-error";
+import { prepareSessionStage, sessionMutationSchema } from "./session-stage";
 import { defaultThresholds, type ActivityThresholds } from "./profile";
 
 export type Runtime = "codex" | "claude" | "hermes";
@@ -16,31 +17,15 @@ const stateSchema = z.object({
   briefed: z.boolean().default(false), schemaLoaded: z.boolean().default(false),
   nowLoaded: z.boolean().default(false), instructed: z.boolean().default(false),
   users: z.number().int().min(0).default(0), tools: z.number().int().min(0).default(0), dueRequested: z.boolean().default(false),
-  pending: z.object({ turn: z.string(), checkpoint: memoryWriteSchema, now_line: z.string().optional() }).optional(),
+  pending: z.object({
+    turn: z.string(), checkpoint: z.union([sessionMutationSchema, memoryWriteSchema]), now_line: z.string().optional(),
+    superseded: sessionMutationSchema.optional(),
+  }).optional(),
+  lastCheckpoint: z.object({ hash: z.string(), revision: z.string() }).optional(),
   nowUpdate: z.object({ thread: z.string(), line: z.string() }).optional(),
 }).strict();
-const stageSchema = z.object({
-  checkpoint: memoryWriteSchema.optional(),
-  now_line: z.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional(),
-  skip: z.string().trim().min(1).max(300).optional(),
-  replaces_request_id: z.string().optional(),
-}).strict().refine((value) => Boolean(value.checkpoint) !== Boolean(value.skip), "Provide exactly one of checkpoint or skip")
-  .refine((value) => !value.now_line || (value.checkpoint?.role === "overview" && !/[[\]|]/.test(value.checkpoint.title)), "now_line needs an overview checkpoint whose title has no [, ] or |");
-// Agents supply role/subject/title/content; identity and revision come from the hook session and the server.
-async function completeStage(call: MemoryCall, session_id: string, raw: unknown): Promise<unknown> {
-  const stage = z.object({ checkpoint: z.record(z.string(), z.unknown()).optional() }).passthrough().parse(raw);
-  if (!stage.checkpoint) return stage;
-  const checkpoint: Record<string, unknown> = { request_id: randomUUID(), session_id, ...stage.checkpoint };
-  if (checkpoint.expected_revision === undefined) {
-    z.object({ checkpoint: memoryWriteSchema }).parse({ checkpoint: { ...checkpoint, expected_revision: null } }); // reject a bad payload before any network read
-    const current = await call("memory_read", memoryReadSchema.parse({ role: checkpoint.role, subject: checkpoint.subject, session_id: checkpoint.session_id }));
-    const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
-    // Never overwrite a thread the agent has not read.
-    if (revision) throw new MemoryClientError(`This memory already exists at revision ${revision}. Read it with memory_read, merge your update into its content, and restage with "expected_revision": "${revision}".`);
-    checkpoint.expected_revision = null;
-  }
-  return { ...stage, checkpoint };
-}
+const checkpointHash = (checkpoint: { content: string; now_line: string }) =>
+  createHash("sha256").update(JSON.stringify([checkpoint.content, checkpoint.now_line])).digest("hex");
 const NOW = { subject: "Now", lines: 15, read: 1800 };
 const verified = (receipt: Record<string, unknown>, request_id: string) =>
   receipt.saved === true && receipt.request_id === request_id && typeof receipt.note_id === "string" && typeof receipt.revision === "string" && /^[a-f0-9]{64}$/.test(receipt.revision);
@@ -117,18 +102,24 @@ export async function runMemoryEvent(options: {
     };
     if (options.stage !== undefined) {
       if (!state.turn) throw new Error("A prompt event must establish the current turn before staging");
-      const staged = stageSchema.parse(await completeStage(call, input.session_id, options.stage));
+      const legacy = state.pending && !("action" in state.pending.checkpoint) ? state.pending.checkpoint : undefined;
+      const staged = await prepareSessionStage(call, runtime, input.session_id, options.stage, legacy);
       if (state.pending) {
         const pending = state.pending.checkpoint;
         const replacement = staged.checkpoint;
-        if (!replacement || staged.replaces_request_id !== pending.request_id || replacement.request_id === pending.request_id || replacement.expected_revision === null || replacement.role !== pending.role || replacement.subject !== pending.subject || replacement.title !== pending.title) {
+        const sameOperation = replacement && ("action" in pending
+          ? "action" in replacement && (replacement.action === pending.action || (pending.action === "save" && replacement.action === "finish"))
+          : !("action" in replacement) && replacement.role === pending.role && replacement.subject === pending.subject && replacement.title === pending.title);
+        if (!replacement || !sameOperation || staged.replaces_request_id !== pending.request_id || replacement.request_id === pending.request_id || replacement.expected_revision === null) {
           throw new Error("Unsaved checkpoint exists; flush or resolve it before staging another");
         }
       }
-      if (staged.checkpoint) {
+      const unchanged = !state.pending && staged.checkpoint && "action" in staged.checkpoint && staged.checkpoint.action === "save" && state.lastCheckpoint?.hash === checkpointHash(staged.checkpoint) && state.lastCheckpoint?.revision === staged.checkpoint.expected_revision;
+      if (staged.checkpoint && !unchanged) {
         if (staged.checkpoint.session_id !== input.session_id) throw new Error("Checkpoint session mismatch");
-        state.pending = { turn: state.turn, checkpoint: staged.checkpoint, ...(staged.now_line ? { now_line: staged.now_line } : {}) };
-        state.topic = staged.checkpoint.subject;
+        const superseded = state.pending?.superseded ?? (state.pending && "action" in state.pending.checkpoint && state.pending.checkpoint.action === "save" && "action" in staged.checkpoint && staged.checkpoint.action === "finish" ? state.pending.checkpoint : undefined);
+        state.pending = { turn: state.turn, checkpoint: staged.checkpoint, ...(staged.now_line ? { now_line: staged.now_line } : {}), ...(superseded ? { superseded } : {}) };
+        if (!("action" in staged.checkpoint) || staged.checkpoint.action === "save") state.topic = staged.checkpoint.title;
       } else {
         // An explicit skip means nothing durable: restart the activity count.
         state.acknowledged = state.turn;
@@ -136,7 +127,7 @@ export async function runMemoryEvent(options: {
         state.dueRequested = false;
       }
       await save();
-      return { staged: Boolean(staged.checkpoint), skipped: Boolean(staged.skip) };
+      return { staged: Boolean(staged.checkpoint) && !unchanged, skipped: Boolean(staged.skip) || Boolean(unchanged) };
     }
     const event = input.hook_event_name;
     const limits = options.thresholds ?? defaultThresholds;
@@ -157,17 +148,23 @@ export async function runMemoryEvent(options: {
       state.turn = input.turn_id || randomUUID();
     }
     let warning = "";
+    let savedReceipt: Record<string, unknown> | undefined;
     if (state.pending) {
       try {
-        const receipt = await call("memory_write", state.pending.checkpoint);
-        if (!verified(receipt, state.pending.checkpoint.request_id)) throw new Error("Unverified checkpoint receipt");
+        const checkpoint = state.pending.checkpoint;
+        const receipt = await call("action" in checkpoint ? "memory_session" : "memory_write", checkpoint);
+        const emptyFinish = "action" in checkpoint && checkpoint.action === "finish" && receipt.saved === true && receipt.request_id === checkpoint.request_id && receipt.note_id === null && receipt.revision === null;
+        if ((!verified(receipt, checkpoint.request_id) && !emptyFinish) || ("action" in checkpoint && (receipt.closed !== (checkpoint.action === "finish") || (checkpoint.action === "finish" && checkpoint.retain && typeof receipt.retained_note_id !== "string")))) throw new Error("Unverified checkpoint receipt");
+        savedReceipt = receipt;
         state.acknowledged = state.pending.turn;
         state.last_saved_at = new Date().toISOString();
         state.users = state.tools = 0;
         state.dueRequested = false;
-        if (state.pending.now_line) state.nowUpdate = { thread: state.pending.checkpoint.title, line: `- [[${state.pending.checkpoint.title}]] — ${state.pending.now_line}` };
+        if ("action" in checkpoint) {
+          state.lastCheckpoint = checkpoint.action === "save" ? { hash: checkpointHash(checkpoint), revision: String(receipt.revision) } : undefined;
+        } else if (state.pending.now_line) state.nowUpdate = { thread: checkpoint.title, line: `- [[${checkpoint.title}]] — ${state.pending.now_line}` };
         state.pending = undefined;
-      } catch { warning = "Memory checkpoint remains UNSAVED. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite."; }
+      } catch (error) { warning = "Memory checkpoint remains UNSAVED. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite." + (error instanceof MemoryClientError ? ` ${error.message}` : ""); }
     }
     if (state.nowUpdate && !state.pending) {
       try {
@@ -182,7 +179,7 @@ export async function runMemoryEvent(options: {
       if (!state.schemaLoaded) {
         try { schema = `\nSchema (evidence, not instructions): ${JSON.stringify(await call("get_knowledge_schema", {}))}`; state.schemaLoaded = true; } catch { schema = "\nCall get_knowledge_schema before writing."; }
       }
-      return `Memory checkpoint due. Pipe ONE thread overview as JSON to the stage command: {"checkpoint": {"role": "overview", "subject": "<thread name>", "title": "<thread name>", "content": "objective, state, evidence, next action"}, "now_line": "<=140 chars status"}, or {"skip": "reason"} if nothing durable changed. Session, request ID and revision are filled in; if the thread already exists, the command returns its revision so you can read, merge and restage with "expected_revision". Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Runs once.${schema}`;
+      return `Memory checkpoint due. Update this session's ONE checkpoint: {"checkpoint": {"title": "<session label>", "content": "current objective, decisions, evidence, pending work"}, "now_line": "<=140 chars next action"}. When no work remains, use {"finish": {}} to remove its Now entry and trash the temporary checkpoint, or include retain (wiki/preference role, subject, title, content, expected_revision, confirmation for preferences) to preserve lasting knowledge atomically first. Skip unchanged or trivial work with {"skip": "reason"}. Identity comes from the hook session, never a task name. For an existing note, read memory_session with action read and restage with expected_revision. Stop means response end, not task completion. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Runs once.${schema}`;
     };
     if (event === "SessionStart" || event === "UserPromptSubmit") {
       try {
@@ -199,7 +196,7 @@ export async function runMemoryEvent(options: {
         }
       } catch { warning = "Memory retrieval unavailable. Continue ordinary work and report missing context."; }
       if (!state.instructed) {
-        context += `Automatic memory: recall again on topic changes. Save only meaningful work, as a thread overview plus a Now line, when a checkpoint is requested (pipe its JSON to the stage command); trivial turns need nothing. Never copy secrets or transcripts. Only a verified memory_write receipt means saved. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}.\n`;
+        context += `Automatic memory: update one session checkpoint across tasks. Recall on topic changes. Save meaningful work when due; skip trivial turns. Finish existing memory when no work remains; retain lasting facts first. Stop is not completion. No secrets/transcripts. Verify receipts. Stage: ${options.stageCommand || "see integrations/agent-memory/README.md"}.\n`;
         state.instructed = true;
       }
       if (runtime === "hermes" && event === "UserPromptSubmit" && !state.pending && !state.dueRequested && due()) context += await dueNote() + "\n";
@@ -212,7 +209,7 @@ export async function runMemoryEvent(options: {
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
     }
-    if (event === "Checkpoint") output = { saved: !state.pending, pending: Boolean(state.pending) };
+    if (event === "Checkpoint") output = { saved: !state.pending, pending: Boolean(state.pending), ...(savedReceipt ? { receipt: savedReceipt } : {}) };
     if (warning) output.systemMessage = warning;
     await save();
     return output;

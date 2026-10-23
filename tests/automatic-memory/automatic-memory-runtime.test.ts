@@ -20,6 +20,11 @@ function checkpoint(session_id = "session-1") {
     title: "Checkpoint", content: "Work is in progress", expected_revision: null,
   };
 }
+function bound(checkpoint: { request_id: string; session_id: string; title: string; content: string; expected_revision: string | null }, runtime = "codex", now_line = "Work in progress") {
+  return { action: "save", runtime, session_id: checkpoint.session_id, request_id: checkpoint.request_id,
+    title: checkpoint.title, content: checkpoint.content, expected_revision: checkpoint.expected_revision, now_line };
+}
+const isSave = (name: string, args: Record<string, unknown>) => name === "memory_session" && args.action !== "read";
 function event(hook_event_name: string, overrides: Partial<HookInput> = {}): HookInput {
   return { session_id: "session-1", hook_event_name, ...overrides };
 }
@@ -75,8 +80,8 @@ test("a trivial session makes no extra calls, receives no block, and PostToolUse
 
 test("over the threshold, exactly one Stop request; a verified save resets the counters", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const call = caller(calls, async (name, args) => name === "memory_write"
-    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64) } : {});
+  const call = caller(calls, async (name, args) => isSave(name, args)
+    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64), closed: false } : {});
   for (let turn = 1; turn <= 4; turn++) await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: `t${turn}` }) });
   const requested = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") });
   assert.equal(requested.decision, "block");
@@ -126,12 +131,16 @@ function nowServer(conflicts = 0) {
 const thread = (title: string, session_id = "session-1") => ({
   request_id: randomUUID(), role: "overview", subject: title, session_id, title, content: `# ${title}\nNext: continue`, expected_revision: null,
 });
-const save = (directory: string, call: MemoryCall, title: string, now_line: string, session_id = "session-1", runtime: "codex" | "claude" = "codex") =>
-  runMemoryEvent({ runtime, directory, enabled: true, call, input: event("UserPromptSubmit", { session_id, turn_id: `turn-${title}` }) })
-    .then(() => runMemoryEvent({ runtime, directory, enabled: true, call, input: event("Checkpoint", { session_id }), stage: { checkpoint: thread(title, session_id), now_line } }))
-    .then(() => runMemoryEvent({ runtime, directory, enabled: true, call, input: event("Checkpoint", { session_id }) }));
+async function save(directory: string, call: MemoryCall, title: string, now_line: string, session_id = "session-1", runtime: "codex" | "claude" = "codex") {
+  await runMemoryEvent({ runtime, directory, enabled: true, call, input: event("UserPromptSubmit", { session_id, turn_id: `turn-${title}` }) });
+  const file = (await readdir(directory)).find(file => file.endsWith(".json"))!;
+  const state = JSON.parse(await readFile(join(directory, file), "utf8"));
+  state.pending = { turn: `turn-${title}`, checkpoint: thread(title, session_id), now_line };
+  await writeFile(join(directory, file), JSON.stringify(state));
+  await runMemoryEvent({ runtime, directory, enabled: true, call, input: event("Checkpoint", { session_id }) });
+}
 
-test("saves from two runtimes both appear in Now, newest first, one line per thread, capped", async () => withPrivateDirectory(async (directory) => {
+test("legacy pending saves from two runtimes recover their capped Now index", async () => withPrivateDirectory(async (directory) => {
   const { store, call } = nowServer();
   await save(join(directory, "codex"), call, "Alpha", "ship the gate");
   await save(join(directory, "claude"), call, "Beta", "review", "session-2", "claude");
@@ -165,19 +174,17 @@ test("replaying a staged checkpoint creates no duplicate Now line", async () => 
   const { store, call } = nowServer();
   const saved = thread("Alpha");
   for (let i = 0; i < 2; i++) {
-    await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: `turn-${i}` }) });
-    await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { checkpoint: saved, now_line: "ship" } });
-    await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
+    await save(directory, call, saved.title, "ship");
   }
   assert.equal(store.content!.match(/\[\[Alpha\]\]/g)?.length, 1);
   assert.equal(store.writes, 1, "the unchanged line is not rewritten");
 }));
 
-test("now_line requires an overview checkpoint and a plain single line", async () => withPrivateDirectory(async (directory) => {
+test("now_line requires a checkpoint and a plain single line", async () => withPrivateDirectory(async (directory) => {
   const call = caller([]);
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t" }) });
   for (const stage of [
-    { checkpoint: checkpoint(), now_line: "ok" },
+    { finish: {}, now_line: "ok" },
     { checkpoint: thread("Alpha"), now_line: "two\nlines" },
     { checkpoint: thread("Alpha"), now_line: "[[link]]" },
     { checkpoint: thread("A]]B"), now_line: "ok" },
@@ -197,47 +204,47 @@ test("Hermes injects the checkpoint-due note once instead of blocking at prompt 
 
 test("stages privately and only verified receipt flushes a checkpoint", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const call = caller(calls, async (name, args) => name === "memory_write"
-    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64) }
+  const call = caller(calls, async (name, args) => isSave(name, args)
+    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64), closed: false }
     : {});
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-1", prompt: "Start" }) });
   const saved = checkpoint();
   assert.deepEqual(await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: saved } }), { staged: true, skipped: false });
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: saved });
+  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: bound(saved, "claude") });
   const stopped = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Stop") });
   assert.equal(stopped.decision, undefined, "a pending checkpoint is flushed before Stop asks for continuation");
-  assert.deepEqual(calls.filter(({ name }) => name === "memory_write").map(({ args }) => args), [saved]);
+  assert.deepEqual(calls.filter(({ name, args }) => isSave(name, args)).map(({ args }) => args), [bound(saved, "claude")]);
   assert.equal((await readState(directory)).pending, undefined);
   assert.equal((await readState(directory)).acknowledged, "turn-1");
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("SessionStart") });
   assert.equal(calls.filter(({ name }) => name === "memory_read").length, 2, "resume reloads the Now index after context loss");
-  assert.equal(calls.filter(({ name }) => name === "recall").at(-1)?.args.query, "task", "resume retrieves the saved handoff topic");
+  assert.equal(calls.filter(({ name }) => name === "recall").at(-1)?.args.query, "Checkpoint", "resume retrieves the saved handoff topic");
 }));
 
 test("failed flush and malformed receipt retain the same request for retry", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   let attempts = 0;
   const call = caller(calls, async (name, args) => {
-    if (name !== "memory_write") return {};
+    if (!isSave(name, args)) return {};
     attempts++;
     if (attempts === 1) throw new Error("temporary transport failure");
     if (attempts === 2) return { saved: true, request_id: args.request_id, note_id: "note-1", revision: 1 };
-    return { saved: true, request_id: args.request_id, note_id: "note-1", revision: "b".repeat(64) };
+    return { saved: true, request_id: args.request_id, note_id: "note-1", revision: "b".repeat(64), closed: false };
   });
   await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-1" }) });
   const saved = checkpoint();
   await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: saved } });
   const failed = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("Stop") });
   assert.match(String(failed.systemMessage), /UNSAVED/);
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: saved });
+  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: bound(saved, "hermes") });
 
   const malformed = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-2" }) });
   assert.match(String(malformed.systemMessage), /UNSAVED/);
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: saved });
+  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: bound(saved, "hermes") });
   await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("Stop") });
-  const writes = calls.filter(({ name }) => name === "memory_write");
+  const writes = calls.filter(({ name, args }) => isSave(name, args));
   assert.equal(writes.length, 3);
-  assert.deepEqual(writes.map(({ args }) => args), [saved, saved, saved]);
+  assert.deepEqual(writes.map(({ args }) => args), [bound(saved, "hermes"), bound(saved, "hermes"), bound(saved, "hermes")]);
   assert.equal((await readState(directory)).pending, undefined);
   assert.equal((await readState(directory)).acknowledged, "turn-1");
 }));
@@ -275,15 +282,14 @@ test("stop hook guard, session mismatch, pending overwrite, and disabled mode ar
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: valid } });
   await assert.rejects(() => runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: checkpoint() } }), /Unsaved checkpoint exists/);
   await assert.rejects(() => runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("PostToolUse"), stage: {
-    replaces_request_id: valid.request_id,
-    checkpoint: { ...checkpoint(), subject: "unrelated-topic", expected_revision: "c".repeat(64) },
-  } }), /Unsaved checkpoint exists/, "conflict resolution cannot discard a pending contribution for another subject");
+    finish: { expected_revision: "c".repeat(64) },
+  } }), /Unsaved checkpoint exists/, "finish cannot silently replace a pending save");
 }));
 
 test("a conflict replacement must identify the pending request and carry a fresh revision", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const call = caller(calls, async (name, args) => name === "memory_write"
-    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "c".repeat(64) }
+  const call = caller(calls, async (name, args) => isSave(name, args)
+    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "c".repeat(64), closed: false }
     : {});
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-conflict" }) });
   const pending = checkpoint();
@@ -291,23 +297,25 @@ test("a conflict replacement must identify the pending request and carry a fresh
   const replacement = { ...checkpoint(), expected_revision: "d".repeat(64) };
   await assert.rejects(() => runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: replacement, replaces_request_id: "wrong-request" } }), /Unsaved checkpoint exists/);
   await assert.rejects(() => runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: { ...replacement, expected_revision: null }, replaces_request_id: pending.request_id } }), /Unsaved checkpoint exists/);
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-conflict", checkpoint: pending });
+  assert.deepEqual((await readState(directory)).pending, { turn: "turn-conflict", checkpoint: bound(pending) });
 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: replacement, replaces_request_id: pending.request_id } });
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-conflict", checkpoint: replacement });
-  assert.deepEqual(await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") }), { saved: true, pending: false });
+  assert.deepEqual((await readState(directory)).pending, { turn: "turn-conflict", checkpoint: bound(replacement) });
+  const result = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
+  assert.equal(result.saved, true);
+  assert.equal(result.pending, false);
   assert.equal((await readState(directory)).pending, undefined);
-  assert.deepEqual(calls.filter(({ name }) => name === "memory_write").map(({ args }) => args), [replacement]);
+  assert.deepEqual(calls.filter(({ name, args }) => isSave(name, args)).map(({ args }) => args), [bound(replacement)]);
 }));
 
 test("Checkpoint reports pending until a verified receipt, and compaction or interrupt warns when unstaged", async () => withPrivateDirectory(async (directory) => {
   let writes = 0;
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const call = caller(calls, async (name, args) => {
-    if (name !== "memory_write") return {};
+    if (!isSave(name, args)) return {};
     writes++;
     if (writes === 1) throw new Error("offline");
-    return { saved: true, request_id: args.request_id, note_id: "note-1", revision: "e".repeat(64) };
+    return { saved: true, request_id: args.request_id, note_id: "note-1", revision: "e".repeat(64), closed: false };
   });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-pending" }) });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: checkpoint() } });
@@ -316,7 +324,8 @@ test("Checkpoint reports pending until a verified receipt, and compaction or int
   assert.equal(pending.pending, true);
   assert.match(String(pending.systemMessage), /UNSAVED/);
   const saved = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Checkpoint") });
-  assert.deepEqual(saved, { saved: true, pending: false });
+  assert.equal(saved.saved, true);
+  assert.equal(saved.pending, false);
 
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-uncheckpointed" }) });
   await tools(directory, call, 10, "claude");
@@ -334,11 +343,11 @@ async function stageMinimal(directory: string, call: MemoryCall, checkpointOverr
 
 test("a minimal checkpoint gets the hook session, a request id and a null revision, then flushes", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const call = caller(calls, async (name, args) => name === "memory_write"
-    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64) } : { note: null, revision: null });
+  const call = caller(calls, async (name, args) => isSave(name, args)
+    ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64), closed: false } : { note: null, revision: null });
   assert.deepEqual(await stageMinimal(directory, call), { staged: true, skipped: false });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Checkpoint") });
-  const write = calls.find(({ name, args }) => name === "memory_write" && args.subject === "Alpha")!.args;
+  const write = calls.find(({ name, args }) => isSave(name, args))!.args;
   assert.equal(write.session_id, "session-1");
   assert.equal(write.expected_revision, null);
   assert.match(String(write.request_id), /^[0-9a-f-]{36}$/);
@@ -348,18 +357,76 @@ test("a minimal checkpoint gets the hook session, a request id and a null revisi
 test("a minimal checkpoint for an existing thread is rejected with its revision and stages nothing", async () => withPrivateDirectory(async (directory) => {
   const revision = "b".repeat(64);
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const call = caller(calls, async (name) => name === "memory_read" ? { note: { content: "old" }, revision } : {});
+  const call = caller(calls, async (name, args) => name === "memory_session" && args.action === "read" ? { note: { content: "old" }, revision } : {});
   await assert.rejects(() => stageMinimal(directory, call), (error: Error) => error instanceof MemoryClientError && error.message.includes(revision));
   assert.equal((await readState(directory)).pending, undefined);
-  assert.equal(calls.some(({ name }) => name === "memory_write"), false);
+  assert.equal(calls.some(({ name, args }) => isSave(name, args)), false);
 }));
 
 test("an explicit expected_revision is passed through without a read", async () => withPrivateDirectory(async (directory) => {
   const revision = "c".repeat(64);
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   await stageMinimal(directory, caller(calls), { expected_revision: revision });
-  assert.equal(calls.some(({ name, args }) => name === "memory_read" && args.subject === "Alpha"), false, "no thread read when the agent supplies the revision");
+  assert.equal(calls.some(({ name, args }) => name === "memory_session" && args.action === "read"), false, "no session read when the agent supplies the revision");
   const pending = (await readState(directory)).pending as { checkpoint: Record<string, unknown> };
   assert.equal(pending.checkpoint.expected_revision, revision);
   assert.equal(pending.checkpoint.session_id, "session-1");
+}));
+
+test("unchanged checkpoints skip remote calls and completion can flush below the activity threshold", async () => withPrivateDirectory(async (directory) => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const revision = "f".repeat(64);
+  const call = caller(calls, async (name, args) => isSave(name, args)
+    ? { saved: true, request_id: args.request_id, note_id: "fixture-note", revision, closed: args.action === "finish", retained_note_id: null }
+    : { note: null, revision: null });
+  await stageMinimal(directory, call);
+  await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Checkpoint") });
+  const before = calls.length;
+  const skipped = await stageMinimal(directory, call, { expected_revision: revision });
+  assert.deepEqual(skipped, { staged: false, skipped: true });
+  assert.equal(calls.length, before, "unchanged content/status with a known revision costs no server call");
+  await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Checkpoint"), stage: { finish: { expected_revision: revision } } });
+  const finished = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Checkpoint") });
+  assert.equal(finished.saved, true);
+  assert.equal(calls.at(-1)?.args.action, "finish");
+  assert.equal((await readState(directory)).lastCheckpoint, undefined);
+}));
+
+test("finish retries keep their identity and malformed completion receipts cannot drop pending data", async () => withPrivateDirectory(async (directory) => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let attempts = 0;
+  const call = caller(calls, async (name, args) => {
+    if (!isSave(name, args)) return {};
+    attempts++;
+    if (attempts === 1) return { saved: true, request_id: args.request_id, note_id: null, revision: null, closed: false };
+    return { saved: true, request_id: args.request_id, note_id: null, revision: null, closed: true, retained_note_id: null };
+  });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit") });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { finish: { expected_revision: null } } });
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") })).pending, true);
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") })).pending, false);
+  const writes = calls.filter(({ name, args }) => isSave(name, args));
+  assert.deepEqual(writes[0].args, writes[1].args);
+}));
+
+test("explicit finish can resolve a pending save while retaining its private content until completion succeeds", async () => withPrivateDirectory(async (directory) => {
+  let offline = true;
+  const call: MemoryCall = async (name, args) => {
+    if (name === "memory_session" && args.action === "finish") {
+      if (offline) throw new Error("offline");
+      return { saved: true, request_id: args.request_id, note_id: "fixture", revision: "e".repeat(64), closed: true, retained_note_id: null };
+    }
+    return {};
+  };
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit") });
+  const saved = checkpoint();
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { checkpoint: saved } });
+  await assert.rejects(() => runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { finish: { expected_revision: null }, replaces_request_id: saved.request_id } }), /Unsaved checkpoint exists/);
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { finish: { expected_revision: "d".repeat(64) }, replaces_request_id: saved.request_id } });
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") })).pending, true);
+  const pending = (await readState(directory)).pending as { superseded: { content: string } };
+  assert.equal(pending.superseded.content, saved.content);
+  offline = false;
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") })).pending, false);
+  assert.equal((await readState(directory)).pending, undefined);
 }));

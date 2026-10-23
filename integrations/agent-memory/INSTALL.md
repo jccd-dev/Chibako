@@ -152,6 +152,21 @@ necessarily revoke server credentials or remove private checkpoints.
 
 ## Compatibility and pending activation
 
+Plugin 0.3.0 requires a server with `memory_session` (vault schema 2). Upgrade the
+server before the plugin. The additive migration preserves existing notes and
+memory records; older server versions refuse the newer schema. No live vault or
+installed cache is modified by building the packages. Existing custom knowledge
+schemas are preserved; align their Agent memory section with the new session
+lifecycle if they still prescribe per-task overviews.
+
+Automatic memory now keeps one temporary checkpoint per key/runtime/session.
+The agent explicitly finishes it when no work remains, preserving only lasting
+wiki/preference knowledge and moving the checkpoint to Trash. Its Now entry is
+removed atomically. This authority covers only newly registered session
+checkpoints, not source notes, legacy overviews or other sessions. Trashed notes
+follow the vault's 30-day expiry policy. A response ending or app closing is not
+completion. No background model, cleanup sweep or transcript capture is added.
+
 Package fixtures verify extracted archives in unrelated working directories,
 private setup fixtures, scope checks, replay/binding and native callback envelopes.
 Those checks do not prove a particular desktop host or remote gateway runs hooks.

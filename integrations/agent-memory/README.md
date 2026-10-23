@@ -112,15 +112,13 @@ summary and stages it when requested:
 node --import tsx scripts/agent-memory.ts codex stage < /private/checkpoint.json
 ```
 
-The hook's stage command already carries `--session <id>`; pipe only the thread
+The hook's stage command already carries `--session <id>`; pipe only the checkpoint
 (use `claude` or `hermes` for those runtimes):
 
 ```json
 {
   "checkpoint": {
-    "role": "overview",
-    "subject": "Thread name",
-    "title": "Thread name",
+    "title": "Session label",
     "content": "Concise objective, changes, evidence, unresolved work, checkpoint and next action"
   },
   "now_line": "<=140 chars status, no brackets"
@@ -128,19 +126,34 @@ The hook's stage command already carries `--session <id>`; pipe only the thread
 ```
 
 `session_id`, `hook_event_name`, `request_id` and `expected_revision` are filled in
-(a new thread gets `expected_revision: null`). If the thread already exists, staging
-is rejected with its current revision: read it, merge your update, and restage with
+(a new session gets `expected_revision: null`). If session memory already exists, staging
+is rejected with its current revision: use `memory_session` action `read` with the
+runtime and hook session ID, merge your update, and restage with
 `"expected_revision": "<revision>"` in the checkpoint. Without `--session`, or for
 full legacy payloads, supply the top-level `session_id` and `hook_event_name:
 "Checkpoint"` and every checkpoint field (`request_id`, matching `session_id`,
 `expected_revision`) yourself.
 
-Use one overview per thread: `subject` and `title` equal the thread name. For an
-existing thread, read it first and pass its revision as `expected_revision`. After the
-thread save is verified, the runner upserts `- [[Thread]] — status` into the shared
-"Now" overview (newest first, 15 lines, revision-checked; a stale revision is re-read
-and merged, and replay adds no duplicate). A failed Now update stays pending and
-retries at the next event.
+The server binds one temporary note to the authenticated key, runtime and session
+ID. Different tasks/labels in that session update the same note. Its first title
+gets a unique suffix and stays stable. `memory_session` saves the checkpoint and
+updates its shared Now entry in one SQLite transaction (newest first, 15 lines).
+An unchanged checkpoint with the last verified revision is skipped locally.
+Legacy pending writes keep their original identity and recovery path; existing
+duplicate topic notes are not automatically adopted or deleted.
+
+When no work remains, stage `{"finish":{"expected_revision":"<session revision>"}}`
+even below the checkpoint threshold. This removes its Now entry and moves only
+its registered session checkpoint to Trash. If decisions or lessons remain useful,
+include `retain` in `finish`: `{ "role": "wiki", "subject": "canonical-topic",
+"title": "Canonical topic", "content": "Confirmed knowledge and reasons",
+"expected_revision": null }`. Search before creating; use `memory_read` and its
+revision when merging an existing topic. Preference retention uses role `preference`
+and also requires `confirmation` with source and scope. Retention and cleanup
+commit together or all roll back. A trivial session needs no checkpoint note.
+Trash follows the existing 30-day expiry policy; resume restores the same note
+while it remains available. Source notes and other sessions cannot be discarded.
+REST callers can send the same action payload to `POST /api/memory`.
 
 When a checkpoint is due but nothing durable changed, replace `checkpoint` with
 `skip: "Nothing durable changed"`. This creates no note. Do not label a turn
@@ -156,7 +169,8 @@ and the freshly read expected_revision. No transcript is parsed or stored.
 
 Stop requests a due checkpoint once; its continuation guard prevents loops.
 Hermes instead gets a "checkpoint due" note on its next `pre_llm_call` (it also counts
-`post_tool_call`). Automatic saves no longer create session Notes. Compaction
+`post_tool_call`). Stop ends a response, not a session; neither Stop nor app closure
+automatically declares work complete. Compaction
 and interrupt hooks can only flush data already staged; they cannot summarize lost
 context. A crash can lose unstaged work. State locks prevent concurrent hooks on
 one host; server transactions coordinate different hosts. A crash can leave a `.lock`

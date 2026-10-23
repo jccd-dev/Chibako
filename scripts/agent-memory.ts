@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   if (action === "stage" && args.values.session) {
     // The stage command carries the hook's session so agents need not supply it.
     const object = z.record(z.string(), z.unknown()).parse(payload);
-    payload = { session_id: args.values.session, hook_event_name: "Checkpoint", ...object };
+    payload = { ...object, session_id: args.values.session, hook_event_name: "Checkpoint" };
   }
   const input = inputSchema.parse(payload);
   // A skipped count (e.g. a parallel hook holds the lock) must not surface as a user-visible failure.
@@ -62,12 +62,12 @@ async function main(): Promise<void> {
   try {
     const execute = async () => {
       const call = connection.call;
-      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
+      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), finish: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
       const options = { runtime, input, directory: stateDirectory, enabled: true, call, ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
           stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)} --session ${quote(input.session_id)}` } : {}) };
       const result = await runMemoryEvent({ ...options, ...(staged ? { stage: staged } : {}) });
-      const flushed = staged?.checkpoint ? await runMemoryEvent({ ...options, input: { ...input, hook_event_name: "Checkpoint" } }) : {};
+      const flushed = staged?.checkpoint || staged?.finish ? await runMemoryEvent({ ...options, input: { ...input, hook_event_name: "Checkpoint" } }) : {};
       process.stdout.write(JSON.stringify({ ...result, ...flushed }) + "\n");
     };
     if (profile) {

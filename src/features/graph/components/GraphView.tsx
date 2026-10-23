@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import {
   forceSimulation,
   forceLink,
-  forceManyBody,
-  forceCenter,
   forceCollide,
   forceX,
   forceY,
+  type ForceLink,
+  type ForceX,
   type Simulation,
   type SimulationLinkDatum,
   type SimulationNodeDatum,
@@ -17,7 +17,13 @@ import {
 import { select } from "d3-selection";
 import type { NoteSummary } from "@/lib/notes";
 import { cn } from "@/lib/utils";
-import { graphLayoutFor } from "@/lib/graph-layout";
+import { galaxyLayout, type GalaxyLayout } from "@/lib/graph-layout";
+import { radialLayout } from "@/lib/graph-radial-layout";
+import { nodeRadius, placementColor, sameGroup, type GraphPattern } from "@/features/graph/galaxy-style";
+import { useGraphPattern } from "@/features/graph/use-graph-pattern";
+import { GraphLegend } from "@/features/graph/components/GraphLegend";
+import { GraphPatternSwitch } from "@/features/graph/components/GraphPatternSwitch";
+import { useGraphViewport, type GraphBounds } from "@/features/graph/use-graph-viewport";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface GraphNode extends SimulationNodeDatum {
@@ -37,14 +43,33 @@ interface GraphData {
   links: GraphLink[];
 }
 
-const KIND_COLOR: Record<string, string> = {
-  note: "var(--primary)",
-  wiki: "var(--graph-wiki)",
-  index: "var(--graph-index)",
-};
-
 const ORPHAN_OPACITY = 0.15;
 const HOVER_DIM = 0.25;
+const LINK_OPACITY = 0.32;
+// Links between galaxies (or radial clusters) would otherwise drown the pattern.
+const CROSS_GROUP_OPACITY = 0.3;
+// Pull toward each note's layout slot; links are weak so the pattern holds. Radial
+// clusters need a firmer pull because their many cross-cluster links tug on hubs.
+const SLOT_STRENGTH: Record<GraphPattern, number> = { galaxy: 0.3, radial: 0.6 };
+// Divided by the larger endpoint degree so a hub's links together stay weaker than its slot pull.
+const LINK_STRENGTH: Record<GraphPattern, number> = { galaxy: 0.08, radial: 0.04 };
+
+function endpoints(link: GraphLink): [string, string] {
+  return [typeof link.source === "object" ? link.source.id : link.source, typeof link.target === "object" ? link.target.id : link.target];
+}
+
+// Snap notes back to their layout slots and clear motion/pins (d3 mutates its node objects).
+function seedSlots(nodes: GraphNode[], placements: GalaxyLayout["placements"]) {
+  for (const node of nodes) {
+    const slot = placements.get(node.id);
+    node.x = slot?.x ?? 0;
+    node.y = slot?.y ?? 0;
+    node.vx = 0;
+    node.vy = 0;
+    node.fx = null;
+    node.fy = null;
+  }
+}
 
 export function GraphView() {
   const router = useRouter();
@@ -54,14 +79,10 @@ export function GraphView() {
   const simulationRef = useRef<Simulation<GraphNode, GraphLink> | null>(null);
   const [data, setData] = useState<GraphData | null>(null);
   const [hovered, setHovered] = useState<GraphNode | null>(null);
-  const [t, setT] = useState({ x: 0, y: 0, k: 1 });
-  const tRef = useRef(t);
-  useEffect(() => {
-    tRef.current = t;
-  }, [t]);
   const [orphansOnly, setOrphansOnly] = useState(false);
   const [folder, setFolder] = useState("");
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [pattern, setPattern] = useGraphPattern();
 
   useEffect(() => {
     fetch("/api/graph")
@@ -77,7 +98,24 @@ export function GraphView() {
   const links = useMemo(() => (data?.links ?? []).map((l) => ({ source: l.source, target: l.target })), [data]);
   const folders = useMemo(() => [...new Set(nodes.map((n) => n.folder).filter(Boolean))].sort(), [nodes]);
 
-  // Adjacency map: node id -> connected node ids (drives degree, orphan count, hover highlighting)
+  // Target slots for both patterns, computed from the id-only links before d3 rewrites them.
+  const layouts = useMemo(() => {
+    const plain = links.map((l) => ({ source: String(l.source), target: String(l.target) }));
+    return { galaxy: galaxyLayout(nodes, plain), radial: radialLayout(nodes, plain) };
+  }, [nodes, links]);
+  const layout = layouts[pattern];
+  const degree = layout.degree;
+  const bounds = useMemo<GraphBounds | null>(() => {
+    if (!layout.galaxies.length) return null;
+    return {
+      minX: Math.min(...layout.galaxies.map((g) => g.x - g.radius)),
+      maxX: Math.max(...layout.galaxies.map((g) => g.x + g.radius)),
+      minY: Math.min(...layout.galaxies.map((g) => g.y - g.radius)),
+      maxY: Math.max(...layout.galaxies.map((g) => g.y + g.radius)),
+    };
+  }, [layout]);
+
+  // Adjacency map: node id -> connected node ids (drives hover highlighting)
   const neighbors = useMemo(() => {
     const m = new Map<string, Set<string>>();
     const add = (a: string, b: string) => {
@@ -86,18 +124,12 @@ export function GraphView() {
       s.add(b);
     };
     for (const l of links) {
-      const s = typeof l.source === "object" ? l.source.id : l.source;
-      const t = typeof l.target === "object" ? l.target.id : l.target;
+      const [s, t] = endpoints(l);
       add(s, t);
       add(t, s);
     }
     return m;
   }, [links]);
-  const degree = useMemo(() => {
-    const d = new Map<string, number>();
-    for (const [id, set] of neighbors) d.set(id, set.size);
-    return d;
-  }, [neighbors]);
   const orphanCount = useMemo(() => nodes.filter((n) => !(degree.get(n.id) ?? 0)).length, [nodes, degree]);
   const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
@@ -113,31 +145,39 @@ export function GraphView() {
     return () => observer.disconnect();
   }, []);
 
-  // apply pan/zoom transform
+  const { transformRef, fit } = useGraphViewport(svgRef, gRef, size, bounds);
+
+  // The simulation reads slots through this ref, so a pattern switch retargets it in place.
+  const layoutRef = useRef(layout);
+  const patternRef = useRef(pattern);
+  const appliedLayoutRef = useRef<GalaxyLayout | null>(null);
   useEffect(() => {
-    if (gRef.current) gRef.current.setAttribute("transform", `translate(${t.x},${t.y}) scale(${t.k})`);
-  }, [t]);
+    layoutRef.current = layout;
+    patternRef.current = pattern;
+  }, [layout, pattern]);
 
   // Filters and hover never rebuild the simulation, so they dim the graph in
   // place instead of scattering every node with a fresh simulation pulse.
   useEffect(() => {
-    if (!nodes.length || !svgRef.current || !size.width || !size.height) return;
+    if (!nodes.length || !svgRef.current) return;
     const svg = svgRef.current;
-    const { width, height } = size;
-    const layout = graphLayoutFor(nodes.length);
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    const radiusFor = (node: GraphNode) => nodeRadius(node.kind, degree.get(node.id) ?? 0);
+
+    // Start every note in its slot so loading never explodes the layout.
+    appliedLayoutRef.current = layoutRef.current;
+    seedSlots(nodes, layoutRef.current.placements);
+    const slotX = (node: GraphNode) => layoutRef.current.placements.get(node.id)?.x ?? 0;
+    const slotY = (node: GraphNode) => layoutRef.current.placements.get(node.id)?.y ?? 0;
 
     const sim = forceSimulation(nodes)
-      .force("link", forceLink<GraphNode, GraphLink>(links).id((node) => node.id).distance(layout.linkDistance).strength(0.5))
-      .force("charge", forceManyBody().strength(layout.chargeStrength))
-      .force("center", forceCenter(width / 2, height / 2))
-      .force("collide", forceCollide(26))
-      .force("centerX", forceX<GraphNode>(width / 2).strength((node) =>
-        (degree.get(node.id) ?? 0) === 0 ? layout.orphanStrength : layout.centerStrength
-      ))
-      .force("centerY", forceY<GraphNode>(height / 2).strength((node) =>
-        (degree.get(node.id) ?? 0) === 0 ? layout.orphanStrength : layout.centerStrength
-      ));
+      .force("link", forceLink<GraphNode, GraphLink>(links).id((node) => node.id).distance(30).strength((link) => {
+        const [s, t] = endpoints(link);
+        return LINK_STRENGTH[patternRef.current] / Math.max(1, degree.get(s) ?? 1, degree.get(t) ?? 1);
+      }))
+      .force("collide", forceCollide<GraphNode>((node) => radiusFor(node) + 2.5))
+      .force("slotX", forceX<GraphNode>(slotX).strength(SLOT_STRENGTH[patternRef.current]))
+      .force("slotY", forceY<GraphNode>(slotY).strength(SLOT_STRENGTH[patternRef.current]))
+      .alpha(0.25);
     simulationRef.current = sim;
 
     const root = select(svg).select<SVGGElement>("g.graph-root");
@@ -154,10 +194,7 @@ export function GraphView() {
       .data(nodes)
       .join("circle")
       .attr("class", "node")
-      .attr("r", (d) => (d.kind === "index" ? 11 : d.kind === "wiki" ? 8 : 6))
-      .attr("fill", (d) => KIND_COLOR[d.kind] ?? "var(--primary)")
-      .attr("stroke", "var(--popover)")
-      .attr("stroke-width", 2)
+      .attr("r", radiusFor)
       .attr("cursor", "grab")
       .on("mousedown", (event, d) => {
         event.stopPropagation();
@@ -172,6 +209,7 @@ export function GraphView() {
       .on("mouseover", (_event, d) => { if (!dragNode) setHovered(d); })
       .on("mouseout", () => { if (!dragNode) setHovered(null); });
 
+    // Labels stay hidden until the visual-state effect reveals index notes or a hover neighborhood.
     const labelSel = root
       .append("g")
       .selectAll<SVGTextElement, GraphNode>("text")
@@ -179,15 +217,13 @@ export function GraphView() {
       .join("text")
       .attr("class", "label")
       .attr("text-anchor", "middle")
-      .attr("dy", -14)
-      .attr("font-size", 10)
-      .attr("fill", "var(--muted-foreground)")
+      .attr("dy", (d) => -(radiusFor(d) + 5))
       .attr("pointer-events", "none")
       .text((d) => d.title);
 
     // Drag a node: pin it under the cursor (fx/fy) while the simulation keeps
     // running, so linked nodes trail with a springy follow. On release the pin
-    // is lifted and the node springs back into the layout. A press that never
+    // is lifted and the node springs back into its slot. A press that never
     // moved is treated as a click and opens the note.
     let dragNode: GraphNode | null = null;
     let moved = false;
@@ -196,7 +232,7 @@ export function GraphView() {
 
     function toGraph(clientX: number, clientY: number) {
       const rect = svg.getBoundingClientRect();
-      const { x, y, k } = tRef.current;
+      const { x, y, k } = transformRef.current;
       return { x: (clientX - rect.left - x) / k, y: (clientY - rect.top - y) / k };
     }
     function onDragMove(e: MouseEvent) {
@@ -238,24 +274,28 @@ export function GraphView() {
       window.removeEventListener("mouseleave", onDragEnd);
       root.selectAll("*").remove();
     };
-  }, [nodes, links, degree, nodesById, router, size]);
+  }, [nodes, links, degree, nodesById, router, transformRef]);
+
+  // Switching pattern retargets the running simulation so notes glide to their new slots.
+  useEffect(() => {
+    const sim = simulationRef.current;
+    if (!sim || appliedLayoutRef.current === layout) return;
+    appliedLayoutRef.current = layout;
+    // d3 caches accessor results at initialize(); re-setting each accessor refreshes them.
+    for (const name of ["slotX", "slotY"]) {
+      const force = sim.force(name) as ForceX<GraphNode> | undefined;
+      force?.x(force.x()).strength(SLOT_STRENGTH[pattern]);
+    }
+    const link = sim.force("link") as ForceLink<GraphNode, GraphLink> | undefined;
+    link?.strength(link.strength());
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) seedSlots(nodes, layout.placements);
+    sim.alpha(0.8).restart();
+  }, [layout, nodes, pattern]);
 
   function resetView() {
-    setT({ x: 0, y: 0, k: 1 });
-    const positioned = nodes.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
-    if (!positioned.length) return;
-
-    const centerX = positioned.reduce((sum, node) => sum + (node.x ?? 0), 0) / positioned.length;
-    const centerY = positioned.reduce((sum, node) => sum + (node.y ?? 0), 0) / positioned.length;
-    for (const node of positioned) {
-      node.x = (node.x ?? centerX) + size.width / 2 - centerX;
-      node.y = (node.y ?? centerY) + size.height / 2 - centerY;
-      node.vx = 0;
-      node.vy = 0;
-      node.fx = null;
-      node.fy = null;
-    }
-    simulationRef.current?.alpha(0.55).restart();
+    seedSlots(nodes, layout.placements);
+    simulationRef.current?.alpha(0.3).restart();
+    if (bounds) fit(bounds);
   }
 
   // Visual state: orphan/folder filtering + hover neighborhood highlighting,
@@ -272,91 +312,45 @@ export function GraphView() {
       return o;
     };
     const related = (id: string) => hovered && (id === hovered.id || neighbors.get(hovered.id)?.has(id));
+    const touchesHovered = (d: GraphLink) => {
+      const [s, t] = endpoints(d);
+      return !!hovered && (s === hovered.id || t === hovered.id);
+    };
 
     const nodeOpacity = (d: GraphNode) => {
       const base = baseOpacity(d);
       if (!hovered) return base;
       return related(d.id) ? Math.max(base, 0.95) : Math.min(base, HOVER_DIM);
     };
+    // Labels: index notes always, everyone else only inside the hovered neighborhood.
+    const labelOpacity = (d: GraphNode) => {
+      if (hovered) return related(d.id) ? nodeOpacity(d) : 0;
+      return d.kind === "index" ? baseOpacity(d) : 0;
+    };
 
     root.selectAll<SVGCircleElement, GraphNode>("circle.node")
-      .attr("opacity", nodeOpacity)
-      .attr("stroke", (d) => (related(d.id) ? "var(--primary)" : "var(--popover)"));
+      .attr("fill", (d) => placementColor(pattern, layout.placements.get(d.id)))
+      .attr("opacity", nodeOpacity);
     root.selectAll<SVGTextElement, GraphNode>("text.label")
-      .attr("opacity", nodeOpacity)
+      .attr("opacity", labelOpacity)
       .attr("font-weight", (d) => (related(d.id) ? 600 : 400));
 
     root.selectAll<SVGLineElement, GraphLink>("line.link")
-      .attr("stroke", (d) => {
-        const s = typeof d.source === "object" ? d.source.id : d.source;
-        const t = typeof d.target === "object" ? d.target.id : d.target;
-        return hovered && (s === hovered.id || t === hovered.id) ? "var(--primary)" : "var(--border)";
-      })
+      .attr("stroke", (d) => placementColor(pattern, layout.placements.get(endpoints(d)[0])))
       .attr("stroke-opacity", (d) => {
-        const s = typeof d.source === "object" ? d.source.id : d.source;
-        const t = typeof d.target === "object" ? d.target.id : d.target;
+        const [s, t] = endpoints(d);
         const so = nodesById.get(s);
         const to = nodesById.get(t);
-        const base = Math.min(so ? baseOpacity(so) : ORPHAN_OPACITY, to ? baseOpacity(to) : ORPHAN_OPACITY);
+        const inGroup = sameGroup(pattern, layout.placements.get(s), layout.placements.get(t));
+        const base =
+          Math.min(so ? baseOpacity(so) : ORPHAN_OPACITY, to ? baseOpacity(to) : ORPHAN_OPACITY) *
+          LINK_OPACITY *
+          (inGroup ? 1 : CROSS_GROUP_OPACITY);
         if (!hovered) return base;
-        return s === hovered.id || t === hovered.id ? 1 : Math.min(base, 0.06);
+        return touchesHovered(d) ? 0.95 : Math.min(base, 0.05);
       })
-      .attr("stroke-width", (d) => {
-        if (!hovered) return 1;
-        const s = typeof d.source === "object" ? d.source.id : d.source;
-        const t = typeof d.target === "object" ? d.target.id : d.target;
-        return s === hovered.id || t === hovered.id ? 1.6 : 1;
-      });
-  }, [hovered, orphansOnly, folder, nodes, links, neighbors, degree, nodesById]);
-
-  // wheel zoom + background drag pan (nodes stay clickable)
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    function onWheel(e: WheelEvent) {
-      e.preventDefault();
-      const el = svgRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      setT((prev) => {
-        const k = Math.min(2.5, Math.max(0.4, prev.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-        const s = k / prev.k;
-        return { k, x: mx - (mx - prev.x) * s, y: my - (my - prev.y) * s };
-      });
-    }
-    let dragging = false;
-    let lx = 0;
-    let ly = 0;
-    function onDown(e: MouseEvent) {
-      if ((e.target as Element).tagName === "circle") return;
-      dragging = true;
-      lx = e.clientX;
-      ly = e.clientY;
-    }
-    function onMove(e: MouseEvent) {
-      if (!dragging) return;
-      const dx = e.clientX - lx;
-      const dy = e.clientY - ly;
-      lx = e.clientX;
-      ly = e.clientY;
-      setT((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-    }
-    function onUp() {
-      dragging = false;
-    }
-    svg.addEventListener("wheel", onWheel, { passive: false });
-    svg.addEventListener("mousedown", onDown);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      svg.removeEventListener("wheel", onWheel);
-      svg.removeEventListener("mousedown", onDown);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, []);
+      .attr("stroke-width", (d) => (touchesHovered(d) ? 0.9 : 0.5));
+  }, [hovered, orphansOnly, folder, nodes, links, neighbors, degree, nodesById, layout, pattern]);
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
@@ -397,6 +391,7 @@ export function GraphView() {
         >
           Orphans ({orphanCount})
         </button>
+        <GraphPatternSwitch value={pattern} onChange={setPattern} />
         <button
           className="rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
           onClick={resetView}
@@ -411,8 +406,11 @@ export function GraphView() {
         </div>
       )}
       <svg ref={svgRef} className="h-full w-full cursor-grab select-none active:cursor-grabbing fade-in">
-        <g ref={gRef} className="graph-root" />
+        <g ref={gRef}>
+          <g className="graph-root" />
+        </g>
       </svg>
+      {nodes.length > 0 && <GraphLegend pattern={pattern} />}
       {hovered && (
         <div className="pointer-events-none absolute bottom-4 left-4 rounded-lg border border-border bg-popover px-3 py-1.5 text-xs shadow-lg fade-in">
           <span className="font-medium">{hovered.title}</span>

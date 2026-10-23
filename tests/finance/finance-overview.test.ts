@@ -163,7 +163,7 @@ test("overview keeps reserved money and obligations separate while attention agg
   assert.equal(overview.money.balance_cents, 6500);
   assert.equal(overview.assets.balance_cents, 0);
   assert.deepEqual(overview.allocations, {
-    reserved_cents: 8000,
+    reserved_cents: 10000,
     goal_count: 1,
   });
   assert.deepEqual(overview.obligations, {
@@ -200,7 +200,7 @@ test("overview keeps reserved money and obligations separate while attention agg
     target: "goals",
     urgency: "warning",
     due_date: null,
-    amount_cents: 1500,
+    amount_cents: 3500,
     currency: "PHP",
   });
   assert.equal(JSON.stringify(attention).includes("Private plan text"), false);

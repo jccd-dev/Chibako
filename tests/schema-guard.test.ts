@@ -80,3 +80,27 @@ test("a long-lived process picks up a replaced or newer database even if it neve
     rmSync(vault, { recursive: true, force: true });
   }
 });
+
+test("schema 1 upgrades preserve existing notes and memory registrations", async () => {
+  const vault = mkdtempSync(join(tmpdir(), "chibako-session-migration-"));
+  process.env.CHIBAKO_DATA_DIR = vault;
+  const { getDb, SCHEMA_VERSION } = await import("../src/lib/db");
+  const { createNote, getNote } = await import("../src/lib/notes");
+  try {
+    const db = getDb();
+    const note = createNote({ folder: "Agent Memory", title: "Legacy memory fixture", content: "Preserve this [[Decision]]" });
+    db.prepare("INSERT INTO memory_records (note_id, folder, title, role, subject, owner_id) VALUES (?,?,?,?,?,?)")
+      .run(note.id, note.folder, note.title, "overview", "Legacy thread", "shared");
+    db.exec("DROP TABLE memory_session_requests; ALTER TABLE memory_records DROP COLUMN closed_at; PRAGMA user_version = 1");
+    db.close();
+    const migrated = getDb();
+    assert.equal(migrated.pragma("user_version", { simple: true }), SCHEMA_VERSION);
+    assert.equal(getNote(note.id)?.content, note.content);
+    assert.deepEqual(migrated.prepare("SELECT note_id, closed_at FROM memory_records WHERE note_id = ?").get(note.id), { note_id: note.id, closed_at: null });
+    assert.ok(migrated.prepare("SELECT 1 FROM sqlite_master WHERE name = 'memory_session_requests'").get());
+    assert.ok(migrated.prepare("SELECT id FROM notes_fts WHERE id = ?").get(note.id));
+  } finally {
+    getDb().close();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});

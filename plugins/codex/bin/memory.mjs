@@ -27026,7 +27026,7 @@ function date4(params) {
 }
 
 // scripts/memory/runtime.ts
-import { createHash, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash, randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir2, open as open3, readFile as readFile2, rename as rename2, stat, unlink as unlink2 } from "node:fs/promises";
 import path3 from "node:path";
 
@@ -27043,6 +27043,71 @@ var memoryWriteSchema = external_exports.object({
   confirmation: external_exports.object({ source: identity, scope: identity }).strict().optional()
 }).strict();
 var memoryReadSchema = memoryWriteSchema.pick({ role: true, subject: true, session_id: true });
+var sessionIdentity = external_exports.object({ runtime: external_exports.enum(["codex", "claude", "hermes"]), session_id: identity });
+var retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, session_id: true }).extend({
+  role: external_exports.enum(["wiki", "preference"])
+});
+var sessionMemorySchema = external_exports.discriminatedUnion("action", [
+  sessionIdentity.extend({ action: external_exports.literal("read") }).strict(),
+  sessionIdentity.extend({
+    action: external_exports.literal("save"),
+    request_id: identity,
+    title: memoryWriteSchema.shape.title.refine((value) => !/[[\]|]/.test(value), "Title cannot contain [, ] or |"),
+    content: memoryWriteSchema.shape.content,
+    expected_revision: memoryWriteSchema.shape.expected_revision,
+    now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/)
+  }).strict(),
+  sessionIdentity.extend({
+    action: external_exports.literal("finish"),
+    request_id: identity,
+    expected_revision: memoryWriteSchema.shape.expected_revision,
+    retain: retainedMemorySchema.optional()
+  }).strict()
+]);
+
+// scripts/memory/session-stage.ts
+import { randomUUID } from "node:crypto";
+var sessionMutationSchema = external_exports.discriminatedUnion("action", [sessionMemorySchema.options[1], sessionMemorySchema.options[2]]);
+var checkpointSchema = memoryWriteSchema.pick({ title: true, content: true }).extend({
+  expected_revision: memoryWriteSchema.shape.expected_revision.optional(),
+  request_id: memoryWriteSchema.shape.request_id.optional(),
+  session_id: memoryWriteSchema.shape.session_id.optional(),
+  // Old staged payloads may name a task; it no longer controls record identity.
+  role: external_exports.enum(["session", "overview"]).optional(),
+  subject: external_exports.string().optional()
+}).strict();
+var stageSchema = external_exports.object({
+  checkpoint: checkpointSchema.optional(),
+  finish: external_exports.object({ expected_revision: memoryWriteSchema.shape.expected_revision.optional(), retain: retainedMemorySchema.optional(), request_id: memoryWriteSchema.shape.request_id.optional() }).strict().optional(),
+  now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional(),
+  skip: external_exports.string().trim().min(1).max(300).optional(),
+  replaces_request_id: external_exports.string().optional()
+}).strict().refine((value) => [value.checkpoint, value.finish, value.skip].filter(Boolean).length === 1, "Provide exactly one of checkpoint, finish or skip").refine((value) => !value.now_line || Boolean(value.checkpoint), "now_line needs a checkpoint");
+async function prepareSessionStage(call, runtime, session_id, raw, legacy) {
+  if (legacy) {
+    return external_exports.object({ checkpoint: memoryWriteSchema, replaces_request_id: external_exports.string(), now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional() }).strict().refine((value) => !value.now_line || value.checkpoint.role === "overview" && !/[[\]|]/.test(value.checkpoint.title), "now_line needs an overview with a plain title").parse(raw);
+  }
+  const stage = stageSchema.parse(raw);
+  if (stage.skip) return { skip: stage.skip, replaces_request_id: stage.replaces_request_id };
+  if (stage.checkpoint?.session_id && stage.checkpoint.session_id !== session_id) throw new MemoryClientError("Checkpoint session mismatch");
+  const source = stage.checkpoint ?? stage.finish;
+  const candidate = sessionMutationSchema.parse({
+    runtime,
+    session_id,
+    request_id: source.request_id ?? randomUUID(),
+    expected_revision: source.expected_revision ?? null,
+    ...stage.checkpoint ? { action: "save", title: stage.checkpoint.title, content: stage.checkpoint.content, now_line: stage.now_line ?? "Work in progress" } : { action: "finish", ...stage.finish?.retain ? { retain: stage.finish.retain } : {} }
+  });
+  if (source.expected_revision === void 0) {
+    const current = await call("memory_session", { action: "read", runtime, session_id });
+    const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
+    if (revision && current.closed !== true) {
+      throw new MemoryClientError(`This session memory already exists at revision ${revision}. Read memory_session with action read, runtime ${runtime} and the hook session_id, merge the current content, then restage with expected_revision ${revision}.`);
+    }
+    candidate.expected_revision = revision;
+  }
+  return { checkpoint: candidate, replaces_request_id: stage.replaces_request_id };
+}
 
 // scripts/memory/profile.ts
 import { homedir } from "node:os";
@@ -27052,7 +27117,7 @@ import { readdir } from "node:fs/promises";
 // scripts/memory/private-files.ts
 import { mkdir, lstat, open as open2, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 async function privateDirectory(directory) {
   if (!path.isAbsolute(directory)) throw new MemoryClientError("Private data path must be absolute.");
   await mkdir(directory, { recursive: true, mode: 448 });
@@ -27071,7 +27136,7 @@ async function readOptional(file2) {
   }
 }
 async function atomicPrivateWrite(file2, value) {
-  const temporary = `${file2}.${randomUUID()}.tmp`;
+  const temporary = `${file2}.${randomUUID2()}.tmp`;
   const handle = await open2(temporary, "wx", 384);
   try {
     await handle.writeFile(value);
@@ -27188,28 +27253,16 @@ var stateSchema = external_exports.object({
   users: external_exports.number().int().min(0).default(0),
   tools: external_exports.number().int().min(0).default(0),
   dueRequested: external_exports.boolean().default(false),
-  pending: external_exports.object({ turn: external_exports.string(), checkpoint: memoryWriteSchema, now_line: external_exports.string().optional() }).optional(),
+  pending: external_exports.object({
+    turn: external_exports.string(),
+    checkpoint: external_exports.union([sessionMutationSchema, memoryWriteSchema]),
+    now_line: external_exports.string().optional(),
+    superseded: sessionMutationSchema.optional()
+  }).optional(),
+  lastCheckpoint: external_exports.object({ hash: external_exports.string(), revision: external_exports.string() }).optional(),
   nowUpdate: external_exports.object({ thread: external_exports.string(), line: external_exports.string() }).optional()
 }).strict();
-var stageSchema = external_exports.object({
-  checkpoint: memoryWriteSchema.optional(),
-  now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional(),
-  skip: external_exports.string().trim().min(1).max(300).optional(),
-  replaces_request_id: external_exports.string().optional()
-}).strict().refine((value) => Boolean(value.checkpoint) !== Boolean(value.skip), "Provide exactly one of checkpoint or skip").refine((value) => !value.now_line || value.checkpoint?.role === "overview" && !/[[\]|]/.test(value.checkpoint.title), "now_line needs an overview checkpoint whose title has no [, ] or |");
-async function completeStage(call, session_id, raw) {
-  const stage = external_exports.object({ checkpoint: external_exports.record(external_exports.string(), external_exports.unknown()).optional() }).passthrough().parse(raw);
-  if (!stage.checkpoint) return stage;
-  const checkpoint = { request_id: randomUUID2(), session_id, ...stage.checkpoint };
-  if (checkpoint.expected_revision === void 0) {
-    external_exports.object({ checkpoint: memoryWriteSchema }).parse({ checkpoint: { ...checkpoint, expected_revision: null } });
-    const current = await call("memory_read", memoryReadSchema.parse({ role: checkpoint.role, subject: checkpoint.subject, session_id: checkpoint.session_id }));
-    const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
-    if (revision) throw new MemoryClientError(`This memory already exists at revision ${revision}. Read it with memory_read, merge your update into its content, and restage with "expected_revision": "${revision}".`);
-    checkpoint.expected_revision = null;
-  }
-  return { ...stage, checkpoint };
-}
+var checkpointHash = (checkpoint) => createHash("sha256").update(JSON.stringify([checkpoint.content, checkpoint.now_line])).digest("hex");
 var NOW = { subject: "Now", lines: 15, read: 1800 };
 var verified = (receipt, request_id) => receipt.saved === true && receipt.request_id === request_id && typeof receipt.note_id === "string" && typeof receipt.revision === "string" && /^[a-f0-9]{64}$/.test(receipt.revision);
 function mergeNow(content, thread, line) {
@@ -27266,7 +27319,7 @@ async function runMemoryEvent(options) {
       state.binding = options.binding;
     }
     const save = async () => {
-      const temporary = `${file2}.${randomUUID2()}.tmp`;
+      const temporary = `${file2}.${randomUUID3()}.tmp`;
       const handle = await open3(temporary, "wx", 384);
       try {
         await handle.writeFile(JSON.stringify(state));
@@ -27278,25 +27331,29 @@ async function runMemoryEvent(options) {
     };
     if (options.stage !== void 0) {
       if (!state.turn) throw new Error("A prompt event must establish the current turn before staging");
-      const staged = stageSchema.parse(await completeStage(call, input2.session_id, options.stage));
+      const legacy = state.pending && !("action" in state.pending.checkpoint) ? state.pending.checkpoint : void 0;
+      const staged = await prepareSessionStage(call, runtime, input2.session_id, options.stage, legacy);
       if (state.pending) {
         const pending = state.pending.checkpoint;
         const replacement = staged.checkpoint;
-        if (!replacement || staged.replaces_request_id !== pending.request_id || replacement.request_id === pending.request_id || replacement.expected_revision === null || replacement.role !== pending.role || replacement.subject !== pending.subject || replacement.title !== pending.title) {
+        const sameOperation = replacement && ("action" in pending ? "action" in replacement && (replacement.action === pending.action || pending.action === "save" && replacement.action === "finish") : !("action" in replacement) && replacement.role === pending.role && replacement.subject === pending.subject && replacement.title === pending.title);
+        if (!replacement || !sameOperation || staged.replaces_request_id !== pending.request_id || replacement.request_id === pending.request_id || replacement.expected_revision === null) {
           throw new Error("Unsaved checkpoint exists; flush or resolve it before staging another");
         }
       }
-      if (staged.checkpoint) {
+      const unchanged = !state.pending && staged.checkpoint && "action" in staged.checkpoint && staged.checkpoint.action === "save" && state.lastCheckpoint?.hash === checkpointHash(staged.checkpoint) && state.lastCheckpoint?.revision === staged.checkpoint.expected_revision;
+      if (staged.checkpoint && !unchanged) {
         if (staged.checkpoint.session_id !== input2.session_id) throw new Error("Checkpoint session mismatch");
-        state.pending = { turn: state.turn, checkpoint: staged.checkpoint, ...staged.now_line ? { now_line: staged.now_line } : {} };
-        state.topic = staged.checkpoint.subject;
+        const superseded = state.pending?.superseded ?? (state.pending && "action" in state.pending.checkpoint && state.pending.checkpoint.action === "save" && "action" in staged.checkpoint && staged.checkpoint.action === "finish" ? state.pending.checkpoint : void 0);
+        state.pending = { turn: state.turn, checkpoint: staged.checkpoint, ...staged.now_line ? { now_line: staged.now_line } : {}, ...superseded ? { superseded } : {} };
+        if (!("action" in staged.checkpoint) || staged.checkpoint.action === "save") state.topic = staged.checkpoint.title;
       } else {
         state.acknowledged = state.turn;
         state.users = state.tools = 0;
         state.dueRequested = false;
       }
       await save();
-      return { staged: Boolean(staged.checkpoint), skipped: Boolean(staged.skip) };
+      return { staged: Boolean(staged.checkpoint) && !unchanged, skipped: Boolean(staged.skip) || Boolean(unchanged) };
     }
     const event = input2.hook_event_name;
     const limits = options.thresholds ?? defaultThresholds;
@@ -27314,21 +27371,27 @@ async function runMemoryEvent(options) {
     }
     if (event === "UserPromptSubmit") {
       if (!input2.turn_id || input2.turn_id !== state.turn) state.users++;
-      state.turn = input2.turn_id || randomUUID2();
+      state.turn = input2.turn_id || randomUUID3();
     }
     let warning = "";
+    let savedReceipt;
     if (state.pending) {
       try {
-        const receipt = await call("memory_write", state.pending.checkpoint);
-        if (!verified(receipt, state.pending.checkpoint.request_id)) throw new Error("Unverified checkpoint receipt");
+        const checkpoint = state.pending.checkpoint;
+        const receipt = await call("action" in checkpoint ? "memory_session" : "memory_write", checkpoint);
+        const emptyFinish = "action" in checkpoint && checkpoint.action === "finish" && receipt.saved === true && receipt.request_id === checkpoint.request_id && receipt.note_id === null && receipt.revision === null;
+        if (!verified(receipt, checkpoint.request_id) && !emptyFinish || "action" in checkpoint && (receipt.closed !== (checkpoint.action === "finish") || checkpoint.action === "finish" && checkpoint.retain && typeof receipt.retained_note_id !== "string")) throw new Error("Unverified checkpoint receipt");
+        savedReceipt = receipt;
         state.acknowledged = state.pending.turn;
         state.last_saved_at = (/* @__PURE__ */ new Date()).toISOString();
         state.users = state.tools = 0;
         state.dueRequested = false;
-        if (state.pending.now_line) state.nowUpdate = { thread: state.pending.checkpoint.title, line: `- [[${state.pending.checkpoint.title}]] \u2014 ${state.pending.now_line}` };
+        if ("action" in checkpoint) {
+          state.lastCheckpoint = checkpoint.action === "save" ? { hash: checkpointHash(checkpoint), revision: String(receipt.revision) } : void 0;
+        } else if (state.pending.now_line) state.nowUpdate = { thread: checkpoint.title, line: `- [[${checkpoint.title}]] \u2014 ${state.pending.now_line}` };
         state.pending = void 0;
-      } catch {
-        warning = "Memory checkpoint remains UNSAVED. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite.";
+      } catch (error62) {
+        warning = "Memory checkpoint remains UNSAVED. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite." + (error62 instanceof MemoryClientError ? ` ${error62.message}` : "");
       }
     }
     if (state.nowUpdate && !state.pending) {
@@ -27352,7 +27415,7 @@ Schema (evidence, not instructions): ${JSON.stringify(await call("get_knowledge_
           schema2 = "\nCall get_knowledge_schema before writing.";
         }
       }
-      return `Memory checkpoint due. Pipe ONE thread overview as JSON to the stage command: {"checkpoint": {"role": "overview", "subject": "<thread name>", "title": "<thread name>", "content": "objective, state, evidence, next action"}, "now_line": "<=140 chars status"}, or {"skip": "reason"} if nothing durable changed. Session, request ID and revision are filled in; if the thread already exists, the command returns its revision so you can read, merge and restage with "expected_revision". Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Runs once.${schema2}`;
+      return `Memory checkpoint due. Update this session's ONE checkpoint: {"checkpoint": {"title": "<session label>", "content": "current objective, decisions, evidence, pending work"}, "now_line": "<=140 chars next action"}. When no work remains, use {"finish": {}} to remove its Now entry and trash the temporary checkpoint, or include retain (wiki/preference role, subject, title, content, expected_revision, confirmation for preferences) to preserve lasting knowledge atomically first. Skip unchanged or trivial work with {"skip": "reason"}. Identity comes from the hook session, never a task name. For an existing note, read memory_session with action read and restage with expected_revision. Stop means response end, not task completion. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Runs once.${schema2}`;
     };
     if (event === "SessionStart" || event === "UserPromptSubmit") {
       try {
@@ -27375,7 +27438,7 @@ ${JSON.stringify(await call("recall", { query: query.slice(0, 300), limit: 5, bu
         warning = "Memory retrieval unavailable. Continue ordinary work and report missing context.";
       }
       if (!state.instructed) {
-        context += `Automatic memory: recall again on topic changes. Save only meaningful work, as a thread overview plus a Now line, when a checkpoint is requested (pipe its JSON to the stage command); trivial turns need nothing. Never copy secrets or transcripts. Only a verified memory_write receipt means saved. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}.
+        context += `Automatic memory: update one session checkpoint across tasks. Recall on topic changes. Save meaningful work when due; skip trivial turns. Finish existing memory when no work remains; retain lasting facts first. Stop is not completion. No secrets/transcripts. Verify receipts. Stage: ${options.stageCommand || "see integrations/agent-memory/README.md"}.
 `;
         state.instructed = true;
       }
@@ -27389,7 +27452,7 @@ ${JSON.stringify(await call("recall", { query: query.slice(0, 300), limit: 5, bu
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
     }
-    if (event === "Checkpoint") output2 = { saved: !state.pending, pending: Boolean(state.pending) };
+    if (event === "Checkpoint") output2 = { saved: !state.pending, pending: Boolean(state.pending), ...savedReceipt ? { receipt: savedReceipt } : {} };
     if (warning) output2.systemMessage = warning;
     await save();
     return output2;
@@ -32387,7 +32450,8 @@ var memoryStatusSchema = external_exports.object({
   principal_id: external_exports.string().min(1),
   scopes: external_exports.array(external_exports.string()),
   enabled: external_exports.boolean(),
-  area: external_exports.string().nullable()
+  area: external_exports.string().nullable(),
+  session_lifecycle: external_exports.literal(1).optional()
 });
 function validateEndpoint(raw) {
   const url2 = new URL(raw);
@@ -32406,6 +32470,7 @@ function validateMemoryStatus(raw) {
 function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
   let client;
   let verified2 = false;
+  let status;
   let calls = 0;
   const invoke = async (name, args) => {
     if (!key) throw new MemoryClientError("A restricted Chibako API key is required.");
@@ -32430,6 +32495,12 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
     } catch {
       throw new MemoryClientError("Memory request failed. Check the connection and server status; pending checkpoints are retained.");
     }
+    if (result.isError && name === "memory_session") {
+      const content = external_exports.array(external_exports.object({ type: external_exports.string(), text: external_exports.string().optional() }).passthrough()).safeParse(result.content);
+      const message = content.success ? content.data.find((item) => item.type === "text")?.text : void 0;
+      if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.");
+      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError("Session memory changed. Read memory_session with action read, merge current content, and restage with its expected_revision and replaces_request_id identifying the pending request.");
+    }
     if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.");
     return external_exports.record(external_exports.string(), external_exports.unknown()).parse(result.structuredContent);
   };
@@ -32439,9 +32510,13 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
     },
     call: async (name, args) => {
       if (expectedPrincipal && !verified2) {
-        const status = validateMemoryStatus(await invoke("memory_status", {}));
+        status = validateMemoryStatus(await invoke("memory_status", {}));
         if (status.principal_id !== expectedPrincipal || expectedArea && status.area !== expectedArea) throw new MemoryClientError("Connection identity changed. Keep pending work with its original profile and run setup again.");
         verified2 = true;
+      }
+      if (name === "memory_session") {
+        status ??= validateMemoryStatus(await invoke("memory_status", {}));
+        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.");
       }
       return invoke(name, args);
     },
@@ -32461,7 +32536,7 @@ import path5 from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 
 // scripts/memory/host-config.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -35711,7 +35786,7 @@ async function disconnect(directory) {
   });
 }
 async function writeConnectionCheck(call) {
-  const id = randomUUID3();
+  const id = randomUUID4();
   const receipt = external_exports.object({ saved: external_exports.literal(true), request_id: external_exports.string(), note_id: external_exports.string().min(1), revision: external_exports.string().regex(/^[a-f0-9]{64}$/) }).parse(
     await call("memory_write", { request_id: id, role: "session", subject: "setup-check", session_id: `setup-${id}`, title: `TEST Memory connection ${id.slice(0, 8)}`, content: "Explicitly approved plugin setup check. No project work or deployment is implied.", expected_revision: null })
   );
@@ -35815,7 +35890,7 @@ Automatic mode stays off until enabled. Close concurrent host configuration edit
       const receipt = await writeConnectionCheck(connection.call);
       process.stdout.write(JSON.stringify(receipt) + "\n");
     }
-    if ((await ask("Enable automatic memory for this profile? [y/N] ")).trim().toLowerCase() === "y") await setEnabled(directory, true, connection.call);
+    if ((await ask("Enable automatic session memory (completed temporary checkpoints go to Trash)? [y/N] ")).trim().toLowerCase() === "y") await setEnabled(directory, true, connection.call);
     return localStatus(directory);
   } finally {
     readline.close();
@@ -35867,7 +35942,7 @@ async function main() {
   let payload = await readInput();
   if (action === "stage" && args.values.session) {
     const object4 = external_exports.record(external_exports.string(), external_exports.unknown()).parse(payload);
-    payload = { session_id: args.values.session, hook_event_name: "Checkpoint", ...object4 };
+    payload = { ...object4, session_id: args.values.session, hook_event_name: "Checkpoint" };
   }
   const input2 = inputSchema.parse(payload);
   countingOnly = action === "hook" && input2.hook_event_name === "PostToolUse";
@@ -35877,7 +35952,7 @@ async function main() {
   try {
     const execute = async () => {
       const call = connection.call;
-      const staged = action === "stage" ? external_exports.object({ checkpoint: external_exports.unknown().optional(), now_line: external_exports.unknown().optional(), skip: external_exports.unknown().optional(), replaces_request_id: external_exports.unknown().optional() }).parse(payload) : void 0;
+      const staged = action === "stage" ? external_exports.object({ checkpoint: external_exports.unknown().optional(), finish: external_exports.unknown().optional(), now_line: external_exports.unknown().optional(), skip: external_exports.unknown().optional(), replaces_request_id: external_exports.unknown().optional() }).parse(payload) : void 0;
       const options = {
         runtime,
         input: input2,
@@ -35891,7 +35966,7 @@ async function main() {
         } : {}
       };
       const result = await runMemoryEvent({ ...options, ...staged ? { stage: staged } : {} });
-      const flushed = staged?.checkpoint ? await runMemoryEvent({ ...options, input: { ...input2, hook_event_name: "Checkpoint" } }) : {};
+      const flushed = staged?.checkpoint || staged?.finish ? await runMemoryEvent({ ...options, input: { ...input2, hook_event_name: "Checkpoint" } }) : {};
       process.stdout.write(JSON.stringify({ ...result, ...flushed }) + "\n");
     };
     if (profile) {

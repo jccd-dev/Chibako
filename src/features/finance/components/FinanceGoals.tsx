@@ -370,7 +370,9 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
               <FieldDescription>
                 {goal && goal.saved_cents > 0
                   ? `Changing this link moves the current ${formatPHP(goal.saved_cents)} saved balance to the new backing account. It does not add money.`
-                  : "Money added to the goal is kept in this account. Without a link, the goal holds its own money."}
+                  : !goal
+                    ? "The linked account's existing positive balance becomes this goal's progress. Choose an account with no money reserved by another goal. Without a link, the goal holds its own money."
+                    : "Money added to the goal is kept in this account. Without a link, the goal holds its own money."}
               </FieldDescription>
             </Field>
           )}
@@ -437,10 +439,9 @@ function MovementPanel({ goals, disabled }: { goals: FinanceGoalsController; dis
     (row) => row.account_id === goals.accountId,
   );
   const destinationName = selected?.account_name ?? "the chosen account";
-  const toLinked = !deposit && !!linked && goals.accountId === linked;
   const options = goals.accounts
     .filter((row) => !row.archived)
-    .filter((row) => deposit ? row.account_id !== linked : true);
+    .filter((row) => row.account_id !== linked);
   const note = !goals.accountId
     ? deposit
       ? "Choose the account to move money out of."
@@ -449,11 +450,9 @@ function MovementPanel({ goals, disabled }: { goals: FinanceGoalsController; dis
       ? linked
         ? `Move money out of ${destinationName} and into this goal. It will not appear as expenses in history. The money is added to ${linkedName}.`
         : `Move money out of ${destinationName} and into this goal. It will not appear as expenses in history. The goal holds the money.`
-      : toLinked
-        ? `Money moves within the linked account ${linkedName}, so account balances stay unchanged and this amount is freed from the goal.`
-        : linked
-          ? `Money is sent from the linked account ${linkedName} into ${destinationName}. It will not appear as expenses in history.`
-          : `Money held in this goal moves into ${destinationName}. It will not appear as expenses in history.`;
+      : linked
+        ? `Money is sent from the linked account ${linkedName} into ${destinationName}. It will not appear as expenses in history.`
+        : `Money held in this goal moves into ${destinationName}. It will not appear as expenses in history.`;
   return (
     <section aria-label="Goal money" className="flex flex-col gap-4 border-t border-border pt-5">
       <p className="text-sm text-muted-foreground">
