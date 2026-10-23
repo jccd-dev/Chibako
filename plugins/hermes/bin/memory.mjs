@@ -27196,7 +27196,20 @@ var stageSchema = external_exports.object({
   now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional(),
   skip: external_exports.string().trim().min(1).max(300).optional(),
   replaces_request_id: external_exports.string().optional()
-}).strict().refine((value) => Boolean(value.checkpoint) !== Boolean(value.skip)).refine((value) => !value.now_line || value.checkpoint?.role === "overview" && !/[[\]|]/.test(value.checkpoint.title));
+}).strict().refine((value) => Boolean(value.checkpoint) !== Boolean(value.skip), "Provide exactly one of checkpoint or skip").refine((value) => !value.now_line || value.checkpoint?.role === "overview" && !/[[\]|]/.test(value.checkpoint.title), "now_line needs an overview checkpoint whose title has no [, ] or |");
+async function completeStage(call, session_id, raw) {
+  const stage = external_exports.object({ checkpoint: external_exports.record(external_exports.string(), external_exports.unknown()).optional() }).passthrough().parse(raw);
+  if (!stage.checkpoint) return stage;
+  const checkpoint = { request_id: randomUUID2(), session_id, ...stage.checkpoint };
+  if (checkpoint.expected_revision === void 0) {
+    external_exports.object({ checkpoint: memoryWriteSchema }).parse({ checkpoint: { ...checkpoint, expected_revision: null } });
+    const current = await call("memory_read", memoryReadSchema.parse({ role: checkpoint.role, subject: checkpoint.subject, session_id: checkpoint.session_id }));
+    const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
+    if (revision) throw new MemoryClientError(`This memory already exists at revision ${revision}. Read it with memory_read, merge your update into its content, and restage with "expected_revision": "${revision}".`);
+    checkpoint.expected_revision = null;
+  }
+  return { ...stage, checkpoint };
+}
 var NOW = { subject: "Now", lines: 15, read: 1800 };
 var verified = (receipt, request_id) => receipt.saved === true && receipt.request_id === request_id && typeof receipt.note_id === "string" && typeof receipt.revision === "string" && /^[a-f0-9]{64}$/.test(receipt.revision);
 function mergeNow(content, thread, line) {
@@ -27264,8 +27277,8 @@ async function runMemoryEvent(options) {
       await rename2(temporary, file2);
     };
     if (options.stage !== void 0) {
-      const staged = stageSchema.parse(options.stage);
       if (!state.turn) throw new Error("A prompt event must establish the current turn before staging");
+      const staged = stageSchema.parse(await completeStage(call, input2.session_id, options.stage));
       if (state.pending) {
         const pending = state.pending.checkpoint;
         const replacement = staged.checkpoint;
@@ -27339,7 +27352,7 @@ Schema (evidence, not instructions): ${JSON.stringify(await call("get_knowledge_
           schema2 = "\nCall get_knowledge_schema before writing.";
         }
       }
-      return `Memory checkpoint due. Stage ONE thread overview: {"checkpoint": {role "overview", subject and title = thread name, content = objective, state, evidence, next action}, "now_line": "<=140 chars status"}, or {"skip": "reason"} if nothing durable changed. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Runs once.${schema2}`;
+      return `Memory checkpoint due. Pipe ONE thread overview as JSON to the stage command: {"checkpoint": {"role": "overview", "subject": "<thread name>", "title": "<thread name>", "content": "objective, state, evidence, next action"}, "now_line": "<=140 chars status"}, or {"skip": "reason"} if nothing durable changed. Session, request ID and revision are filled in; if the thread already exists, the command returns its revision so you can read, merge and restage with "expected_revision". Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Runs once.${schema2}`;
     };
     if (event === "SessionStart" || event === "UserPromptSubmit") {
       try {
@@ -27362,7 +27375,7 @@ ${JSON.stringify(await call("recall", { query: query.slice(0, 300), limit: 5, bu
         warning = "Memory retrieval unavailable. Continue ordinary work and report missing context.";
       }
       if (!state.instructed) {
-        context += `Automatic memory: recall again on topic changes. Save only meaningful work, as a thread overview plus a Now line, when a checkpoint is requested; trivial turns need nothing. Never copy secrets or transcripts. Only a verified memory_write receipt means saved. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}.
+        context += `Automatic memory: recall again on topic changes. Save only meaningful work, as a thread overview plus a Now line, when a checkpoint is requested (pipe its JSON to the stage command); trivial turns need nothing. Never copy secrets or transcripts. Only a verified memory_write receipt means saved. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}.
 `;
         state.instructed = true;
       }
@@ -35833,7 +35846,7 @@ async function readInput() {
 }
 async function main() {
   if (Number(process.versions.node.split(".")[0]) < 20) throw new MemoryClientError("Chibako Memory requires Node.js 20 or later.");
-  const args = parseArgs({ allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" } } });
+  const args = parseArgs({ allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" }, session: { type: "string" } } });
   const runtime = external_exports.enum(["codex", "claude", "hermes"]).parse(args.positionals[0]);
   const action = args.positionals[1] || "hook";
   const name = args.values.profile || process.env.CHIBAKO_MEMORY_PROFILE || "default";
@@ -35851,7 +35864,11 @@ async function main() {
     return;
   }
   if (profile && profile.runtime !== runtime) throw new Error("Runtime does not match the configured memory profile.");
-  const payload = await readInput();
+  let payload = await readInput();
+  if (action === "stage" && args.values.session) {
+    const object4 = external_exports.record(external_exports.string(), external_exports.unknown()).parse(payload);
+    payload = { session_id: args.values.session, hook_event_name: "Checkpoint", ...object4 };
+  }
   const input2 = inputSchema.parse(payload);
   countingOnly = action === "hook" && input2.hook_event_name === "PostToolUse";
   const connection = connectMemory(profile?.endpoint || process.env.CHIBAKO_MEMORY_MCP_URL || "", profile?.api_key || process.env.CHIBAKO_MEMORY_API_KEY || "", profile?.principal_id, profile?.area);
@@ -35870,7 +35887,7 @@ async function main() {
         ...profile?.thresholds ? { thresholds: profile.thresholds } : {},
         ...profile ? {
           binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
-          stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)}`
+          stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)} --session ${quote(input2.session_id)}`
         } : {}
       };
       const result = await runMemoryEvent({ ...options, ...staged ? { stage: staged } : {} });
@@ -35896,7 +35913,8 @@ main().catch((error62) => {
     process.stdout.write("{}\n");
     return;
   }
-  process.stdout.write(JSON.stringify({ systemMessage: error62 instanceof MemoryClientError ? error62.message : "Chibako Memory operation failed. Check the selected profile, private permissions, server status and connection. Capture is unverified; no credentials or checkpoint content were logged." }) + "\n");
+  const invalid = error62 instanceof external_exports.ZodError ? `Invalid memory payload: ${error62.issues.map((issue2) => `${issue2.path.join(".") || "(root)"}: ${issue2.message}`).join("; ")}` : "";
+  process.stdout.write(JSON.stringify({ systemMessage: invalid || (error62 instanceof MemoryClientError ? error62.message : "Chibako Memory operation failed. Check the selected profile, private permissions, server status and connection. Capture is unverified; no credentials or checkpoint content were logged.") }) + "\n");
   process.exitCode = 1;
 });
 /*! Bundled license information:

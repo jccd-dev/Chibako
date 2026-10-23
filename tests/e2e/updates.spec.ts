@@ -22,13 +22,23 @@ async function authenticate(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/app(?:\/note\/[^/]+)?$/);
 }
 
-function publish(operation: object | null) {
+function publish(operation: object | null, options: { checkAck?: string; checkError?: string } = {}) {
   const status = {
     v: 1, protocol: 1, heartbeatAt: Date.now(), checkedAt: Date.now(), currentVersion: "0.1.1",
     latest: { version: "0.1.2", notes: "Faster search", publishedAt: "2026-10-21T00:00:00Z", url: "https://github.com/jccd-dev/chibako/releases/tag/v0.1.2" },
-    checkError: null, operation,
+    checkError: options.checkError ?? null, checkAck: options.checkAck ?? null, operation,
   };
   fs.writeFileSync(path.join(updaterDir, "out", "status.json"), JSON.stringify(status));
+}
+
+function clearRequests() {
+  for (const name of fs.readdirSync(path.join(updaterDir, "in"))) fs.rmSync(path.join(updaterDir, "in", name));
+}
+
+function onlyRequest(): { id: string; action: string } {
+  const requests = fs.readdirSync(path.join(updaterDir, "in"));
+  expect(requests).toHaveLength(1);
+  return JSON.parse(fs.readFileSync(path.join(updaterDir, "in", requests[0]), "utf8"));
 }
 
 test("owner sees the available update, requests it, follows progress, and gets the updater's failure reason", async ({ page }) => {
@@ -58,6 +68,78 @@ test("owner sees the available update, requests it, follows progress, and gets t
 
   publish({ ...operation, phase: "rolled_back", error: "The new version did not become healthy." });
   await expect(page.getByRole("alert").filter({ hasText: "The new version did not become healthy." })).toBeVisible();
+});
+
+test("sidebar rail badge shows the available version above Agent and opens the update confirmation", async ({ page }) => {
+  await authenticate(page);
+  clearRequests();
+  publish(null);
+  await page.reload();
+
+  const badge = page.getByRole("button", { name: "Update available: v0.1.2" });
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute("title", "Update available: v0.1.2");
+  const badgeBox = await badge.boundingBox();
+  const agentBox = await page.getByRole("link", { name: "Agent access" }).boundingBox();
+  expect(badgeBox && agentBox && badgeBox.y < agentBox.y).toBe(true);
+
+  await badge.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("version 0.1.2");
+  await expect(dialog).toContainText("Faster search");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(fs.readdirSync(path.join(updaterDir, "in"))).toHaveLength(0);
+});
+
+test("manual check shows pending, success, and the updater's error", async ({ page }) => {
+  await authenticate(page);
+  clearRequests();
+  publish(null);
+  await page.goto("/app/settings");
+  await page.getByRole("tab", { name: "Updates" }).click();
+
+  const check = page.getByRole("button", { name: "Check for updates" });
+  await expect(check).toBeEnabled();
+  await check.click();
+  await expect(page.getByRole("button", { name: "Checking…" })).toBeDisabled();
+  await expect.poll(() => fs.readdirSync(path.join(updaterDir, "in")).length).toBe(1);
+  const success = onlyRequest();
+  expect(success).toMatchObject({ action: "check" });
+
+  publish(null, { checkAck: success.id });
+  await expect(page.getByText("Update v0.1.2 is available.")).toBeVisible();
+  await expect(check).toBeEnabled();
+
+  clearRequests();
+  await check.click();
+  await expect(page.getByRole("button", { name: "Checking…" })).toBeDisabled();
+  await expect.poll(() => fs.readdirSync(path.join(updaterDir, "in")).length).toBe(1);
+  const failure = onlyRequest();
+  expect(failure).toMatchObject({ action: "check" });
+
+  publish(null, { checkAck: failure.id, checkError: "Could not check for updates." });
+  await expect(page.getByRole("alert").filter({ hasText: "Could not check for updates." })).toBeVisible();
+  await expect(check).toBeEnabled();
+});
+
+test("manual check releases the button when its request stalls", async ({ page }) => {
+  await authenticate(page);
+  clearRequests();
+  publish(null);
+  await page.goto("/app/settings");
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await page.clock.install();
+  await page.route("**/api/updates", async (route) => {
+    if (route.request().method() === "POST") return;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Check for updates" }).click();
+  await expect(page.getByRole("button", { name: "Checking…" })).toBeDisabled();
+  await page.clock.runFor(45_001);
+  await expect(page.getByRole("alert").filter({ hasText: "The update check timed out." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+  expect(fs.readdirSync(path.join(updaterDir, "in"))).toHaveLength(0);
 });
 
 test("successful update preserves unsaved settings until reload is explicitly confirmed", async ({ page }) => {
@@ -167,6 +249,8 @@ test("settings explains an unavailable updater instead of offering a broken upda
   await expect(page.getByText("The Chibako updater is not responding.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Settings", exact: true })).not.toHaveAttribute("aria-describedby");
   await expect(page.getByRole("button", { name: /Update to/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Check for updates" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Update available/ })).toHaveCount(0);
 });
 
 test("needs-attention state blocks update actions in the notice and settings", async ({ page }) => {
@@ -189,5 +273,7 @@ test("needs-attention state blocks update actions in the notice and settings", a
   await page.goto("/app/settings");
   await page.getByRole("tab", { name: "Updates" }).click();
   await expect(page.getByRole("button", { name: "Update to v0.1.2" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Check for updates" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Update available/ })).toHaveCount(0);
   expect(fs.readdirSync(path.join(updaterDir, "in"))).toHaveLength(0);
 });

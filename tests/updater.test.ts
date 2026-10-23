@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { STATUS_STALE_MS, releaseManifestSchema, statusSchema, updateRequestSchema } from "../src/features/updates/protocol";
+import { STATUS_STALE_MS, checkRequestSchema, releaseManifestSchema, statusSchema, updateRequestSchema } from "../src/features/updates/protocol";
 import { writeFileAtomic } from "../updater/files";
 import { writePin } from "../updater/pin";
 import { acquireLock } from "../updater/lock";
@@ -262,6 +262,49 @@ test("request intake rejects forged, oversized, linked, replayed, and stale requ
   }
 });
 
+test("release discovery runs every 3 hours, and a manual check refetches without installing or replaying", async () => {
+  const { fixture } = await prepared();
+  const controller = new AbortController();
+  let now = 1_000_000;
+  let fetches = 0;
+  const seenAfterSleep: number[] = [];
+  const updater = new Updater(fixture.config, {
+    manifest: async () => { fetches += 1; return manifest; }, now: () => now, log: () => {},
+    sleep: async () => {
+      seenAfterSleep.push(fetches);
+      now += 60 * 60_000;
+      if (seenAfterSleep.length === 4) controller.abort();
+    },
+  });
+  try {
+    await updater.run(controller.signal);
+    // Startup check, nothing at +1h/+2h, the next at +3h.
+    assert.deepEqual(seenAfterSleep, [1, 1, 1, 2]);
+
+    const checkId = "66666666-6666-4666-8666-666666666666";
+    const inbox = join(fixture.dirs.control, "channel", "in");
+    const sendCheck = () => writeFileSync(join(inbox, `request-${checkId}.json`), JSON.stringify({ v: 1, id: checkId, action: "check" }));
+    const pulls = () => fixture.calls().filter((call) => call.startsWith("pull ")).length;
+    assert.equal(status(fixture).checkAck ?? null, null);
+    sendCheck();
+    await updater.tick();
+    assert.equal(fetches, 3, "manual check fetched the manifest");
+    assert.equal(status(fixture).checkAck, checkId);
+    assert.equal(status(fixture).operation, null, "a check never starts an operation");
+    assert.equal(pulls(), 0);
+    assert.equal(fixture.pin(), OLD_REF);
+    assert.deepEqual(readdirSync(inbox), []);
+    sendCheck(); // replay
+    await updater.tick();
+    assert.equal(fetches, 3, "a replayed check id fetches nothing");
+    writeFileSync(join(inbox, "request-77777777-7777-4777-8777-777777777777.json"), JSON.stringify({ v: 1, id: "77777777-7777-4777-8777-777777777777", action: "check", version: "0.1.2" }));
+    await updater.tick();
+    assert.equal(fetches, 3, "a check with extra fields is rejected");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("only one operation runs at a time across processes: a held lock leaves the request queued", async () => {
   const { fixture, updater } = await prepared();
   try {
@@ -307,6 +350,7 @@ test("release manifests and requests are validated strictly", () => {
     { ...manifest, extra: true },
   ]) assert.equal(releaseManifestSchema.safeParse(bad).success, false);
   assert.equal(updateRequestSchema.safeParse({ v: 1, id: REQUEST_ID, action: "update", version: "0.1.2; rm -rf /" }).success, false);
+  assert.equal(checkRequestSchema.safeParse({ v: 1, id: REQUEST_ID, action: "check", version: "0.1.2" }).success, false);
   assert.equal(updateRequestSchema.safeParse({ v: 1, id: REQUEST_ID, action: "update", version: "0.1.2", digest: NEW_DIGEST }).success, false);
 });
 

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { UPDATER_PROTOCOL, MAX_REQUEST_BYTES, REQUEST_FILE, TERMINAL_PHASES, compareVersions, updateRequestSchema, type ReleaseManifest, type UpdaterStatus } from "../src/features/updates/protocol";
+import { UPDATER_PROTOCOL, MAX_REQUEST_BYTES, REQUEST_FILE, TERMINAL_PHASES, compareVersions, inboxRequestSchema, type ReleaseManifest, type UpdaterStatus } from "../src/features/updates/protocol";
 import type { UpdaterConfig } from "./config";
 import { Docker } from "./docker";
 import { readBounded, writeFileAtomic } from "./files";
@@ -8,7 +8,7 @@ import { acquireLock } from "./lock";
 import { advance, beginOperation, type Context } from "./operation";
 import { StateStore, type UpdaterState } from "./state";
 
-const CHECK_INTERVAL_MS = 6 * 60 * 60_000;
+const CHECK_INTERVAL_MS = 3 * 60 * 60_000;
 const MAX_SCANNED = 64;
 
 export interface UpdaterDeps {
@@ -25,6 +25,7 @@ export class Updater {
   private checkedAt: number | null = null;
   private checkError: string | null = null;
   private currentVersion: string | null = null;
+  private checkAck: string | null = null;
 
   constructor(private config: UpdaterConfig, private deps: UpdaterDeps) {
     const sleep = deps.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -48,6 +49,7 @@ export class Updater {
       currentVersion: this.currentVersion,
       latest: this.latest ? { version: this.latest.version, notes: this.latest.notes, publishedAt: this.latest.publishedAt, url: this.latest.url } : null,
       checkError: this.checkError,
+      ...(this.checkAck ? { checkAck: this.checkAck } : {}), // omitted until used so an older app still parses the status
       operation: op ? { id: op.id, phase: op.phase, from: op.from as string | null, to: op.to, updatedAt: op.updatedAt, error: op.error } : null,
     };
     fs.mkdirSync(this.outbox, { recursive: true });
@@ -55,7 +57,7 @@ export class Updater {
   }
 
   /** Refresh what is running and what is available. A newer release never installs itself. */
-  async check(): Promise<void> {
+  async check(ack?: string): Promise<void> {
     this.checkedAt = this.ctx.now();
     try {
       const running = await this.ctx.docker.runningImage().catch(() => null);
@@ -72,6 +74,7 @@ export class Updater {
       this.checkError = "Could not check for updates.";
       this.ctx.log(`check failed: ${error instanceof Error ? error.message : error}`);
     }
+    if (ack) this.checkAck = ack;
     this.publish();
   }
 
@@ -80,10 +83,11 @@ export class Updater {
    * and records every request id as seen; that is the only state write here, so callers must hold the
    * operation lock. A sweep alone never touches the authoritative state.
    */
-  private scanInbox(consume: boolean): string | null {
+  private scanInbox(consume: boolean): { version: string | null; check: string | null } | null {
     if (!fs.existsSync(this.inbox)) return null;
     let state: UpdaterState | null = null;
     let accepted: string | null = null;
+    let check: string | null = null;
     for (const name of fs.readdirSync(this.inbox).slice(0, MAX_SCANNED)) {
       const file = path.join(this.inbox, name);
       if (name.startsWith(".tmp-")) {
@@ -97,14 +101,15 @@ export class Updater {
       fs.rmSync(file, { force: true });
       if (text === null) continue;
       let request;
-      try { request = updateRequestSchema.parse(JSON.parse(text)); } catch { continue; }
+      try { request = inboxRequestSchema.parse(JSON.parse(text)); } catch { continue; }
       state ??= this.ctx.store.load();
       if (name !== `request-${request.id}.json` || state.seen.includes(request.id)) continue; // replay or mismatch
       state.seen = [...state.seen, request.id].slice(-64);
-      if (!accepted) accepted = request.version;
+      if (request.action === "check") check ??= request.id;
+      else accepted ??= request.version;
     }
     if (state) this.ctx.store.save(state);
-    return accepted;
+    return { version: accepted, check };
   }
 
   private hasRequest(): boolean {
@@ -123,8 +128,11 @@ export class Updater {
     if (!lock) { this.ctx.log("another deployment holds the lock"); return; } // requests stay queued
     try {
       if (!this.isPending()) { // re-read under the lock: an operator apply may have finished meanwhile
-        const version = this.scanInbox(true);
-        if (!version) return;
+        const { version, check } = this.scanInbox(true) ?? { version: null, check: null };
+        if (!version) {
+          if (check) await this.check(check); // manual check: refresh only, never installs
+          return;
+        }
         const manifest = await this.deps.manifest();
         if (manifest.version !== version || manifest.minUpdaterProtocol > UPDATER_PROTOCOL) {
           this.checkError = `Version ${version} is no longer the available update.`;

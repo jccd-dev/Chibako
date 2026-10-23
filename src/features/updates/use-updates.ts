@@ -7,6 +7,9 @@ const IDLE_POLL_MS = 5 * 60_000;
 const WATCH_POLL_MS = 15_000;
 const ACTIVE_POLL_MS = 2_000;
 const REQUEST_PICKUP_MS = 60_000;
+// Manifest fetch is capped at 15s and the updater polls every 2s; leave room for a held lock.
+const CHECK_WAIT_MS = 45_000;
+const CHECK_POLL_MS = 1_000;
 
 async function fetchView(signal: AbortSignal): Promise<UpdateView> {
   const response = await fetch("/api/updates", { cache: "no-store", signal });
@@ -62,6 +65,13 @@ function useUpdateController() {
   const bundleVersion = useRef<string | null>(null);
   const requestedAt = useRef(0);
   const sequence = useRef(0);
+  const [checking, setChecking] = useState(false);
+  const [checkMessage, setCheckMessage] = useState<string | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  // Bumped on unmount so an in-flight manual check stops without touching state.
+  const checkRun = useRef(0);
+  const checkingRef = useRef(false);
+  const checkController = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     const id = ++sequence.current;
@@ -170,11 +180,62 @@ function useUpdateController() {
     }
   }, [view, submitting]);
 
+  const checkForUpdates = useCallback(async () => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    const run = checkRun.current;
+    const live = () => run === checkRun.current;
+    const controller = new AbortController();
+    checkController.current = controller;
+    const timeout = setTimeout(() => controller.abort(), CHECK_WAIT_MS);
+    setChecking(true);
+    setCheckMessage(null);
+    setCheckError(null);
+    try {
+      const response = await fetch("/api/updates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check" }),
+        signal: controller.signal,
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string; requestId?: string } | null;
+      if (!response.ok || !body?.requestId) throw new Error(body?.error ?? "Could not check for updates.");
+      const deadline = Date.now() + CHECK_WAIT_MS;
+      while (live() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, CHECK_POLL_MS));
+        if (!live()) return;
+        const next = await fetchView(controller.signal).catch(() => null);
+        if (!live() || !next) continue;
+        if (next.state === "updating") throw new Error("An update is already in progress.");
+        if (next.checkAck !== body.requestId) continue;
+        sequence.current += 1;
+        setView(next);
+        if (next.message) throw new Error(next.message);
+        setCheckMessage(next.latest ? `Update v${next.latest.version} is available.` : "Chibako is up to date.");
+        return;
+      }
+      if (live()) throw new Error("The updater did not answer the check. Confirm its container is running and up to date; re-run the Chibako installer if it is older.");
+    } catch (e) {
+      if (live()) setCheckError(controller.signal.aborted ? "The update check timed out. Try again." : e instanceof Error ? e.message : "Could not check for updates.");
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      checkController.current = null;
+      checkingRef.current = false;
+      if (live()) setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    checkRun.current += 1;
+    checkController.current?.abort();
+  }, []);
+
   const dismissError = useCallback(() => setError(null), []);
   /** Loads the installed version; the owner decides when to discard unsaved work. */
   const reload = useCallback(() => window.location.reload(), []);
   const updating = target !== null || view?.state === "updating";
-  return { view, error, reconnecting, submitting, updating, target, pendingReload, startUpdate, dismissError, reload };
+  return { view, error, reconnecting, submitting, updating, target, pendingReload, startUpdate, dismissError, reload, checkForUpdates, checking, checkMessage, checkError };
 }
 
 const UpdatesContext = createContext<ReturnType<typeof useUpdateController> | null>(null);

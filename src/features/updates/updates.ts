@@ -43,7 +43,7 @@ function readStatus(dir: string): UpdaterStatus | null {
 }
 
 function view(partial: Partial<UpdateView> & Pick<UpdateView, "state">): UpdateView {
-  return { currentVersion: currentVersion(), latest: null, operation: null, message: null, ...partial };
+  return { currentVersion: currentVersion(), latest: null, operation: null, message: null, checkAck: null, ...partial };
 }
 
 export function getUpdateView(nowMs = Date.now()): UpdateView {
@@ -61,6 +61,7 @@ export function getUpdateView(nowMs = Date.now()): UpdateView {
   if (status.protocol !== UPDATER_PROTOCOL) {
     return view({ state: "unavailable", operation, message: "The updater is out of date. Re-run the Chibako installer to refresh it." });
   }
+  const checkAck = status.checkAck ?? null;
   const latest = status.latest;
   const available = latest && current && compareVersions(latest.version, current) > 0;
   return view({
@@ -68,7 +69,20 @@ export function getUpdateView(nowMs = Date.now()): UpdateView {
     latest: available ? latest : null,
     operation,
     message: status.checkError,
+    checkAck,
   });
+}
+
+function dropRequest(dir: string, body: { id: string; [key: string]: unknown }): { requestId: string } {
+  const inbox = path.join(dir, "in");
+  if (fs.readdirSync(inbox).some((name) => REQUEST_FILE.test(name))) throw new UpdateError("An update request is already waiting.");
+  const text = JSON.stringify(body);
+  if (Buffer.byteLength(text) > MAX_REQUEST_BYTES) throw new UpdateError("Request too large.", 400);
+  // Write then rename so the updater never reads a partial request.
+  const temp = path.join(inbox, `.tmp-${body.id}`);
+  fs.writeFileSync(temp, text, { flag: "wx", mode: 0o644 });
+  fs.renameSync(temp, path.join(inbox, `request-${body.id}.json`));
+  return { requestId: body.id };
 }
 
 /** Asks the updater to install exactly the release the owner saw. */
@@ -80,14 +94,17 @@ export function requestUpdate(version: string): { requestId: string } {
   if (current.state !== "available" || current.latest?.version !== parsed.data) {
     throw new UpdateError(current.state === "updating" ? "An update is already in progress." : "That version is no longer the available update. Refresh and try again.");
   }
-  const inbox = path.join(dir!, "in");
-  if (fs.readdirSync(inbox).some((name) => REQUEST_FILE.test(name))) throw new UpdateError("An update request is already waiting.");
   const id = randomUUID();
-  const body = JSON.stringify({ v: 1, id, action: "update", version: parsed.data });
-  if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) throw new UpdateError("Request too large.", 400);
-  // Write then rename so the updater never reads a partial request.
-  const temp = path.join(inbox, `.tmp-${id}`);
-  fs.writeFileSync(temp, body, { flag: "wx", mode: 0o644 });
-  fs.renameSync(temp, path.join(inbox, `request-${id}.json`));
-  return { requestId: id };
+  return dropRequest(dir!, { v: 1, id, action: "update", version: parsed.data });
+}
+
+/** Asks the updater to refetch the release manifest now. Never installs; the browser waits for `checkAck`. */
+export function requestCheck(): { requestId: string } {
+  const dir = channelDir();
+  const current = getUpdateView();
+  if (!dir || current.state === "unmanaged") throw new UpdateError("Updates are managed outside this installation.");
+  if (current.state === "updating") throw new UpdateError("An update is already in progress.");
+  if (current.state === "unavailable") throw new UpdateError(current.message ?? "The Chibako updater is not responding.");
+  if (current.operation?.phase === "needs_attention") throw new UpdateError("The updater needs attention. Follow the recovery steps first.");
+  return dropRequest(dir, { v: 1, id: randomUUID(), action: "check" });
 }

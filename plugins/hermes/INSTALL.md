@@ -41,7 +41,7 @@ directories. Install only one Chibako package per runtime profile; replace/disab
 package through the plugin manager before using a new one, rather than loading both.
 
 Maintainers regenerate `plugins/` with `npm run publish:memory-plugins` after
-changing the runner, skills or manifest; `tests/automatic-memory-package.test.ts`
+changing the runner, skills or manifest; `tests/automatic-memory/automatic-memory-package.test.ts`
 fails when the committed files differ from a fresh build. `npm run
 build:memory-plugins` still writes `dist/plugins/chibako-<runtime>-<version>.tar.gz`
 archives for offline installs: extract one to a stable directory and add that path

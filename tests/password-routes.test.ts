@@ -188,6 +188,17 @@ test("setup, login, password change, and session invalidation preserve route con
     assert.equal((await postUpdate("x".repeat(400), sameOrigin)).status, 413);
     assert.equal((await postUpdate({ version: "0.1.9" }, sameOrigin)).status, 409, "stale version is not queued");
     assert.deepEqual(readdirSync(join(updaterDir, "in")), [], "denied and malformed requests wrote nothing");
+    assert.equal((await postUpdate({ action: "check" }, { Authorization: `Bearer ${writeKey}`, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" })).status, 401, "bearer callers cannot trigger checks");
+    assert.equal((await postUpdate({ action: "check" }, { ...sameOrigin, "Sec-Fetch-Site": "cross-site" })).status, 403);
+    assert.equal((await postUpdate({ action: "check", version: "0.1.2" }, sameOrigin)).status, 400);
+    assert.equal((await postUpdate({ action: "install" }, sameOrigin)).status, 400);
+    assert.deepEqual(readdirSync(join(updaterDir, "in")), [], "denied and malformed checks wrote nothing");
+    const check = await postUpdate({ action: "check" }, sameOrigin);
+    assert.equal(check.status, 202);
+    const [checkFile] = readdirSync(join(updaterDir, "in"));
+    assert.deepEqual(JSON.parse(readFileSync(join(updaterDir, "in", checkFile), "utf8")), { v: 1, id: (await check.json()).requestId, action: "check" });
+    assert.equal((await postUpdate({ action: "check" }, sameOrigin)).status, 409, "only one request waits at a time");
+    rmSync(join(updaterDir, "in", checkFile));
     const queued = await postUpdate({ version: "0.1.2" }, sameOrigin);
     assert.equal(queued.status, 202);
     const files = readdirSync(join(updaterDir, "in"));

@@ -115,7 +115,7 @@ Evidence in the implementation:
 - The caller supplies a retrieval budget. Chibako estimates token use from
   character count and stops adding results near that budget
   ([implementation](../src/lib/recall.ts#L140),
-  [test](../tests/recall.test.ts#L7)).
+  [test](../tests/recall/recall.test.ts#L7)).
 - [`ingest_note`](../src/mcp/server.ts#L311) combines a note, its outlinks,
   backlinks, and the Knowledge Schema in one MCP call. This saves round trips;
   its full note body can still be large.

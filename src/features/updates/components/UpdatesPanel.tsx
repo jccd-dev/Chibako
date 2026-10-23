@@ -16,7 +16,10 @@ const STATE_TEXT = {
 
 /** Settings view of the update channel, including the unmanaged and unavailable states. */
 export function UpdatesPanel() {
-  const { view, error, reconnecting, submitting, updating, pendingReload, startUpdate } = useUpdates();
+  const {
+    view, error, reconnecting, submitting, updating, pendingReload, startUpdate,
+    checkForUpdates, checking, checkMessage, checkError,
+  } = useUpdates();
   const [open, setOpen] = useState(false);
   if (!view) return <p className="pt-3 text-sm text-muted-foreground">Checking…</p>;
 
@@ -25,6 +28,8 @@ export function UpdatesPanel() {
   const busy = updating || view.state === "updating";
   const latest = view.latest;
   const phaseLabel = phase ? UPDATE_PHASE_LABEL[phase] : undefined;
+  const canCheck = !checking && !submitting && !busy && !needsAttention
+    && view.state !== "unmanaged" && view.state !== "unavailable";
 
   return (
     <div className="flex max-w-lg flex-col gap-3 pt-3 text-sm">
@@ -38,6 +43,15 @@ export function UpdatesPanel() {
       </dl>
 
       <p className="text-muted-foreground">{view.message ?? STATE_TEXT[view.state]}</p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onClick={() => void checkForUpdates()} disabled={!canCheck}>
+          {checking ? "Checking…" : "Check for updates"}
+        </Button>
+        {checking && <span role="status" className="text-xs text-muted-foreground">Asking the updater for the latest release…</span>}
+      </div>
+      {checkMessage && <p role="status" className="text-muted-foreground">{checkMessage}</p>}
+      {checkError && <p role="alert" className="text-destructive">{checkError}</p>}
 
       {pendingReload && (
         <div role="status" className="rounded-md border border-border bg-muted/40 p-3">

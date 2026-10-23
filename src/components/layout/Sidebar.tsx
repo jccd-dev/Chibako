@@ -15,6 +15,7 @@ import { financeTabs, financeTabLabel, isFinanceTab, type FinanceTab } from "@/f
 import { cn } from "@/lib/utils";
 import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
 import { SettingsUpdateLink } from "@/features/updates/components/SettingsUpdateLink";
+import { UpdateRailButton } from "@/features/updates/components/UpdateRailButton";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { NoteLink } from "@/components/NoteLink";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -821,18 +822,21 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       >
         <IconWallet size={16} />
       </Link>
-      <Link
-        href="/app/agent"
-        aria-label="Agent access"
-        title="Agent access"
-        className={cn(
-          "mt-auto grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          pathname === "/app/agent" && "bg-accent text-foreground"
-        )}
-      >
-        <IconBot size={16} />
-      </Link>
-      <SettingsUpdateLink active={pathname === "/app/settings"} />
+      <div className="mt-auto flex flex-col items-center gap-1">
+        <UpdateRailButton />
+        <Link
+          href="/app/agent"
+          aria-label="Agent access"
+          title="Agent access"
+          className={cn(
+            "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+            pathname === "/app/agent" && "bg-accent text-foreground"
+          )}
+        >
+          <IconBot size={16} />
+        </Link>
+        <SettingsUpdateLink active={pathname === "/app/settings"} />
+      </div>
     </nav>
   );
 

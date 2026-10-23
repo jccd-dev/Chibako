@@ -65,21 +65,23 @@ Saving is activity-gated: the hook counts user turns and tool calls since the
 last verified save (defaults 4 and 10). Trivial turns need no checkpoint and no
 skip. Stage only when the hook says a checkpoint is due, once per request.
 
-The hook context supplies the actual session ID and an installed stage command.
-Use that command to pass a concise checkpoint envelope on stdin, for example a
-shell heredoc with a quoted delimiter. No payload file is required. The envelope
-has `session_id`, `hook_event_name: "Checkpoint"`, and either `checkpoint` plus
-`now_line`, or `skip: "No durable change"` when the work was not meaningful.
+The hook context supplies an installed stage command that already carries the
+session ID. Pipe a concise JSON payload to it on stdin, for example a shell
+heredoc with a quoted delimiter. No payload file is required. The payload is either
+`{"checkpoint": {"role": "overview", "subject": ..., "title": ..., "content": ...}, "now_line": ...}`
+or `{"skip": "No durable change"}` when the work was not meaningful. The command
+fills in the session, request ID and revision.
 
-A checkpoint uses a stable retry request_id, the `overview` role, the thread as
-subject, actual session_id, the thread's overview title, concise content and
-expected_revision. `now_line` is plain status text for that thread (one line, at most 140
-characters, no brackets); the runtime renders and upserts `- [[Thread]] — status`
-in "Now". The thread title must not contain `[`, `]` or `|`. Create with null revision; read and merge
-before updates. Overview content includes objective, decisions, evidence,
-unresolved work and next action. Keep implementation, verification, commit and
-deployment statuses separate. Preference writes require an explicit confirmation
-source and scope. Never stage secrets or transcripts.
+The checkpoint uses the `overview` role, the thread as subject, the thread's
+overview title and concise content. `now_line` is plain status text for that thread
+(one line, at most 140 characters, no brackets); the runtime renders and upserts
+`- [[Thread]] — status` in "Now". The thread title must not contain `[`, `]` or `|`.
+A new thread needs nothing more. If the thread already exists, staging is rejected
+with its current revision: read it, merge your update, and restage with
+`"expected_revision": "<revision>"` in the checkpoint. Overview content includes
+objective, decisions, evidence, unresolved work and next action. Keep implementation,
+verification, commit and deployment statuses separate. Preference writes require an
+explicit confirmation source and scope. Never stage secrets or transcripts.
 
 Staged means privately retained. Only a validated save receipt establishes saving.
 An outage retains the pending checkpoint under the same identity. A conflict needs
