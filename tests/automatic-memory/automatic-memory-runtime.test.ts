@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runMemoryEvent, type HookInput, type MemoryCall } from "../../scripts/memory/runtime";
 import { MemoryClientError } from "../../scripts/memory/client-error";
+import { withPrivateLock } from "../../scripts/memory/private-files";
 
 async function withPrivateDirectory<T>(run: (directory: string) => Promise<T>): Promise<T> {
   const directory = await mkdtemp(join(tmpdir(), "chibako-memory-runtime-"));
@@ -429,4 +431,16 @@ test("explicit finish can resolve a pending save while retaining its private con
   offline = false;
   assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") })).pending, false);
   assert.equal((await readState(directory)).pending, undefined);
+}));
+
+test("a lock left by a dead hook is reclaimed, while a live holder still reports busy", async () => withPrivateDirectory(async (directory) => {
+  const file = join(directory, "profile.lock");
+  const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"]).stdout.toString();
+  await writeFile(file, dead, { mode: 0o600 });
+  assert.equal(await withPrivateLock(file, async () => "ran"), "ran");
+  await assert.rejects(stat(file), { code: "ENOENT" }, "the reclaimed lock is released");
+  await writeFile(file, String(process.pid), { mode: 0o600 });
+  await assert.rejects(withPrivateLock(file, async () => "ran"), MemoryClientError);
+  await utimes(file, new Date(0), new Date(0));
+  assert.equal(await withPrivateLock(file, async () => "ran"), "ran", "an expired lock is reclaimed even when its PID is live");
 }));

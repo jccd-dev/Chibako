@@ -175,9 +175,10 @@ Hermes instead gets a "checkpoint due" note on its next `pre_llm_call` (it also 
 automatically declares work complete. Compaction
 and interrupt hooks can only flush data already staged; they cannot summarize lost
 context. A crash can lose unstaged work. State locks prevent concurrent hooks on
-one host; server transactions coordinate different hosts. A crash can leave a `.lock`
-file: stop the associated runtime process, verify it is no longer running, then
-remove only that stale lock before retrying. No background daemon is installed.
+one session; separate sessions and runtimes run independently, and server transactions
+coordinate different hosts. A lock records its holder's PID. A later hook reclaims it once
+that process has exited or the lock is older than two minutes, so a crashed or timed-out
+hook does not block later events. No background daemon is installed.
 
 Metrics on stderr report MCP calls and elapsed milliseconds without checkpoint
 content or credentials. Added model usage/context tokens and summary quality still

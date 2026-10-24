@@ -6,7 +6,7 @@ import { z } from "zod";
 import { runMemoryEvent } from "./memory/runtime";
 import { connectMemory } from "./memory/connection";
 import { profileDirectory, readProfile } from "./memory/profile";
-import { privateDirectory, withPrivateLock } from "./memory/private-files";
+import { privateDirectory } from "./memory/private-files";
 import { runControl } from "./memory/controls";
 
 const inputSchema = z.object({
@@ -70,14 +70,10 @@ async function main(): Promise<void> {
       const flushed = staged?.checkpoint || staged?.finish ? await runMemoryEvent({ ...options, input: { ...input, hook_event_name: "Checkpoint" } }) : {};
       process.stdout.write(JSON.stringify({ ...result, ...flushed }) + "\n");
     };
-    if (profile) {
-      await privateDirectory(directory);
-      await withPrivateLock(path.join(directory, "profile.lock"), async () => {
-        const current = await readProfile(directory);
-        if (!current?.enabled || current.endpoint !== profile.endpoint || current.principal_id !== profile.principal_id || current.area !== profile.area || current.api_key !== profile.api_key) throw new Error("Profile changed; retry the event after setup finishes.");
-        await execute();
-      });
-    } else await execute();
+    // Events take only their per-session state lock: holding profile.lock across network calls made concurrent sessions fail as busy.
+    // Profile writes are atomic renames, so an event racing setup finishes with the profile it read.
+    if (profile) await privateDirectory(directory);
+    await execute();
   } finally {
     await connection.close();
     process.stderr.write(`memory metrics: calls=${connection.calls} elapsed_ms=${Date.now() - start}; model usage not measured\n`);
