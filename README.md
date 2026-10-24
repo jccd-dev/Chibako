@@ -371,8 +371,24 @@ npx skills add jccd-dev/Chibako --skill chibako-memory
 Reload your agent's skills, then ask it to use `chibako-memory`. This standalone
 skill does not install hooks or configure MCP. Use `notes:read` and `schema:read`;
 add `notes:write` only if you authorize ordinary note saves. The automatic plugin
-already includes both memory and setup skills, so a separate skill install is
+already includes memory, setup, and cleanup skills, so a separate skill install is
 unnecessary. Remove duplicate manual memory hooks before enabling the plugin.
+
+### Review old memory on demand
+
+Invoke `$chibako-memory-cleanup` with a project, topic, or folder, for example:
+`$chibako-memory-cleanup review Chibako session leftovers and duplicate decisions`.
+It proposes what to keep, merge, or trash; approve concrete changes before they
+are applied. Observation deletion is permanent and needs explicit approval.
+The skill is explicit-only and is not called by lifecycle hooks. Routine session
+completion continues to clean up only its own checkpoint. For a standalone install:
+
+```bash
+npx skills add jccd-dev/Chibako --skill chibako-memory-cleanup
+```
+
+Review uses the existing read connection. Applying broader cleanup requires the
+appropriate Note-write permissions; restricted `memory:write` does not grant them.
 
 See [how agent memory works](docs/AGENT-MEMORY.md) for retrieval, saving, and limits.
 

@@ -142,6 +142,21 @@ test("manual check releases the button when its request stalls", async ({ page }
   expect(fs.readdirSync(path.join(updaterDir, "in"))).toHaveLength(0);
 });
 
+test("manual check reports an updater that never acknowledges it", async ({ page }) => {
+  await authenticate(page);
+  clearRequests();
+  publish(null);
+  await page.goto("/app/settings");
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await page.clock.install();
+  await page.getByRole("button", { name: "Check for updates" }).click();
+  await expect.poll(() => fs.readdirSync(path.join(updaterDir, "in")).length).toBe(1);
+  clearRequests(); // an updater that predates manual checks consumes the request without answering
+  await page.clock.runFor(46_000);
+  await expect(page.getByRole("alert").filter({ hasText: "The updater did not answer the check." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+});
+
 test("successful update preserves unsaved settings until reload is explicitly confirmed", async ({ page }) => {
   await authenticate(page);
   for (const name of fs.readdirSync(path.join(updaterDir, "in"))) fs.rmSync(path.join(updaterDir, "in", name));

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Chibako Memory"
+  short_description: "Recall and preserve shared Chibako knowledge"
+  default_prompt: "Use $chibako-memory to retrieve relevant context for this task and preserve durable knowledge when authorized."
+policy:
+  allow_implicit_invocation: true

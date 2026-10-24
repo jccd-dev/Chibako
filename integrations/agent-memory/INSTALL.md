@@ -16,8 +16,9 @@ only what that agent needs. Setup checks the required scopes through
 ## Install the package
 
 The committed `plugins/<runtime>/` directories are the installable packages. Each
-contains a compiled runner, lifecycle hooks, both `chibako-memory` and
-`chibako-memory-setup` skills, and native plugin definitions; the web
+contains a compiled runner, lifecycle hooks, the `chibako-memory`,
+`chibako-memory-setup`, and explicit-only `chibako-memory-cleanup` skills,
+and native plugin definitions; the web
 application, database bindings, tsx and node_modules are not required on the client.
 
 | Runtime | Install |

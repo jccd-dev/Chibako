@@ -25,9 +25,10 @@ export async function buildMemoryPlugins(output = join(root, "dist/plugins"), { 
     await cp(join(root, "LICENSE"), join(directory, "LICENSE"));
     await cp(join(root, "integrations/agent-memory/INSTALL.md"), join(directory, "INSTALL.md"));
     await writeFile(join(directory, "mcp.json"), json({ mcpServers: {} }));
-    for (const name of ["chibako-memory", "chibako-memory-setup"]) {
+    for (const name of ["chibako-memory", "chibako-memory-setup", "chibako-memory-cleanup"]) {
       const skillDirectory = join(directory, "skills", name);
       await mkdir(skillDirectory, { recursive: true });
+      await cp(join(root, "skills", name), skillDirectory, { recursive: true });
       const content = await readFile(join(root, "skills", name, "SKILL.md"), "utf8");
       const pluginRoot = runtime === "codex" ? '${PLUGIN_ROOT}' : runtime === "claude" ? '${CLAUDE_PLUGIN_ROOT}' : '${CHIBAKO_PLUGIN_ROOT}';
       const instructions = runtime === "hermes" ? "Before showing a command, resolve this installed skill file to its absolute path. Its plugin root is two directories above the skill directory. Show an initial terminal line exporting CHIBAKO_PLUGIN_ROOT to that quoted absolute root, then show the runner command on the next line; do not derive it from the current project.\n\n" : "";

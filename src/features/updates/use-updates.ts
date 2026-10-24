@@ -216,7 +216,9 @@ function useUpdateController() {
       }
       if (live()) throw new Error("The updater did not answer the check. Confirm its container is running and up to date; re-run the Chibako installer if it is older.");
     } catch (e) {
-      if (live()) setCheckError(controller.signal.aborted ? "The update check timed out. Try again." : e instanceof Error ? e.message : "Could not check for updates.");
+      // Only an aborted request is a timeout; the abort timer also fires as the wait loop gives up, so check the error, not the signal.
+      const aborted = e instanceof DOMException && e.name === "AbortError";
+      if (live()) setCheckError(aborted ? "The update check timed out. Try again." : e instanceof Error ? e.message : "Could not check for updates.");
     } finally {
       clearTimeout(timeout);
       controller.abort();

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { load } from "js-yaml";
 
 const root = process.cwd();
 
@@ -40,6 +41,14 @@ test("memory packages run outside checkout without dependencies or configured cr
       assert.deepEqual(JSON.parse(await readFile(path.join(extracted, "mcp.json"), "utf8")), { mcpServers: {} });
       const skill = await readFile(path.join(extracted, "skills/chibako-memory-setup/SKILL.md"), "utf8");
       assert.doesNotMatch(skill, /\{\{MEMORY_RUNNER\}\}|\{\{RUNTIME\}\}/);
+      const cleanup = await readFile(path.join(extracted, "skills/chibako-memory-cleanup/SKILL.md"), "utf8");
+      const header = cleanup.match(/^---\n([\s\S]*?)\n---/);
+      assert.ok(header);
+      const frontmatter = load(header[1]);
+      assert.ok(frontmatter && typeof frontmatter === "object" && "disable-model-invocation" in frontmatter);
+      assert.equal(frontmatter["disable-model-invocation"], true);
+      const policy = await readFile(path.join(extracted, "skills/chibako-memory-cleanup/agents/openai.yaml"), "utf8");
+      assert.deepEqual(load(policy), { policy: { allow_implicit_invocation: false } });
       if (runtime === "hermes") {
         const native = await readFile(path.join(extracted, "plugin.yaml"), "utf8");
         assert.match(native, /provides_hooks:\n  - pre_llm_call/);
@@ -55,7 +64,7 @@ class Context:
 c=Context()
 m.register(c)
 assert len(c.hooks)==6
-assert len(c.skills)==2
+assert set(c.skills)=={'chibako-memory', 'chibako-memory-setup', 'chibako-memory-cleanup'}
 assert all(p.exists() for p in c.skills.values())
 assert c.hooks['pre_llm_call'](session_id='fixture', user_message='hello', conversation_history=['private transcript']) == {}
 assert c.hooks['agent_loop_stopped'](session_key='opaque-route') is None
