@@ -1,7 +1,9 @@
 # Automatic agent memory
 
-The Chibako plugin bundles a standalone Node.js runner, lifecycle hooks, and two
-skills: `chibako-memory` and `chibako-memory-setup`. Install it through your
+The Chibako plugin bundles a standalone Node.js runner, lifecycle hooks, and three
+skills: `chibako-memory`, `chibako-memory-setup`, and the explicit-only
+`chibako-memory-cleanup`. Cleanup reviews run only when the user invokes the
+skill, independently of automatic session checkpoint disposal. Install it through your
 runtime's plugin manager, then configure the connection privately in your terminal.
 
 Start with [INSTALL.md](INSTALL.md) for Claude Code, Codex, and Hermes installation,

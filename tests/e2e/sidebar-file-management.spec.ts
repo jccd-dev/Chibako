@@ -294,3 +294,15 @@ test("opening a nested note reveals it and Collapse folders closes the tree", as
   await sidebar.getByRole("button", { name: "Collapse folders" }).click();
   await expect(sidebar.getByRole("button", { name: outer, exact: true })).toHaveAttribute("aria-expanded", "false");
 });
+
+test("Collapse folders stays reachable after scrolling a long file tree", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  for (let i = 0; i < 40; i++) await createNote(page.request, `Scroll ${stamp} ${i}`);
+  await page.goto("/app");
+
+  const tree = page.getByRole("navigation", { name: "Files and folders" });
+  await expect(tree.getByRole("link", { name: `Scroll ${stamp} 39`, exact: true })).toBeAttached();
+  await tree.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect(tree.getByRole("button", { name: "Collapse folders" })).toBeInViewport();
+});

@@ -62,8 +62,11 @@ sequenceDiagram
 
 The installable [`chibako-memory`](../skills/chibako-memory/SKILL.md) skill
 teaches compatible agents this workflow. The standalone skill requires a configured
-Chibako MCP connection. The automatic plugin bundles both this skill and
-`chibako-memory-setup`, plus lifecycle hooks. Follow the
+Chibako MCP connection. The automatic plugin bundles this skill,
+`chibako-memory-setup`, and the explicit-only
+[`chibako-memory-cleanup`](../skills/chibako-memory-cleanup/SKILL.md), plus lifecycle
+hooks. Cleanup reviews old memory within a user-selected scope and applies
+authorized changes; lifecycle hooks never invoke it. Follow the
 [installation guide](../integrations/agent-memory/INSTALL.md) to connect it.
 
 ## Automatic memory with hooks

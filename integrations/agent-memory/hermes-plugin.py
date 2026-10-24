@@ -40,5 +40,5 @@ def _callback(event):
 def register(ctx):
     for event in ("pre_llm_call", "post_tool_call", "pre_verify", "on_session_end", "post_compaction", "agent_loop_stopped"):
         ctx.register_hook(event, _callback(event))
-    for name in ("chibako-memory", "chibako-memory-setup"):
+    for name in ("chibako-memory", "chibako-memory-setup", "chibako-memory-cleanup"):
         ctx.register_skill(name, _PLUGIN_ROOT / "skills" / name / "SKILL.md")

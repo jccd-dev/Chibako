@@ -31,7 +31,7 @@ test("sidebar drops files into root space and open folder contents", async ({ pa
   await page.goto(`/app/note/${note.id}`);
   const sidebar = page.getByRole("navigation", { name: "Files and folders" });
   const folderButton = sidebar.getByRole("button", { name: "Projects", exact: true });
-  await folderButton.click();
+  // Opening a nested note reveals its folder.
   await expect(folderButton).toHaveAttribute("aria-expanded", "true");
 
   const rootScope = sidebar.locator("xpath=./div").last();

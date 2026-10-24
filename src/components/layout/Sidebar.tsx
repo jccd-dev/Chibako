@@ -635,8 +635,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
         {notes.some(n => n.is_pinned) && <details><summary className="tree-item">Pinned</summary>{notes.filter(n => n.is_pinned).map(noteRow)}</details>}
         <details><summary className="tree-item">Recent</summary>{[...notes].sort((a,b) => b.updated_at - a.updated_at).slice(0,5).map(noteRow)}</details>
-        <div ref={treeRef} {...dropProps("")} className="min-h-16 flex-1" onClick={e => { if (e.target === e.currentTarget) { clearSelection(); setSelectedFolder(null); } }}>
-          <div className="group/sidebar-row my-1 flex items-center">
+        <div ref={treeRef} {...dropProps("")} className="min-h-16 shrink-0 grow" onClick={e => { if (e.target === e.currentTarget) { clearSelection(); setSelectedFolder(null); } }}>
+          <div className="group/sidebar-row sticky top-0 z-10 my-1 flex items-center bg-sidebar">
             <button type="button" aria-pressed={selectedFolder === ""} onClick={() => { setSelectedFolder(""); clearSelection(); }}
               className={cn("tree-item min-w-0 flex-1", (dropTarget === "" || selectedFolder === "") && "bg-accent", dropTarget === "" && "ring-1 ring-primary")}>
               <IconFolder size={14} />Files
@@ -850,7 +850,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   return <>
     {mobile ? (
       <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
-        <SheetContent side="left" className="w-72 p-0">
+        <SheetContent side="left" className="w-72 bg-sidebar p-0">
           <SheetTitle className="sr-only">Files and folders</SheetTitle>
           <div className="flex h-full flex-col pt-8">
             {filePanel}
