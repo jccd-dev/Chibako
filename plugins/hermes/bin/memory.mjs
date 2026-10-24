@@ -27027,7 +27027,7 @@ function date4(params) {
 
 // scripts/memory/runtime.ts
 import { createHash, randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir2, open as open3, readFile as readFile2, rename as rename2, stat, unlink as unlink2 } from "node:fs/promises";
+import { mkdir as mkdir2, open as open3, readFile as readFile2, rename as rename2, stat } from "node:fs/promises";
 import path3 from "node:path";
 
 // src/features/memory/types.ts
@@ -27065,8 +27065,106 @@ var sessionMemorySchema = external_exports.discriminatedUnion("action", [
   }).strict()
 ]);
 
-// scripts/memory/session-stage.ts
+// scripts/memory/private-files.ts
+import { mkdir, lstat, open as open2, readFile, rename, unlink } from "node:fs/promises";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+async function privateDirectory(directory) {
+  if (!path.isAbsolute(directory)) throw new MemoryClientError("Private data path must be absolute.");
+  await mkdir(directory, { recursive: true, mode: 448 });
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || info.mode & 63) throw new MemoryClientError("Private data directory must be owned by this user with mode 0700.");
+}
+async function readOptional(file2) {
+  try {
+    const info = await lstat(file2);
+    if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.()) throw new MemoryClientError("Refusing a non-owned file or symlink.");
+    if (info.size > 2e6) throw new MemoryClientError("Configuration or state exceeds size limit.");
+    return await readFile(file2, "utf8");
+  } catch (error62) {
+    if (error62 && typeof error62 === "object" && "code" in error62 && error62.code === "ENOENT") return null;
+    throw error62;
+  }
+}
+async function atomicPrivateWrite(file2, value) {
+  const temporary = `${file2}.${randomUUID()}.tmp`;
+  const handle = await open2(temporary, "wx", 384);
+  try {
+    await handle.writeFile(value);
+    await handle.sync();
+    await handle.close();
+    await rename(temporary, file2);
+  } catch (error62) {
+    await handle.close().catch(() => {
+    });
+    await unlink(temporary).catch(() => {
+    });
+    throw error62;
+  }
+}
+var busy = "Memory profile is busy or locked. Retry after its operation finishes; inspect stale locks only after the process stops.";
+var lockWaitMs = 2e3;
+var staleLockMs = 12e4;
+async function isStaleLock(file2) {
+  try {
+    const info = await lstat(file2);
+    if (!info.isFile() || info.uid !== process.getuid?.()) return false;
+    const age = Date.now() - info.mtimeMs;
+    if (age > staleLockMs) return true;
+    const pid = Number(await readFile(file2, "utf8"));
+    if (!Number.isInteger(pid) || pid <= 0) return age > lockWaitMs;
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error62) {
+      return error62 instanceof Error && "code" in error62 && error62.code === "ESRCH";
+    }
+  } catch {
+    return false;
+  }
+}
+async function acquirePrivateLock(file2) {
+  const deadline = Date.now() + lockWaitMs;
+  for (; ; ) {
+    try {
+      const handle = await open2(file2, "wx", 384);
+      try {
+        await handle.writeFile(String(process.pid));
+      } catch (error62) {
+        await handle.close().catch(() => {
+        });
+        await unlink(file2).catch(() => {
+        });
+        throw error62;
+      }
+      return async () => {
+        await handle.close();
+        await unlink(file2);
+      };
+    } catch (error62) {
+      if (!(error62 && typeof error62 === "object" && "code" in error62 && error62.code === "EEXIST")) throw error62;
+    }
+    if (await isStaleLock(file2)) {
+      await unlink(file2).catch(() => {
+      });
+      continue;
+    }
+    if (Date.now() >= deadline) throw new MemoryClientError(busy);
+    await delay(50);
+  }
+}
+async function withPrivateLock(file2, operation) {
+  const release = await acquirePrivateLock(file2);
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
+}
+
+// scripts/memory/session-stage.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
 var sessionMutationSchema = external_exports.discriminatedUnion("action", [sessionMemorySchema.options[1], sessionMemorySchema.options[2]]);
 var checkpointSchema = memoryWriteSchema.pick({ title: true, content: true }).extend({
   expected_revision: memoryWriteSchema.shape.expected_revision.optional(),
@@ -27094,7 +27192,7 @@ async function prepareSessionStage(call, runtime, session_id, raw, legacy) {
   const candidate = sessionMutationSchema.parse({
     runtime,
     session_id,
-    request_id: source.request_id ?? randomUUID(),
+    request_id: source.request_id ?? randomUUID2(),
     expected_revision: source.expected_revision ?? null,
     ...stage.checkpoint ? { action: "save", title: stage.checkpoint.title, content: stage.checkpoint.content, now_line: stage.now_line ?? "Work in progress" } : { action: "finish", ...stage.finish?.retain ? { retain: stage.finish.retain } : {} }
   });
@@ -27113,60 +27211,6 @@ async function prepareSessionStage(call, runtime, session_id, raw, legacy) {
 import { homedir } from "node:os";
 import path2 from "node:path";
 import { readdir } from "node:fs/promises";
-
-// scripts/memory/private-files.ts
-import { mkdir, lstat, open as open2, readFile, rename, unlink } from "node:fs/promises";
-import path from "node:path";
-import { randomUUID as randomUUID2 } from "node:crypto";
-async function privateDirectory(directory) {
-  if (!path.isAbsolute(directory)) throw new MemoryClientError("Private data path must be absolute.");
-  await mkdir(directory, { recursive: true, mode: 448 });
-  const info = await lstat(directory);
-  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || info.mode & 63) throw new MemoryClientError("Private data directory must be owned by this user with mode 0700.");
-}
-async function readOptional(file2) {
-  try {
-    const info = await lstat(file2);
-    if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.()) throw new MemoryClientError("Refusing a non-owned file or symlink.");
-    if (info.size > 2e6) throw new MemoryClientError("Configuration or state exceeds size limit.");
-    return await readFile(file2, "utf8");
-  } catch (error62) {
-    if (error62 && typeof error62 === "object" && "code" in error62 && error62.code === "ENOENT") return null;
-    throw error62;
-  }
-}
-async function atomicPrivateWrite(file2, value) {
-  const temporary = `${file2}.${randomUUID2()}.tmp`;
-  const handle = await open2(temporary, "wx", 384);
-  try {
-    await handle.writeFile(value);
-    await handle.sync();
-    await handle.close();
-    await rename(temporary, file2);
-  } catch (error62) {
-    await handle.close().catch(() => {
-    });
-    await unlink(temporary).catch(() => {
-    });
-    throw error62;
-  }
-}
-async function withPrivateLock(file2, operation) {
-  let handle;
-  try {
-    handle = await open2(file2, "wx", 384);
-  } catch {
-    throw new MemoryClientError("Memory profile is busy or locked. Retry after its operation finishes; inspect stale locks only after the process stops.");
-  }
-  try {
-    return await operation();
-  } finally {
-    await handle.close();
-    await unlink(file2);
-  }
-}
-
-// scripts/memory/profile.ts
 var defaultThresholds = { user_turns: 4, tool_calls: 10 };
 var profileSchema = external_exports.object({
   version: external_exports.literal(1),
@@ -27302,7 +27346,7 @@ async function runMemoryEvent(options) {
   if ((permissions.mode & 63) !== 0 || permissions.uid !== process.getuid?.()) throw new Error("Memory state directory must be private to the runtime user");
   const key = createHash("sha256").update(`${runtime}:${input2.session_id}`).digest("hex");
   const file2 = path3.join(directory, `${key}.json`);
-  const lock = await open3(`${file2}.lock`, "wx", 384);
+  const release = await acquirePrivateLock(`${file2}.lock`);
   try {
     let state = stateSchema.parse({});
     try {
@@ -27457,8 +27501,7 @@ ${JSON.stringify(await call("recall", { query: query.slice(0, 300), limit: 5, bu
     await save();
     return output2;
   } finally {
-    await lock.close();
-    await unlink2(`${file2}.lock`);
+    await release();
   }
 }
 
@@ -32168,13 +32211,13 @@ var StreamableHTTPClientTransport = class {
       this.onerror?.(new Error(`Maximum reconnection attempts (${maxRetries}) exceeded.`));
       return;
     }
-    const delay = this._getNextReconnectionDelay(attemptCount);
+    const delay2 = this._getNextReconnectionDelay(attemptCount);
     this._reconnectionTimeout = setTimeout(() => {
       this._startOrAuthSse(options).catch((error62) => {
         this.onerror?.(new Error(`Failed to reconnect SSE stream: ${error62 instanceof Error ? error62.message : String(error62)}`));
         this._scheduleReconnection(options, attemptCount + 1);
       });
-    }, delay);
+    }, delay2);
   }
   _handleSseStream(stream, options, isReconnectable) {
     if (!stream) {
@@ -32531,7 +32574,7 @@ import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 
 // scripts/memory/setup.ts
-import { mkdir as mkdir3, unlink as unlink3, mkdtemp, rm } from "node:fs/promises";
+import { mkdir as mkdir3, unlink as unlink2, mkdtemp, rm } from "node:fs/promises";
 import path5 from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -35742,7 +35785,7 @@ async function applySetup(preview) {
         await saveProfile(input2.directory, profile);
       } catch (error62) {
         if (await readOptional(hostFile) !== rendered.text) throw new MemoryClientError("Setup failed and host config changed concurrently; automatic rollback was refused. Review the selected host configuration.");
-        if (original === null) await unlink3(hostFile);
+        if (original === null) await unlink2(hostFile);
         else await atomicPrivateWrite(hostFile, original);
         throw error62;
       }
@@ -35969,14 +36012,8 @@ async function main() {
       const flushed = staged?.checkpoint || staged?.finish ? await runMemoryEvent({ ...options, input: { ...input2, hook_event_name: "Checkpoint" } }) : {};
       process.stdout.write(JSON.stringify({ ...result, ...flushed }) + "\n");
     };
-    if (profile) {
-      await privateDirectory(directory);
-      await withPrivateLock(path6.join(directory, "profile.lock"), async () => {
-        const current = await readProfile(directory);
-        if (!current?.enabled || current.endpoint !== profile.endpoint || current.principal_id !== profile.principal_id || current.area !== profile.area || current.api_key !== profile.api_key) throw new Error("Profile changed; retry the event after setup finishes.");
-        await execute();
-      });
-    } else await execute();
+    if (profile) await privateDirectory(directory);
+    await execute();
   } finally {
     await connection.close();
     process.stderr.write(`memory metrics: calls=${connection.calls} elapsed_ms=${Date.now() - start}; model usage not measured

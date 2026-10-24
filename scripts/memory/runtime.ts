@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { memoryWriteSchema } from "../../src/features/memory/types";
 import { MemoryClientError } from "./client-error";
+import { acquirePrivateLock } from "./private-files";
 import { prepareSessionStage, sessionMutationSchema } from "./session-stage";
 import { defaultThresholds, type ActivityThresholds } from "./profile";
 
@@ -76,8 +77,7 @@ export async function runMemoryEvent(options: {
   if ((permissions.mode & 0o077) !== 0 || permissions.uid !== process.getuid?.()) throw new Error("Memory state directory must be private to the runtime user");
   const key = createHash("sha256").update(`${runtime}:${input.session_id}`).digest("hex");
   const file = path.join(directory, `${key}.json`);
-  // shortcut: a crash leaves this lock; remove it only after confirming the process stopped.
-  const lock = await open(`${file}.lock`, "wx", 0o600);
+  const release = await acquirePrivateLock(`${file}.lock`);
   try {
     let state = stateSchema.parse({});
     try {
@@ -214,7 +214,6 @@ export async function runMemoryEvent(options: {
     await save();
     return output;
   } finally {
-    await lock.close();
-    await unlink(`${file}.lock`);
+    await release();
   }
 }
