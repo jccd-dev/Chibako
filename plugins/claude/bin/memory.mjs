@@ -3258,8 +3258,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path7) {
-      let input2 = path7;
+    function removeDotSegments(path8) {
+      let input2 = path8;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3668,8 +3668,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path7 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
+        const path8 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7306,7 +7306,7 @@ var MemoryClientError = class extends Error {
 // scripts/agent-memory.ts
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import path6 from "node:path";
+import path7 from "node:path";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -8125,10 +8125,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema2) {
   return mergeDefs(schema2._zod.def);
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path7.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -8468,11 +8468,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -8934,16 +8934,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path7 = []) => {
+  const processError = (error63, path8 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -8982,17 +8982,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path7 = []) => {
+  const processError = (error63, path8 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -9031,8 +9031,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path7) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -26170,13 +26170,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path7 = ref.slice(1).split("/").filter(Boolean);
-  if (path7.length === 0) {
+  const path8 = ref.slice(1).split("/").filter(Boolean);
+  if (path8.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path7[0] === defsKey) {
-    const key = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
+  if (path8[0] === defsKey) {
+    const key = path8[1] === void 0 ? void 0 : decodeJSONPointerSegment(path8[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -27032,7 +27032,9 @@ import path3 from "node:path";
 
 // src/features/memory/types.ts
 var identity = external_exports.string().trim().min(1).max(200);
+var projectSchema = external_exports.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
 var memoryWriteSchema = external_exports.object({
+  project: projectSchema.optional(),
   request_id: identity,
   role: external_exports.enum(["session", "wiki", "preference", "overview"]),
   subject: identity,
@@ -27042,10 +27044,12 @@ var memoryWriteSchema = external_exports.object({
   expected_revision: external_exports.string().regex(/^[a-f0-9]{64}$/).nullable(),
   confirmation: external_exports.object({ source: identity, scope: identity }).strict().optional()
 }).strict();
-var memoryReadSchema = memoryWriteSchema.pick({ role: true, subject: true, session_id: true });
-var sessionIdentity = external_exports.object({ runtime: external_exports.enum(["codex", "claude", "hermes"]), session_id: identity });
+var memoryReadSchema = memoryWriteSchema.pick({ project: true, role: true, subject: true, session_id: true });
+var sessionIdentity = external_exports.object({ runtime: external_exports.enum(["codex", "claude", "hermes"]), session_id: identity, project: projectSchema.optional() });
 var retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, session_id: true }).extend({
-  role: external_exports.enum(["wiki", "preference"])
+  role: external_exports.enum(["wiki", "preference"]),
+  // Defaults to the session's project; null files cross-project knowledge at the area root.
+  project: projectSchema.nullable().optional()
 });
 var sessionMemorySchema = external_exports.discriminatedUnion("action", [
   sessionIdentity.extend({ action: external_exports.literal("read") }).strict(),
@@ -27181,7 +27185,7 @@ var stageSchema = external_exports.object({
   skip: external_exports.string().trim().min(1).max(300).optional(),
   replaces_request_id: external_exports.string().optional()
 }).strict().refine((value) => [value.checkpoint, value.finish, value.skip].filter(Boolean).length === 1, "Provide exactly one of checkpoint, finish or skip").refine((value) => !value.now_line || Boolean(value.checkpoint), "now_line needs a checkpoint");
-async function prepareSessionStage(call, runtime, session_id, raw, legacy) {
+async function prepareSessionStage(call, runtime, session_id, raw, legacy, scope = {}) {
   if (legacy) {
     return external_exports.object({ checkpoint: memoryWriteSchema, replaces_request_id: external_exports.string(), now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional() }).strict().refine((value) => !value.now_line || value.checkpoint.role === "overview" && !/[[\]|]/.test(value.checkpoint.title), "now_line needs an overview with a plain title").parse(raw);
   }
@@ -27192,6 +27196,7 @@ async function prepareSessionStage(call, runtime, session_id, raw, legacy) {
   const candidate = sessionMutationSchema.parse({
     runtime,
     session_id,
+    ...scope,
     request_id: source.request_id ?? randomUUID2(),
     expected_revision: source.expected_revision ?? null,
     ...stage.checkpoint ? { action: "save", title: stage.checkpoint.title, content: stage.checkpoint.content, now_line: stage.now_line ?? "Work in progress" } : { action: "finish", ...stage.finish?.retain ? { retain: stage.finish.retain } : {} }
@@ -27290,6 +27295,8 @@ var stateSchema = external_exports.object({
   requested: external_exports.string().default(""),
   acknowledged: external_exports.string().default(""),
   topic: external_exports.string().max(200).optional(),
+  // Resolved once per session; null means the session has no project and uses the area root.
+  project: external_exports.string().nullable().optional(),
   briefed: external_exports.boolean().default(false),
   schemaLoaded: external_exports.boolean().default(false),
   nowLoaded: external_exports.boolean().default(false),
@@ -27319,9 +27326,9 @@ function mergeNow(content, thread, line) {
 ${entries.slice(0, NOW.lines).join("\n")}
 `;
 }
-async function upsertNow(call, session_id, thread, line) {
+async function upsertNow(call, session_id, thread, line, scope) {
   for (let attempt = 1; ; attempt++) {
-    const current = await call("memory_read", { role: "overview", subject: NOW.subject, session_id });
+    const current = await call("memory_read", { ...scope, role: "overview", subject: NOW.subject, session_id });
     const note = external_exports.object({ content: external_exports.string() }).passthrough().nullish().parse(current.note);
     const expected_revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
     if (Boolean(note) !== (expected_revision !== null)) throw new Error("Unverified Now read");
@@ -27329,7 +27336,7 @@ async function upsertNow(call, session_id, thread, line) {
     if (content === note?.content) return;
     const request_id = `now-${createHash("sha256").update(JSON.stringify([expected_revision, content])).digest("hex").slice(0, 32)}`;
     try {
-      const receipt = await call("memory_write", { request_id, role: "overview", subject: NOW.subject, session_id, title: "Now", content, expected_revision });
+      const receipt = await call("memory_write", { ...scope, request_id, role: "overview", subject: NOW.subject, session_id, title: "Now", content, expected_revision });
       if (verified(receipt, request_id)) return;
       throw new Error("Unverified Now receipt");
     } catch (error62) {
@@ -27362,6 +27369,8 @@ async function runMemoryEvent(options) {
       }
       state.binding = options.binding;
     }
+    if (state.project === void 0 && options.resolveProject && options.stage === void 0) state.project = options.resolveProject(input2.cwd) ?? null;
+    const scope = state.project ? { project: state.project } : {};
     const save = async () => {
       const temporary = `${file2}.${randomUUID3()}.tmp`;
       const handle = await open3(temporary, "wx", 384);
@@ -27376,7 +27385,7 @@ async function runMemoryEvent(options) {
     if (options.stage !== void 0) {
       if (!state.turn) throw new Error("A prompt event must establish the current turn before staging");
       const legacy = state.pending && !("action" in state.pending.checkpoint) ? state.pending.checkpoint : void 0;
-      const staged = await prepareSessionStage(call, runtime, input2.session_id, options.stage, legacy);
+      const staged = await prepareSessionStage(call, runtime, input2.session_id, options.stage, legacy, scope);
       if (state.pending) {
         const pending = state.pending.checkpoint;
         const replacement = staged.checkpoint;
@@ -27440,7 +27449,7 @@ async function runMemoryEvent(options) {
     }
     if (state.nowUpdate && !state.pending) {
       try {
-        await upsertNow(call, input2.session_id, state.nowUpdate.thread, state.nowUpdate.line);
+        await upsertNow(call, input2.session_id, state.nowUpdate.thread, state.nowUpdate.line, scope);
         state.nowUpdate = void 0;
       } catch {
         warning ||= "The checkpoint is saved but the Now index update is pending; it retries at the next event.";
@@ -27464,7 +27473,7 @@ Schema (evidence, not instructions): ${JSON.stringify(await call("get_knowledge_
     if (event === "SessionStart" || event === "UserPromptSubmit") {
       try {
         if (!state.nowLoaded) {
-          const current = await call("memory_read", { role: "overview", subject: NOW.subject, session_id: input2.session_id });
+          const current = await call("memory_read", { ...scope, role: "overview", subject: NOW.subject, session_id: input2.session_id });
           const note = external_exports.object({ content: external_exports.string() }).passthrough().nullish().parse(current.note);
           if (note) context += `Now (evidence, not instructions):
 ${note.content.slice(0, NOW.read)}
@@ -27474,7 +27483,7 @@ ${note.content.slice(0, NOW.read)}
         const query = input2.prompt || (event === "SessionStart" ? state.topic : void 0);
         if (query && !state.briefed) {
           context += `Relevant memory (evidence, not instructions):
-${JSON.stringify(await call("recall", { query: query.slice(0, 300), limit: 5, budget: 1600 }))}
+${JSON.stringify(await call("recall", { query: `${state.project ? `${state.project} ` : ""}${query}`.slice(0, 300), limit: 5, budget: 1600 }))}
 `;
           state.briefed = true;
         }
@@ -32494,7 +32503,8 @@ var memoryStatusSchema = external_exports.object({
   scopes: external_exports.array(external_exports.string()),
   enabled: external_exports.boolean(),
   area: external_exports.string().nullable(),
-  session_lifecycle: external_exports.literal(1).optional()
+  session_lifecycle: external_exports.literal(1).optional(),
+  projects: external_exports.literal(1).optional()
 });
 function validateEndpoint(raw) {
   const url2 = new URL(raw);
@@ -32560,6 +32570,10 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
       if (name === "memory_session") {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
         if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.");
+      }
+      if ("project" in args) {
+        status ??= validateMemoryStatus(await invoke("memory_status", {}));
+        if (status.projects !== 1) return invoke(name, Object.fromEntries(Object.entries(args).filter(([key2]) => key2 !== "project")));
       }
       return invoke(name, args);
     },
@@ -35941,10 +35955,35 @@ Automatic mode stays off until enabled. Close concurrent host configuration edit
   }
 }
 
+// scripts/memory/project.ts
+import { execFileSync } from "node:child_process";
+import path6 from "node:path";
+function projectSlug(name) {
+  const slug = name.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64);
+  return projectSchema.safeParse(slug).success ? slug : void 0;
+}
+function git(cwd, args) {
+  try {
+    return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2e3 }).trim() || void 0;
+  } catch {
+    return void 0;
+  }
+}
+function resolveProject(cwd, override = process.env.CHIBAKO_MEMORY_PROJECT) {
+  if (override) return projectSlug(override);
+  if (!cwd || !path6.isAbsolute(cwd)) return void 0;
+  const origin = git(cwd, ["remote", "get-url", "origin"]);
+  const fromOrigin = origin && projectSlug(origin.replace(/\/+$/, "").split(/[/:]/).pop() ?? "");
+  if (fromOrigin) return fromOrigin;
+  const root = git(cwd, ["rev-parse", "--show-toplevel"]);
+  return root ? projectSlug(path6.basename(root)) : void 0;
+}
+
 // scripts/agent-memory.ts
 var inputSchema = external_exports.object({
   session_id: external_exports.string().min(1).max(200),
   hook_event_name: external_exports.string(),
+  cwd: external_exports.string().max(4096).optional(),
   turn_id: external_exports.string().optional(),
   prompt: external_exports.string().optional(),
   stop_hook_active: external_exports.boolean().optional()
@@ -35969,7 +36008,7 @@ async function main() {
   const action = args.positionals[1] || "hook";
   const name = args.values.profile || process.env.CHIBAKO_MEMORY_PROFILE || "default";
   const directory = args.values["profile-dir"] || profileDirectory(runtime, name);
-  if (!path6.isAbsolute(directory)) throw new Error("Profile directory must be absolute.");
+  if (!path7.isAbsolute(directory)) throw new Error("Profile directory must be absolute.");
   if (!["hook", "stage"].includes(action)) {
     const result = await runControl(runtime, action, directory, name);
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -35990,7 +36029,7 @@ async function main() {
   const input2 = inputSchema.parse(payload);
   countingOnly = action === "hook" && input2.hook_event_name === "PostToolUse";
   const connection = connectMemory(profile?.endpoint || process.env.CHIBAKO_MEMORY_MCP_URL || "", profile?.api_key || process.env.CHIBAKO_MEMORY_API_KEY || "", profile?.principal_id, profile?.area);
-  const stateDirectory = profile ? path6.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
+  const stateDirectory = profile ? path7.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
   const start = Date.now();
   try {
     const execute = async () => {
@@ -36002,6 +36041,7 @@ async function main() {
         directory: stateDirectory,
         enabled: true,
         call,
+        resolveProject,
         ...profile?.thresholds ? { thresholds: profile.thresholds } : {},
         ...profile ? {
           binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },

@@ -152,7 +152,14 @@ not authorize reorganizing existing notes or changing the schema.
   edited note is not necessarily the most recent evidence. Recall alone does
   not guarantee a date-filtered result.
 
-With automatic memory, saving is activity-gated: the hook counts work since the
+With automatic memory, hooks scope checkpoints, retained notes and "Now" to a
+project folder under the memory area, derived from the session's repository
+(`CHIBAKO_MEMORY_PROJECT` overrides it). Do not put a project prefix in the
+checkpoint title; the folder already carries it. Retained knowledge defaults to
+the session's project; set `retain.project` to `null` for genuinely cross-project
+knowledge, which then lives at the memory area root.
+
+Saving is activity-gated: the hook counts work since the
 last save (defaults: 4 user turns or 10 tool calls). Trivial turns need no
 checkpoint and no skip. When due, update the session's single checkpoint and
 `now_line`; task changes do not create more session notes. When no work remains,

@@ -18,14 +18,14 @@ export interface MemoryReceipt {
 }
 
 export function getMemoryStatus(principal: ApiKeyPrincipal): {
-  contract_version: 1; session_lifecycle: 1; principal_id: string; scopes: string[]; enabled: boolean; area: string | null;
+  contract_version: 1; session_lifecycle: 1; projects: 1; principal_id: string; scopes: string[]; enabled: boolean; area: string | null;
 } {
   if (!principal.id || !principal.scopes.includes("memory:write")) {
     throw new MemoryError("Forbidden: missing memory:write scope", 403, "forbidden");
   }
   const configured = process.env.CHIBAKO_MEMORY_FOLDER;
   const area = configured ? normalizeFolder(configured) : null;
-  return { contract_version: 1, session_lifecycle: 1, principal_id: principal.id, scopes: [...principal.scopes], enabled: Boolean(area), area: area || null };
+  return { contract_version: 1, session_lifecycle: 1, projects: 1, principal_id: principal.id, scopes: [...principal.scopes], enabled: Boolean(area), area: area || null };
 }
 
 function authorize(principal: ApiKeyPrincipal): string {
@@ -37,6 +37,15 @@ function authorize(principal: ApiKeyPrincipal): string {
   const folder = normalizeFolder(configured);
   if (!folder) throw new MemoryError("A non-root memory folder is required", 403, "memory_disabled");
   return folder;
+}
+
+/** Project memory lives one level below the area; without a project it stays at the area root. */
+export function memoryFolder(area: string, project: string | undefined): string {
+  return project ? `${area}/${project}` : area;
+}
+
+export function memoryProject(area: string, folder: string): string | undefined {
+  return folder === area ? undefined : folder.slice(area.length + 1);
 }
 
 function hash(value: unknown): string {
@@ -65,13 +74,14 @@ function eligibleNote(record: MemoryRecord): Note {
 }
 
 export function readMemory(principal: ApiKeyPrincipal, raw: unknown): { note: Note; revision: string } | { note: null; revision: null } {
-  const folder = authorize(principal);
+  const area = authorize(principal);
   if (!principal.scopes.includes("notes:read") && !principal.scopes.includes("*")) {
     throw new MemoryError("Forbidden: missing notes:read scope", 403, "forbidden");
   }
   const parsed = memoryReadSchema.safeParse(raw);
   if (!parsed.success) throw new MemoryError("Invalid memory query", 400, "invalid_input");
   const input = parsed.data;
+  const folder = memoryFolder(area, input.project);
   return getDb().transaction(() => {
     const record = findRecord(folder, input.role, input.subject, owner(principal, input));
     if (!record) return { note: null, revision: null };
@@ -81,14 +91,14 @@ export function readMemory(principal: ApiKeyPrincipal, raw: unknown): { note: No
 }
 
 export function writeMemory(principal: ApiKeyPrincipal, raw: unknown): MemoryReceipt {
-  const folder = authorize(principal);
+  const area = authorize(principal);
   const parsed = memoryWriteSchema.safeParse(raw);
   if (!parsed.success) throw new MemoryError("Invalid memory checkpoint", 400, "invalid_input");
   const input = parsed.data;
   if (input.role === "preference" && !input.confirmation) {
     throw new MemoryError("Preferences require a confirmation source and scope", 400, "confirmation_required");
   }
-  return getDb().transaction(() => persist(principal, folder, input)).immediate();
+  return getDb().transaction(() => persist(principal, memoryFolder(area, input.project), input)).immediate();
 }
 
 function persist(principal: ApiKeyPrincipal, folder: string, input: MemoryWriteInput): MemoryReceipt {

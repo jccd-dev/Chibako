@@ -8,9 +8,10 @@ import { connectMemory } from "./memory/connection";
 import { profileDirectory, readProfile } from "./memory/profile";
 import { privateDirectory } from "./memory/private-files";
 import { runControl } from "./memory/controls";
+import { resolveProject } from "./memory/project";
 
 const inputSchema = z.object({
-  session_id: z.string().min(1).max(200), hook_event_name: z.string(),
+  session_id: z.string().min(1).max(200), hook_event_name: z.string(), cwd: z.string().max(4096).optional(),
   turn_id: z.string().optional(), prompt: z.string().optional(), stop_hook_active: z.boolean().optional(),
 }).passthrough();
 let countingOnly = false;
@@ -63,7 +64,7 @@ async function main(): Promise<void> {
     const execute = async () => {
       const call = connection.call;
       const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), finish: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
-      const options = { runtime, input, directory: stateDirectory, enabled: true, call, ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
+      const options = { runtime, input, directory: stateDirectory, enabled: true, call, resolveProject, ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
           stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)} --session ${quote(input.session_id)}` } : {}) };
       const result = await runMemoryEvent({ ...options, ...(staged ? { stage: staged } : {}) });
