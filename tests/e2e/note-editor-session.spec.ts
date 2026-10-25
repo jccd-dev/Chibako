@@ -291,7 +291,7 @@ test("rich editor survives edited note switches without rebuilding its DOM", asy
   expect(await editor.evaluate((node, previous) => node === previous, original)).toBe(true);
 });
 
-test("persistent rich editor rechecks HTML safety on every selected note", async ({ page }) => {
+test("persistent rich editor keeps HTML intact across selected notes", async ({ page }) => {
   await authenticate(page);
   await page.evaluate(() => localStorage.setItem("chibako_view", "write"));
   const safe = await createNote(page, "Rich safe document", "safe body");
@@ -300,8 +300,7 @@ test("persistent rich editor rechecks HTML safety on every selected note", async
   const editor = page.locator(".tiptap[contenteditable=true]");
   await expect(editor).toHaveText(safe.content);
   await page.getByRole("link", { name: unsafe.title, exact: true }).click();
-  await expect(page.getByText("Rich editing is off: this note has HTML that saving would drop.")).toBeVisible();
-  await expect(editor).toHaveCount(0);
+  await expect(editor.locator(".raw-html-block")).toHaveText(unsafe.content);
   await page.getByRole("link", { name: safe.title, exact: true }).click();
   await expect(editor).toHaveText(safe.content);
   const persisted = await page.request.get(`/api/notes/${unsafe.id}`);
