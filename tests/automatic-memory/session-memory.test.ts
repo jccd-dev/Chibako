@@ -132,3 +132,28 @@ test("manually trashed checkpoints can finish their Now cleanup without reviving
   const now = getNote(listNotes().find(note => note.title === "Now")!.id)!.content;
   assert.ok(!now.includes(`[[${title}]]`));
 });
+
+test("project sessions file checkpoint, Now and retained notes in their project folder and stay there", () => {
+  const session_id = "project-session";
+  const created = receipt(save({ session_id, project: "atlas", title: "Atlas work" }));
+  const note = getNote(created.note_id!)!;
+  assert.equal(note.folder, "Agent Memory/atlas");
+  const projectNow = listNotes().find(item => item.title === "Now" && item.folder === "Agent Memory/atlas")!;
+  assert.ok(getNote(projectNow.id)!.content.includes(`[[${note.title}]]`));
+  const rootNow = listNotes().find(item => item.title === "Now" && item.folder === "Agent Memory")!;
+  assert.ok(!getNote(rootNow.id)!.content.includes(`[[${note.title}]]`), "project work stays out of the root Now");
+
+  const moved = receipt(save({ session_id, project: "other", content: "Changed directory", expected_revision: read({ session_id }).revision }));
+  assert.equal(moved.note_id, created.note_id, "a project change mid-session keeps the same checkpoint");
+  assert.equal(getNote(moved.note_id!)!.folder, "Agent Memory/atlas");
+  assert.ok(!listNotes().some(item => item.folder === "Agent Memory/other"));
+
+  const finished = receipt({ ...identity, session_id, action: "finish", request_id: randomUUID(), expected_revision: read({ session_id }).revision,
+    retain: { role: "wiki", subject: "atlas-lesson", title: "Atlas lesson", content: "Reusable", expected_revision: null } });
+  assert.equal(getNote(finished.retained_note_id!)!.folder, "Agent Memory/atlas");
+  assert.ok(!getNote(projectNow.id)!.content.includes(`[[${note.title}]]`));
+  const crossProject = receipt({ ...identity, session_id: "project-session-2", project: "atlas", action: "finish", request_id: randomUUID(), expected_revision: null,
+    retain: { role: "wiki", subject: "shared-lesson", title: "Shared lesson", content: "Applies everywhere", expected_revision: null, project: null } });
+  assert.equal(getNote(crossProject.retained_note_id!)!.folder, "Agent Memory");
+  for (const project of ["..", "a/b", "Upper", "-lead", ""]) rejected(() => receipt(save({ session_id: `bad-${project}`, project })), "invalid_input");
+});

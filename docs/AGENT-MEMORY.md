@@ -75,7 +75,10 @@ For Codex, Claude Code and Hermes, the
 [hook plugins](../integrations/agent-memory/README.md) make memory automatic
 while keeping its cost low:
 
-- **Session start:** one capped read of the shared "Now" overview (about 450
+- **Project folders:** each session files its checkpoint, retained notes and
+  "Now" under `<memory area>/<project>`, with the project taken from the
+  session's git repository. Sessions outside a repository use the area root.
+- **Session start:** one capped read of the project's "Now" overview (about 450
   tokens), a one-time short instruction, and `recall` on the first prompt. The
   Knowledge Schema is fetched only when a save is due.
 - **Activity gate:** hooks count user turns and tool calls locally. Trivial

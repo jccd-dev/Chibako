@@ -295,6 +295,9 @@ textarea.font-mono { font-family: var(--font-mono); }
 .wt-editor li[data-checked] > div p { margin: 0; }
 .wt-editor li[data-checked="true"] > div { text-decoration: line-through; opacity: 0.65; }
 .wt-editor .wiki-link { cursor: pointer; user-select: none; }
+.wt-editor .raw-html { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.85em; color: var(--muted-foreground); background: var(--muted); border-radius: 4px; padding: 0 0.25em; white-space: pre-wrap; }
+.wt-editor .raw-html-block { display: block; padding: 0.5em 0.75em; margin: 0.5em 0; }
+.wt-editor .raw-html.ProseMirror-selectednode { outline: 2px solid var(--ring); }
 
 /* ---- graph view ---- */
 .graph-root circle.node,

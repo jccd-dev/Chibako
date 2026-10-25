@@ -62,8 +62,12 @@ If two notes contradict each other, do not silently pick one:
 
 ## Agent memory
 Automatic memory keeps one temporary checkpoint per authenticated agent, runtime
-and host session, updated across task or title changes. "Now" is a shared index
-with at most 15 active entries: "[[Session title]] — status, next action".
+and host session, updated across task or title changes. Hooks file it under
+"<memory area>/<project>", where project comes from the session's repository;
+sessions outside a repository use the area root. Each project folder has its own
+"Now" index with at most 15 active entries: "[[Session title]] — status, next action".
+Retained wiki/preference notes go to the session's project folder; set
+retain.project to null for cross-project knowledge at the area root.
 A response ending or app closing does not prove completion; leave unfinished work active.
 When no work remains, the agent decides whether anything has lasting value:
 - Keep confirmed decisions, reasons and reusable lessons in canonical topic

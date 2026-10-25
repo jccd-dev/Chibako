@@ -444,3 +444,20 @@ test("a lock left by a dead hook is reclaimed, while a live holder still reports
   await utimes(file, new Date(0), new Date(0));
   assert.equal(await withPrivateLock(file, async () => "ran"), "ran", "an expired lock is reclaimed even when its PID is live");
 }));
+
+test("the project resolves once per session and scopes Now, recall and staged checkpoints", async () => withPrivateDirectory(async (directory) => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const call = caller(calls);
+  let resolved = 0;
+  const resolveProject = (cwd: string | undefined) => { resolved++; return cwd === "/work/atlas" ? "atlas" : undefined; };
+  await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("SessionStart", { cwd: "/work/atlas", prompt: "Resume" }) });
+  await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("UserPromptSubmit", { cwd: "/elsewhere", turn_id: "turn-1" }) });
+  assert.equal(resolved, 1);
+  assert.deepEqual(calls[0], { name: "memory_read", args: { project: "atlas", role: "overview", subject: "Now", session_id: "session-1" } });
+  assert.match(String(calls.find(({ name }) => name === "recall")!.args.query), /^atlas Resume/);
+  const result = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("Checkpoint"),
+    stage: { checkpoint: { title: "Atlas", content: "Progress", expected_revision: null } } });
+  assert.equal(result.staged, true);
+  await runMemoryEvent({ runtime: "claude", directory, enabled: true, call: caller(calls, async (_name, args) => ({ saved: true, request_id: args.request_id, note_id: "n", revision: "a".repeat(64), closed: false })), resolveProject, input: event("Checkpoint") });
+  assert.equal(calls.find(({ name, args }) => isSave(name, args))!.args.project, "atlas");
+}));

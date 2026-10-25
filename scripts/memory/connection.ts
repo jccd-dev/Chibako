@@ -11,6 +11,7 @@ export const memoryStatusSchema = z.object({
   contract_version: z.literal(1), principal_id: z.string().min(1), scopes: z.array(z.string()),
   enabled: z.boolean(), area: z.string().nullable(),
   session_lifecycle: z.literal(1).optional(),
+  projects: z.literal(1).optional(),
 });
 export type MemoryStatus = z.infer<typeof memoryStatusSchema>;
 export function validateEndpoint(raw: string): string {
@@ -74,6 +75,11 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
       if (name === "memory_session") {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
         if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.");
+      }
+      if ("project" in args) {
+        status ??= validateMemoryStatus(await invoke("memory_status", {}));
+        // Older servers reject the field; their memory stays in the area root.
+        if (status.projects !== 1) return invoke(name, Object.fromEntries(Object.entries(args).filter(([key]) => key !== "project")));
       }
       return invoke(name, args);
     },

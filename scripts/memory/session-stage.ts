@@ -22,7 +22,7 @@ const stageSchema = z.object({
 }).strict().refine(value => [value.checkpoint, value.finish, value.skip].filter(Boolean).length === 1, "Provide exactly one of checkpoint, finish or skip")
   .refine(value => !value.now_line || Boolean(value.checkpoint), "now_line needs a checkpoint");
 
-export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, session_id: string, raw: unknown, legacy?: MemoryWriteInput): Promise<{
+export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, session_id: string, raw: unknown, legacy?: MemoryWriteInput, scope: { project?: string } = {}): Promise<{
   checkpoint?: SessionMutation | MemoryWriteInput; skip?: string; replaces_request_id?: string; now_line?: string;
 }> {
   if (legacy) {
@@ -34,7 +34,7 @@ export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, se
   if (stage.checkpoint?.session_id && stage.checkpoint.session_id !== session_id) throw new MemoryClientError("Checkpoint session mismatch");
   const source = stage.checkpoint ?? stage.finish!;
   const candidate = sessionMutationSchema.parse({
-    runtime, session_id, request_id: source.request_id ?? randomUUID(), expected_revision: source.expected_revision ?? null,
+    runtime, session_id, ...scope, request_id: source.request_id ?? randomUUID(), expected_revision: source.expected_revision ?? null,
     ...(stage.checkpoint ? { action: "save", title: stage.checkpoint.title, content: stage.checkpoint.content, now_line: stage.now_line ?? "Work in progress" }
       : { action: "finish", ...(stage.finish?.retain ? { retain: stage.finish.retain } : {}) }),
   });

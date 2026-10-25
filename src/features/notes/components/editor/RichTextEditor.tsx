@@ -9,8 +9,8 @@ import TaskList from "@tiptap/extension-task-list";
 import Image from "@tiptap/extension-image";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { WikiLink } from "./WikiLinkExtension";
+import { htmlFormattingExtensions, RawHtmlBlock, RawHtmlInline } from "./HtmlExtensions";
 import type { NoteSummary } from "@/lib/notes";
-import { findUnsupportedHtml } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 
 interface RichTextEditorProps {
@@ -43,12 +43,6 @@ export function RichTextEditor({
   onNavigate,
   onViewShortcut,
 }: RichTextEditorProps) {
-  // Freeze the safety check while typing, but reset it for each document.
-  // The editor now survives navigation, so mount is no longer a note boundary.
-  const [safety, setSafety] = useState(() => ({ noteId, html: findUnsupportedHtml(markdown) }));
-  if (safety.noteId !== noteId) setSafety({ noteId, html: findUnsupportedHtml(markdown) });
-  const unsupportedHtml = safety.html;
-  const editable = unsupportedHtml.length === 0;
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuIdx, setMenuIdx] = useState(0);
 
@@ -69,7 +63,10 @@ export function RichTextEditor({
     {
       immediatelyRender: false,
       extensions: [
-        StarterKit,
+        StarterKit.configure({ underline: false }),
+        ...htmlFormattingExtensions,
+        RawHtmlInline,
+        RawHtmlBlock,
         TaskList,
         TaskItem.configure({ nested: true }),
         Image.configure({ inline: false, allowBase64: true }),
@@ -98,9 +95,17 @@ export function RichTextEditor({
       ],
       content: markdown,
       contentType: "markdown",
-      editable,
       editorProps: {
         attributes: { class: "focus:outline-none" },
+        // Inline raw HTML is a single tag, so a one-line prompt can edit it; blocks are edited in source view.
+        handleDoubleClickOn(view, pos, node) {
+          if (node.type.name !== "rawHtmlInline") return false;
+          const html = window.prompt("Edit HTML tag", String(node.attrs.html));
+          if (html === null) return true;
+          const tr = html.trim() ? view.state.tr.setNodeMarkup(pos, undefined, { html }) : view.state.tr.delete(pos, pos + node.nodeSize);
+          view.dispatch(tr);
+          return true;
+        },
         handleKeyDown(_view, event) {
           const m = menuRef.current;
           if (!m) return false;
@@ -144,10 +149,9 @@ export function RichTextEditor({
   // markdown instead of html.
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
-    editor.setEditable(editable, false);
-    if (!editable || editor.getMarkdown() === markdown) return;
+    if (editor.getMarkdown() === markdown) return;
     editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
-  }, [editor, markdown, editable]);
+  }, [editor, markdown]);
 
   const [menuNoteId, setMenuNoteId] = useState(noteId);
   if (menuNoteId !== noteId) {
@@ -280,25 +284,8 @@ export function RichTextEditor({
 
   return (
     <div className="md wt-editor relative" onKeyDown={handleRootKeyDown}>
-      {!editable && (
-        <div className="mb-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          <p>Rich editing is off: this note has HTML that saving would drop.</p>
-          <ul className="mt-1 flex flex-col gap-0.5">
-            {unsupportedHtml.map((snippet) => (
-              <li key={snippet} className="truncate font-mono">
-                {snippet.length > 80 ? `${snippet.slice(0, 80)}…` : snippet}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-1">Remove or rewrite it in the Edit (source) view to turn rich editing back on.</p>
-        </div>
-      )}
       <div className="relative px-0.5 pt-1 pb-10" onClick={handleClick}>
-        {editable ? (
-          <EditorContent editor={editor} />
-        ) : (
-          <p className="text-sm text-muted-foreground">Rich editing is disabled for this note — switch to the Edit view.</p>
-        )}
+        <EditorContent editor={editor} />
       </div>
 
       {showMenu && menu && (

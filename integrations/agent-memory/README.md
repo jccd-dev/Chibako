@@ -66,7 +66,14 @@ is recorded alongside the write receipt. The service validates provenance fields
 it cannot determine whether the author's claim is truthful.
 
 Session identity is `(API key, runtime session, subject)`; shared records use
-`(role, subject)` within the configured area. Include runtime/session identity in
+`(role, subject)` within their folder. An optional `project` (`^[a-z0-9][a-z0-9._-]{0,63}$`)
+places a record in `<area>/<project>`; without it the record stays in the area root.
+Hooks resolve the project once per session from `CHIBAKO_MEMORY_PROJECT`, else the
+`origin` remote's repository name, else the git checkout folder name. Only the slug
+is sent; the path never leaves the machine. Hermes does not report a working
+directory, so it uses the override or the area root. A session checkpoint stays in
+the folder where it was created, and servers without `projects` support in
+`memory_status` keep everything in the root. Include runtime/session identity in
 session titles to avoid collisions. Use a stable topic name for a shared canonical
 wiki. Overview content links the current session handoffs; do not duplicate their
 state into separate handoff notes. Search before choosing canonical subjects.
@@ -139,7 +146,7 @@ full legacy payloads, supply the top-level `session_id` and `hook_event_name:
 The server binds one temporary note to the authenticated key, runtime and session
 ID. Different tasks/labels in that session update the same note. Its first title
 gets a unique suffix and stays stable. `memory_session` saves the checkpoint and
-updates its shared Now entry in one SQLite transaction (newest first, 15 lines).
+updates its project's Now entry in one SQLite transaction (newest first, 15 lines).
 An unchanged checkpoint with the last verified revision is skipped locally.
 Legacy pending writes keep their original identity and recovery path; existing
 duplicate topic notes are not automatically adopted or deleted.

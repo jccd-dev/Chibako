@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { getDb, now } from "../../lib/db";
 import { deleteNote, getNote, restoreNote, type Note } from "../../lib/notes";
 import type { ApiKeyPrincipal } from "../../server/auth/api-key-authorization";
-import { getMemoryStatus, memoryRevision, writeMemory } from "./memory";
+import { getMemoryStatus, memoryFolder, memoryProject, memoryRevision, writeMemory } from "./memory";
 import { MemoryError, sessionMemorySchema, type SessionMemoryInput } from "./types";
 
 interface SessionRecord {
@@ -33,10 +33,10 @@ function sessionRevision(record: SessionRecord, note: Note): string {
   return hash([memoryRevision(note), note.deleted_at, record.closed_at]);
 }
 
-function updateNow(principal: ApiKeyPrincipal, folder: string, input: Exclude<SessionMemoryInput, { action: "read" }>, title: string): void {
+function updateNow(principal: ApiKeyPrincipal, area: string, project: string | undefined, input: Exclude<SessionMemoryInput, { action: "read" }>, title: string): void {
   const db = getDb();
   const record = db.prepare("SELECT note_id, folder, title, closed_at FROM memory_records WHERE folder = ? AND role = 'overview' AND subject = 'Now' AND owner_id = 'shared'")
-    .get(folder) as SessionRecord | undefined;
+    .get(memoryFolder(area, project)) as SessionRecord | undefined;
   const note = record ? registeredNote(record) : null;
   if (!note && input.action === "finish") return;
   const lines = (note?.content ?? "").split("\n");
@@ -47,7 +47,7 @@ function updateNow(principal: ApiKeyPrincipal, folder: string, input: Exclude<Se
   if (content === note?.content) return;
   writeMemory(principal, {
     request_id: `session-now-${hash([principal.id, input]).slice(0, 40)}`,
-    role: "overview", subject: "Now", session_id: input.session_id, title: "Now", content,
+    project, role: "overview", subject: "Now", session_id: input.session_id, title: "Now", content,
     expected_revision: note ? memoryRevision(note) : null,
   });
 }
@@ -62,16 +62,18 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
   const parsed = sessionMemorySchema.safeParse(raw);
   if (!parsed.success) throw new MemoryError("Invalid session memory operation", 400, "invalid_input");
   const input = parsed.data;
-  const folder = status.area;
+  const area = status.area;
   const db = getDb();
   return db.transaction(() => {
-    const record = db.prepare("SELECT note_id, folder, title, closed_at FROM memory_records WHERE folder = ? AND role = 'session' AND subject = ? AND owner_id = ?")
-      .get(folder, `session:${input.runtime}`, JSON.stringify([principal.id, input.session_id])) as SessionRecord | undefined;
+    // Session identity spans the whole area: a checkpoint stays in the project folder where it was created.
+    const record = db.prepare("SELECT note_id, folder, title, closed_at FROM memory_records WHERE (folder = ? OR (folder >= ? AND folder < ?)) AND role = 'session' AND subject = ? AND owner_id = ?")
+      .get(area, `${area}/`, `${area}0`, `session:${input.runtime}`, JSON.stringify([principal.id, input.session_id])) as SessionRecord | undefined;
+    const project = record ? memoryProject(area, record.folder) : input.project;
     if (input.action !== "read") {
       const previous = db.prepare("SELECT fingerprint, receipt_json FROM memory_session_requests WHERE actor_id = ? AND request_id = ?")
         .get(principal.id, input.request_id) as { fingerprint: string; receipt_json: string } | undefined;
       if (previous) {
-        if (previous.fingerprint !== hash([folder, input])) throw new MemoryError("Request identity reused with different content", 409, "request_conflict");
+        if (previous.fingerprint !== hash([area, input])) throw new MemoryError("Request identity reused with different content", 409, "request_conflict");
         return JSON.parse(previous.receipt_json) as SessionMemoryReceipt;
       }
     }
@@ -88,21 +90,21 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
       const title = record?.title ?? `${input.title.slice(0, 87)} (${input.runtime}-${hash([principal.id, input.session_id]).slice(0, 12)})`;
       const receipt = writeMemory(principal, {
         request_id: `session-save-${hash([principal.id, input]).slice(0, 40)}`,
-        role: "session", subject: `session:${input.runtime}`, session_id: input.session_id,
+        project, role: "session", subject: `session:${input.runtime}`, session_id: input.session_id,
         title, content: input.content, expected_revision: note ? memoryRevision(note) : null,
       });
       noteId = receipt.note_id;
       db.prepare("UPDATE memory_records SET closed_at = NULL WHERE note_id = ?").run(noteId);
-      updateNow(principal, folder, input, title);
+      updateNow(principal, area, project, input, title);
     } else {
       if (input.retain) {
         const receipt = writeMemory(principal, {
-          ...input.retain, request_id: `session-retain-${hash([principal.id, input]).slice(0, 40)}`, session_id: input.session_id,
+          ...input.retain, project: input.retain.project === null ? undefined : input.retain.project ?? project, request_id: `session-retain-${hash([principal.id, input]).slice(0, 40)}`, session_id: input.session_id,
         });
         retainedNoteId = receipt.note_id;
       }
       if (record && note) {
-        updateNow(principal, folder, input, record.title);
+        updateNow(principal, area, project, input, record.title);
         deleteNote(note.id);
         db.prepare("UPDATE memory_records SET closed_at = COALESCE(closed_at, ?) WHERE note_id = ?").run(now(), note.id);
       }
@@ -115,7 +117,7 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
       closed: input.action === "finish", retained_note_id: retainedNoteId,
     };
     db.prepare("INSERT INTO memory_session_requests (actor_id, request_id, fingerprint, receipt_json, created_at) VALUES (?,?,?,?,?)")
-      .run(principal.id, input.request_id, hash([folder, input]), JSON.stringify(receipt), now());
+      .run(principal.id, input.request_id, hash([area, input]), JSON.stringify(receipt), now());
     return receipt;
   }).immediate();
 }

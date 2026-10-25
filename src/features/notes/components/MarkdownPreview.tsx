@@ -27,7 +27,7 @@ const baseTagNames = defaultSchema.tagNames ?? [];
 const baseStar = Array.isArray(baseAttributes["*"]) ? (baseAttributes["*"] as Array<string | string[]>) : [];
 const schema = {
   ...defaultSchema,
-  tagNames: [...baseTagNames, "span"],
+  tagNames: [...baseTagNames, "span", "u", "mark"],
   attributes: {
     ...baseAttributes,
     "*": [...baseStar, "className"],

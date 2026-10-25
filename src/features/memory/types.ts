@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 const identity = z.string().trim().min(1).max(200);
+// One safe folder segment under the memory area; hooks derive it from the session's repository.
+export const projectSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
 export const memoryWriteSchema = z.object({
+  project: projectSchema.optional(),
   request_id: identity,
   role: z.enum(["session", "wiki", "preference", "overview"]),
   subject: identity,
@@ -12,11 +15,13 @@ export const memoryWriteSchema = z.object({
   confirmation: z.object({ source: identity, scope: identity }).strict().optional(),
 }).strict();
 export type MemoryWriteInput = z.infer<typeof memoryWriteSchema>;
-export const memoryReadSchema = memoryWriteSchema.pick({ role: true, subject: true, session_id: true });
+export const memoryReadSchema = memoryWriteSchema.pick({ project: true, role: true, subject: true, session_id: true });
 
-const sessionIdentity = z.object({ runtime: z.enum(["codex", "claude", "hermes"]), session_id: identity });
+const sessionIdentity = z.object({ runtime: z.enum(["codex", "claude", "hermes"]), session_id: identity, project: projectSchema.optional() });
 export const retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, session_id: true }).extend({
   role: z.enum(["wiki", "preference"]),
+  // Defaults to the session's project; null files cross-project knowledge at the area root.
+  project: projectSchema.nullable().optional(),
 });
 export const sessionMemorySchema = z.discriminatedUnion("action", [
   sessionIdentity.extend({ action: z.literal("read") }).strict(),
