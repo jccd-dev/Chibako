@@ -1,6 +1,6 @@
 ---
 name: chibako-memory
-description: Retrieve, organize, and preserve shared knowledge through Chibako MCP. Use for prior decisions, preferences, project context, authorized memory saves, or organizing notes by folder, topic, date, properties, and title.
+description: Retrieve, organize, and preserve shared knowledge through Chibako MCP. Use for prior decisions, preferences, project context, authorized memory saves, creating or editing reader-facing notes, or organizing notes by folder, topic, date, properties, and title.
 license: MIT
 ---
 
@@ -89,6 +89,36 @@ not authorize reorganizing existing notes or changing the schema.
 - Inspect the write result before reporting success. If a write times out or
   its outcome is uncertain, inspect recent observations or the target note
   before retrying to avoid duplicates. Report unresolved failures clearly.
+
+## Write for the intended reader
+
+Normal notes are for people by default, including guides, explanations, decisions,
+and reference material. Write for readers who may not know the
+conversation that produced the note. Use compact technical wording for explicitly
+agent-facing memory, observations, and session checkpoints. Storing a note in
+Chibako or retrieving it through MCP does not make it agent-only memory.
+
+For authored reader-facing notes:
+
+- Lead with the main point and enough context to explain why it matters. Match
+  the reader's knowledge; explain necessary jargon and abbreviations on first use.
+- Use natural, plain language and focused paragraphs. Group related ideas under
+  descriptive headings; use lists for steps or parallel items and tables for
+  comparisons when they help. Let the subject determine the structure.
+- Keep the main explanation easy to follow. Place lengthy technical references
+  after it or link an existing supporting note. Keep essential caveats and
+  warnings beside the claims or actions they qualify.
+- Remove repetition, filler, excessive emphasis, and agent shorthand. Preserve
+  useful facts, uncertainty, dates, sources, commands, code, paths, and link
+  targets. Keep quoted and raw source material unchanged unless editing it is
+  explicitly requested.
+- Before saving, use the available Humanizer skill on authored prose. If it is
+  unavailable, apply the guidance above without adding a plugin dependency.
+  Review the result for natural wording, clear structure, and preserved meaning;
+  check that a reader can understand it without the original chat.
+
+Apply this within authorized note creation or edits. A skill update does not
+authorize rewriting existing notes or broadening a targeted edit.
 
 ## Organize notes for retrieval
 
