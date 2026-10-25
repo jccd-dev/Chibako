@@ -48,6 +48,36 @@ jobs:
         env:
           NODE_ENV: test
 
+  # plugins/ is generated and released after merge by plugin-release.yml, so a PR never edits it.
+  plugin-output:
+    name: Plugin output
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Check plugin output
+        run: |
+          set -euo pipefail
+          # The pull_request checkout is a merge commit: HEAD^1 is the base branch.
+          edited="$(git diff --name-only HEAD^1 HEAD -- plugins)"
+          if [[ -n "$edited" ]]; then
+            echo "::error title=Remove plugins/ from this PR::plugins/ is generated after merge. Undo it with: git checkout origin/main -- plugins"
+            echo "$edited"
+            exit 1
+          fi
+          npm run publish:memory-plugins
+          if [[ -n "$(git status --porcelain -- plugins)" ]]; then
+            echo "::notice title=Plugin changes detected::The maintainer picks the plugin version at merge. Nothing for you to do."
+          fi
+
   pull-request-image:
     name: Build and scan pull request images
     if: github.event_name == 'pull_request'

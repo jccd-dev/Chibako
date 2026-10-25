@@ -355,9 +355,9 @@ asks for your Chibako URL and API key without echo and previews private
 configuration before applying it. Never paste the key into agent chat.
 Installation, connection checks and proven autonomous capture are separate states.
 
-The installed files are the committed [`plugins/`](plugins) directories, generated
-from source by `npm run publish:memory-plugins`; a test fails if they drift from a
-fresh build. See the [automatic memory installation guide](integrations/agent-memory/INSTALL.md)
+The installed files are the committed [`plugins/`](plugins) directories, rebuilt
+from source and released automatically after each merge to `main` (see
+[MAINTAINING.md](docs/MAINTAINING.md)). See the [automatic memory installation guide](integrations/agent-memory/INSTALL.md)
 for controls, private-state paths, recovery and compatibility limits.
 
 ### Use the skill without automatic hooks
@@ -502,10 +502,9 @@ Chibako is under active development. These are the current directions.
 Chibako is open source and this repository is public. Contributions,
 bug reports, and ideas are welcome.
 
-1. Fork the repo and create a branch.
-2. `npm install`, then `npm run dev` (and `npm test` for the suite).
-3. Keep changes focused, match existing conventions (`AGENTS.md`), and open a
-   pull request.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, check and pull request
+workflow. In short: branch from `main`, keep the change focused, run
+`npm run lint && npm run typecheck && npm test`, and open a pull request.
 
 Please don't commit secrets or environment-specific values — production deploy
 and host configuration live in a separate private repo.

@@ -1,0 +1,86 @@
+name: Plugin release
+
+# Rebuilds plugins/ after every merge to main and releases it only when the output changed.
+# The merged PR's "plugin: minor" label picks a minor bump; otherwise it is a patch.
+# Pushes made with GITHUB_TOKEN start no workflows, so the release commit cannot loop.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: Version bump if plugins/ changed
+        type: choice
+        options: [patch, minor]
+        default: patch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release plugins
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Choose version level
+        id: level
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_LEVEL: ${{ inputs.level }}
+        run: |
+          set -euo pipefail
+          level="${DISPATCH_LEVEL:-patch}"
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            labels="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[].labels[].name')"
+            if grep -qx 'plugin: minor' <<< "$labels"; then level=minor; fi
+          fi
+          echo "level=${level}" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild and bump
+        id: release
+        env:
+          LEVEL: ${{ steps.level.outputs.level }}
+        run: |
+          set -euo pipefail
+          version="$(node scripts/release-memory-plugins.mjs "$LEVEL")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if [[ -z "$version" ]]; then echo "Plugin output unchanged; nothing to release." >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Test released plugins
+        if: steps.release.outputs.version != ''
+        run: node --import tsx --test "tests/automatic-memory/*.test.ts"
+        env:
+          NODE_ENV: test
+
+      - name: Commit and push release
+        if: steps.release.outputs.version != ''
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugin.json .claude-plugin/marketplace.json plugins
+          git commit -m "chore(plugins): release ${VERSION}"
+          # No force: if main moved, the newer run rebuilds from current state and releases instead.
+          if git push origin HEAD:main; then
+            echo "Released plugins ${VERSION}." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice::main moved during the release; the run for the newer commit releases the plugins."
+          fi

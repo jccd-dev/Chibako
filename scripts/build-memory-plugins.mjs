@@ -65,8 +65,17 @@ export async function buildMemoryPlugins(output = join(root, "dist/plugins"), { 
   }
 }
 
+// Refreshes the committed plugins/ directories that native marketplaces install from.
+export async function publishMemoryPlugins() {
+  await buildMemoryPlugins(join(root, "plugins"), { archives: false });
+  const { version } = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
+  const path = join(root, ".claude-plugin/marketplace.json");
+  const marketplace = JSON.parse(await readFile(path, "utf8"));
+  marketplace.plugins[0].version = version;
+  await writeFile(path, json(marketplace));
+}
+
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  // --publish refreshes the committed plugins/ directories that native marketplaces install from.
-  if (process.argv[2] === "--publish") await buildMemoryPlugins(join(root, "plugins"), { archives: false });
+  if (process.argv[2] === "--publish") await publishMemoryPlugins();
   else await buildMemoryPlugins(process.argv[2] ? resolve(process.argv[2]) : undefined);
 }

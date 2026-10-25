@@ -99,24 +99,28 @@ assert calls[0]['env']['PLUGIN_ROOT'] == str(m._PLUGIN_ROOT)
   }
 });
 
-test("committed marketplace plugins match a fresh build", async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), "chibako-published-"));
-  try {
-    const { buildMemoryPlugins } = await import(path.join(root, "scripts/build-memory-plugins.mjs"));
-    await buildMemoryPlugins(temporary, { archives: false });
-    const fresh = (await readdir(temporary, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => path.relative(temporary, path.join(entry.parentPath, entry.name))).sort();
-    const committed = (await readdir(path.join(root, "plugins"), { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => path.relative(path.join(root, "plugins"), path.join(entry.parentPath, entry.name))).sort();
-    assert.deepEqual(committed, fresh, "run npm run publish:memory-plugins");
-    for (const file of fresh) {
-      assert.ok((await readFile(path.join(root, "plugins", file))).equals(await readFile(path.join(temporary, file))), `${file} is stale; run npm run publish:memory-plugins`);
-    }
-    const claude = JSON.parse(await readFile(path.join(root, ".claude-plugin/marketplace.json"), "utf8"));
-    assert.equal(claude.plugins[0].source, "./plugins/claude");
-    const codex = JSON.parse(await readFile(path.join(root, ".agents/plugins/marketplace.json"), "utf8"));
-    assert.equal(codex.plugins[0].source.path, "./plugins/codex");
-    const bundled = JSON.parse(await readFile(path.join(root, "plugins/codex/.agents/plugins/marketplace.json"), "utf8"));
-    assert.equal(bundled.plugins[0].source.path, "./");
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
+// plugins/ is rebuilt and released by .github/workflows/plugin-release.yml after merge, so PRs may leave it stale.
+test("committed marketplace plugins share one version and point at plugins/", async () => {
+  const { version } = JSON.parse(await readFile(path.join(root, "plugin.json"), "utf8"));
+  for (const runtime of ["claude", "codex", "hermes"]) {
+    const published = JSON.parse(await readFile(path.join(root, "plugins", runtime, "plugin.json"), "utf8"));
+    assert.equal(published.version, version, `plugins/${runtime} is not released at ${version}`);
   }
+  const claudePlugin = JSON.parse(await readFile(path.join(root, "plugins/claude/.claude-plugin/plugin.json"), "utf8"));
+  assert.equal(claudePlugin.version, version);
+  const claude = JSON.parse(await readFile(path.join(root, ".claude-plugin/marketplace.json"), "utf8"));
+  assert.equal(claude.plugins[0].source, "./plugins/claude");
+  assert.equal(claude.plugins[0].version, version);
+  const codex = JSON.parse(await readFile(path.join(root, ".agents/plugins/marketplace.json"), "utf8"));
+  assert.equal(codex.plugins[0].source.path, "./plugins/codex");
+  const bundled = JSON.parse(await readFile(path.join(root, "plugins/codex/.agents/plugins/marketplace.json"), "utf8"));
+  assert.equal(bundled.plugins[0].source.path, "./");
+});
+
+test("plugin releases bump patch by default and minor on request", async () => {
+  const { bumpVersion } = await import(path.join(root, "scripts/release-memory-plugins.mjs"));
+  assert.equal(bumpVersion("0.4.0", "patch"), "0.4.1");
+  assert.equal(bumpVersion("0.4.9", "minor"), "0.5.0");
+  assert.throws(() => bumpVersion("0.4.0", "major"));
+  assert.throws(() => bumpVersion("v0.4", "patch"));
 });
