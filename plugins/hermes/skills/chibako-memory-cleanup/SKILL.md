@@ -38,7 +38,7 @@ An invocation authorizes review; apply only changes the user has authorized.
   preserving unique facts, meaningful dates, provenance, and useful history.
 - **Retire:** confirmed obsolete claims, redundant activity logs, and session
   leftovers whose work is verified complete and whose useful knowledge is
-  retained elsewhere. Age, a missing Now link, or one completed subtask alone
+  retained elsewhere. Age, a missing Agent Now link, or one completed subtask alone
   does not establish that a session is finished.
 - Distinguish an obsolete decision from a conflicting claim. Preserve relevant
   history and explain what superseded it; ask about unresolved conflicts rather
@@ -46,7 +46,7 @@ An invocation authorizes review; apply only changes the user has authorized.
   the user specifically includes them.
 
 Present a concise proposal naming each candidate by ID/title (observation ID
-for observations), action, evidence, merge destination, and any affected Now or
+for observations), action, evidence, merge destination, and any affected Agent Now or
 inbound links. State the coverage and uncertainties. If no cleanup is worthwhile,
 stop without creating a cleanup note. Obtain approval for concrete removals or
 merges unless that exact set of changes is already authorized.
@@ -62,9 +62,9 @@ merges unless that exact set of changes is already authorized.
   alter registration, or use general Note writes to bypass restricted memory
   permissions. Report operations that the available connection cannot perform.
 - Save and verify merged knowledge first. Resolve approved inbound links and
-  stale Now entries before trashing a redundant note; keep a candidate if safe
+  stale Agent Now entries before trashing a redundant note; keep a candidate if safe
   link repair or retention cannot be completed. Remove only the confirmed stale
-  Now line, preserving other sessions and overview content.
+  Agent Now line, preserving other sessions and overview content.
 - Use `delete_note` to move approved notes to recoverable Trash. Permanent note
   purge is outside this workflow. `delete_observation` has no Trash recovery;
   explicitly disclose that before obtaining approval for observation deletion.
