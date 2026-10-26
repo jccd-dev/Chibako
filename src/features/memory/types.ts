@@ -31,11 +31,18 @@ export const sessionMemorySchema = z.discriminatedUnion("action", [
     content: memoryWriteSchema.shape.content,
     expected_revision: memoryWriteSchema.shape.expected_revision,
     now_line: z.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/),
+    // Required to save into a finished (kept) checkpoint, after reading and merging it.
+    reopen: z.literal(true).optional(),
   }).strict(),
   sessionIdentity.extend({
     action: z.literal("finish"), request_id: identity,
     expected_revision: memoryWriteSchema.shape.expected_revision,
     retain: retainedMemorySchema.optional(),
+  }).strict(),
+  // Joins another session's active or finished checkpoint by its title; both sessions then share it.
+  sessionIdentity.extend({
+    action: z.literal("continue"), request_id: identity,
+    title: memoryWriteSchema.shape.title,
   }).strict(),
 ]);
 export type SessionMemoryInput = z.infer<typeof sessionMemorySchema>;

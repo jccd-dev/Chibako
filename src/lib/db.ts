@@ -59,6 +59,13 @@ const MIGRATIONS: string[] = [
     confirmation_json TEXT NOT NULL, created_at INTEGER NOT NULL,
     PRIMARY KEY (actor_id, request_id)
   );`,
+  // Additive: older releases ignore it, so continued sessions there simply start their own checkpoint.
+  `CREATE TABLE IF NOT EXISTS memory_session_links (
+    owner_id TEXT NOT NULL, subject TEXT NOT NULL,
+    note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_id, subject)
+  );`,
   `CREATE TABLE IF NOT EXISTS auth_attempts (
     bucket TEXT PRIMARY KEY,
     window_started_at INTEGER NOT NULL,

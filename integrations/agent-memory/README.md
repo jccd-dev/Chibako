@@ -104,9 +104,10 @@ contribution in its session record; a wiki failure does not undo a saved session
 Run from this checkout with its existing Node dependencies installed. Use an
 absolute script path and an approved working directory in installed hook commands.
 The runner reuses the configured Chibako endpoint over the MCP SDK; it adds no
-model/extraction service. At session start it injects the capped "Now" overview
-(`memory_read`, about 450 tokens) and one short instruction, then recall on the first
-known request. The schema is fetched only when a checkpoint is requested. The agent
+model/extraction service. At session start it injects the capped "Agent Now" index
+(`memory_read`, about 500 tokens, current project first) and one short instruction, then recall on the first
+known request. Checkpoint requests carry no schema; the agent fetches it only before
+retaining knowledge or writing other notes. The agent
 retrieves again on meaningful topic changes. Retrieved content is marked as evidence,
 never executable instructions.
 
@@ -143,25 +144,41 @@ full legacy payloads, supply the top-level `session_id` and `hook_event_name:
 "Checkpoint"` and every checkpoint field (`request_id`, matching `session_id`,
 `expected_revision`) yourself.
 
-The server binds one temporary note to the authenticated key, runtime and session
+The server binds one checkpoint note to the authenticated key, runtime and session
 ID. Different tasks/labels in that session update the same note. Its first title
 gets a unique suffix and stays stable. `memory_session` saves the checkpoint and
-updates its project's Now entry in one SQLite transaction (newest first, 15 lines).
+updates its line in the area-root "Agent Now" index in one SQLite transaction
+(newest first, 15 lines, tagged with the project). Per-project "Now" notes from
+earlier releases are folded into Agent Now and moved to Trash on the next save.
+
+To pick up another session's or agent's handoff, stage
+`{"continue":{"title":"<checkpoint title>"}}`. The command links this session
+to that active or finished checkpoint and returns its note and revision; later saves
+and `finish` from either session update that one note. It is rejected while this
+session has its own active checkpoint; finish that first. If the owner later moves
+or renames the shared note, the link is dropped and the session starts its own.
+
+Saving into a finished (kept) checkpoint requires `"reopen": true` on the
+`memory_session` save, sent after reading and merging it. The stage command adds it
+for you; direct callers without it get `reopen_required`, so older clients cannot
+overwrite a kept record unread. "Agent Now" is managed: if it is trashed, the next
+save restores it; if it is moved or renamed, a fresh index starts at the root.
 An unchanged checkpoint with the last verified revision is skipped locally.
 Legacy pending writes keep their original identity and recovery path; existing
 duplicate topic notes are not automatically adopted or deleted.
 
 When no work remains, stage `{"finish":{"expected_revision":"<session revision>"}}`
-even below the checkpoint threshold. This removes its Now entry and moves only
-its registered session checkpoint to Trash. If decisions or lessons remain useful,
+even below the checkpoint threshold. This closes the checkpoint and removes its Agent Now entry;
+the note stays in its project folder as a session record. If decisions or lessons remain useful,
 include `retain` in `finish`: `{ "role": "wiki", "subject": "canonical-topic",
 "title": "Canonical topic", "content": "Confirmed knowledge and reasons",
 "expected_revision": null }`. Search before creating; use `memory_read` and its
 revision when merging an existing topic. Preference retention uses role `preference`
 and also requires `confirmation` with source and scope. Retention and cleanup
 commit together or all roll back. A trivial session needs no checkpoint note.
-Trash follows the existing 30-day expiry policy; resume restores the same note
-while it remains available. Source notes and other sessions cannot be discarded.
+Resuming or continuing a finished record reopens the same note after a read and
+merge. Automatic memory never deletes notes; remove old records with the
+owner-invoked `chibako-memory-cleanup` skill.
 REST callers can send the same action payload to `POST /api/memory`.
 
 When a checkpoint is due but nothing durable changed, replace `checkpoint` with
@@ -207,7 +224,7 @@ and Hermes gateway routes require their own host verification.
 
 After setup, test the selected runtime:
 
-1. Start a fresh session and confirm the Now briefing loads without a memory prompt.
+1. Start a fresh session and confirm the Agent Now briefing loads without a memory prompt.
 2. Complete meaningful work and confirm a checkpoint receives a verified save receipt.
 3. Resume in another runtime and check the saved status and next action.
 4. Check pause, outage/retry, interruption, and compaction behavior.

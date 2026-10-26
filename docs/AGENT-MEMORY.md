@@ -75,19 +75,35 @@ For Codex, Claude Code and Hermes, the
 [hook plugins](../integrations/agent-memory/README.md) make memory automatic
 while keeping its cost low:
 
-- **Project folders:** each session files its checkpoint, retained notes and
-  "Now" under `<memory area>/<project>`, with the project taken from the
-  session's git repository. Sessions outside a repository use the area root.
-- **Session start:** one capped read of the project's "Now" overview (about 450
-  tokens), a one-time short instruction, and `recall` on the first prompt. The
-  Knowledge Schema is fetched only when a save is due.
+- **Project folders:** each session files its checkpoint and retained notes
+  under `<memory area>/<project>`, with the project taken from the session's
+  git repository. Sessions outside a repository use the area root.
+- **One Agent Now:** a single "Agent Now" index at the memory area root lists
+  active checkpoints across projects as `- [[Thread]] (project) — status`.
+  Releases that kept a "Now" per project folder fold those into Agent Now and
+  move them to Trash on the next save.
+- **Session start:** one capped read of "Agent Now", with the current project's
+  entries first (about 500 tokens), a one-time short instruction, and `recall`
+  on the first prompt.
+- **No schema in save prompts:** a due-checkpoint prompt carries only the
+  checkpoint format (about 300 tokens, down from about 1,650). Agents fetch the Knowledge Schema only
+  before retaining knowledge or writing other notes.
 - **Activity gate:** hooks count user turns and tool calls locally. Trivial
   sessions cost nothing extra. After 4 user turns or 10 tool calls since the
   last save (configurable per profile), the agent is asked once to save.
-- **Thread-centric saves:** the agent saves one overview note per thread plus a
-  short status line. The runner upserts `- [[Thread]] — status` into "Now"
+- **Session-centric saves:** the agent updates one checkpoint per session plus a
+  short status line. The server upserts its line into "Agent Now"
   (newest first, at most 15 lines), so the next session in any runtime knows
   where work stopped.
+- **Shared handoffs:** when an Agent Now entry is the same task, another agent
+  or session stages `{"continue": {"title": "<entry title>"}}` and then saves
+  into that same checkpoint instead of creating its own. Revision checks keep
+  concurrent sessions from overwriting each other.
+- **Kept session records:** finishing closes a checkpoint and removes its
+  Agent Now line; the note stays in its project folder as a session record and
+  can be continued later. Automatic memory never deletes notes. Run the
+  `chibako-memory-cleanup` skill to review records and remove only what you
+  approve.
 
 ## Why retrieval uses fewer context tokens
 

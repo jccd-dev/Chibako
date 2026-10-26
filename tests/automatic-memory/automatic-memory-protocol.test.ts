@@ -96,5 +96,6 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   const done = (await rpc(key.key, "tools/call", "memory_session", finish)).structuredContent;
   assert.equal(done.closed, true);
   assert.deepEqual(await (await postMemory(rest(key.key, "POST", finish))).json(), done);
-  assert.equal((await rpc(key.key, "tools/call", "memory_session", read)).structuredContent.note, null);
+  const kept = (await rpc(key.key, "tools/call", "memory_session", read)).structuredContent;
+  assert.deepEqual([kept.note.id, kept.closed], [receipt.note_id, true], "finish keeps the checkpoint as a closed session record");
 });
