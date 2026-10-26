@@ -61,22 +61,27 @@ If two notes contradict each other, do not silently pick one:
 3. Offer to update the wiki page to reflect the resolved truth.
 
 ## Agent memory
-Automatic memory keeps one temporary checkpoint per authenticated agent, runtime
+Automatic memory keeps one checkpoint per authenticated agent, runtime
 and host session, updated across task or title changes. Hooks file it under
 "<memory area>/<project>", where project comes from the session's repository;
-sessions outside a repository use the area root. Each project folder has its own
-"Now" index with at most 15 active entries: "[[Session title]] — status, next action".
+sessions outside a repository use the area root. One "Agent Now" index at the
+area root lists at most 15 active entries across projects:
+"[[Session title]] (project) — status, next action".
+When an Agent Now entry is the same task or handoff, continue that checkpoint
+(memory_session continue with its title) instead of starting another; every
+continuing agent or session then saves into the same note.
 Retained wiki/preference notes go to the session's project folder; set
 retain.project to null for cross-project knowledge at the area root.
 A response ending or app closing does not prove completion; leave unfinished work active.
 When no work remains, the agent decides whether anything has lasting value:
 - Keep confirmed decisions, reasons and reusable lessons in canonical topic
   wiki/preference notes, merging existing knowledge rather than duplicating it.
-- Use memory_session finish to atomically retain that knowledge, remove the
-  session's Now entry and trash its temporary checkpoint. If nothing is useful,
-  finish without retention. Trivial sessions need no temporary note.
-Only registered checkpoints owned by this caller/session are eligible for this
-cleanup; source notes, other sessions and legacy topic overviews stay protected.
+- Use memory_session finish to atomically retain that knowledge, close the
+  checkpoint and remove its Agent Now entry. The checkpoint stays in its
+  project folder as a session record; finished records can be continued later.
+  If nothing is useful, finish without retention. Trivial sessions need no note.
+Automatic memory never deletes notes; removing session records is owner-invoked
+cleanup that suggests safe candidates and applies only approved changes.
 Save meaningful work only, skipping repeated facts, activity logs and transcripts.
 Resuming the same host session reuses its checkpoint while it still exists.
 

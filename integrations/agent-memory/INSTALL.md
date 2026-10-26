@@ -160,13 +160,12 @@ installed cache is modified by building the packages. Existing custom knowledge
 schemas are preserved; align their Agent memory section with the new session
 lifecycle if they still prescribe per-task overviews.
 
-Automatic memory now keeps one temporary checkpoint per key/runtime/session.
-The agent explicitly finishes it when no work remains, preserving only lasting
-wiki/preference knowledge and moving the checkpoint to Trash. Its Now entry is
-removed atomically. This authority covers only newly registered session
-checkpoints, not source notes, legacy overviews or other sessions. Trashed notes
-follow the vault's 30-day expiry policy. A response ending or app closing is not
-completion. No background model, cleanup sweep or transcript capture is added.
+Automatic memory now keeps one checkpoint per key/runtime/session.
+The agent explicitly finishes it when no work remains, optionally retaining lasting
+wiki/preference knowledge. Finishing closes the checkpoint and removes its Agent Now
+entry atomically; the note stays as a session record. Automatic memory never deletes
+notes; use the `chibako-memory-cleanup` skill to review and remove records you
+approve. A response ending or app closing is not completion. No background model, cleanup sweep or transcript capture is added.
 
 Package fixtures verify extracted archives in unrelated working directories,
 private setup fixtures, scope checks, replay/binding and native callback envelopes.

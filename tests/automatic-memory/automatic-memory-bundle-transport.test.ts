@@ -130,12 +130,16 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     assert.ok("note" in current && current.note);
     const note = current.note;
     assert.equal(note.content, checkpoint.content);
+    await invoke({ session_id: "bundle-handoff", hook_event_name: "UserPromptSubmit", turn_id: "handoff-turn" });
+    const continued = JSON.parse((await invoke({ session_id: "bundle-handoff", hook_event_name: "Checkpoint", continue: { title: note.title } }, "stage")).stdout) as { continued: boolean; note: { id: string } };
+    assert.equal(continued.continued, true, "the compiled runner passes continue through to the server");
+    assert.equal(continued.note.id, note.id);
     const overview = { request_id: "bundle-overview-1", role: "overview", subject: "Bundle thread", session_id: "bundle-session", title: "Bundle thread", content: "Next: verify", expected_revision: current.revision };
     for (let i = 0; i < 2; i++) {
       const result = JSON.parse((await invoke({ session_id: "bundle-session", hook_event_name: "Checkpoint", checkpoint: overview, now_line: "verifying transport" }, "stage")).stdout) as { saved: boolean; pending: boolean };
       assert.deepEqual([result.saved, result.pending], [true, false]);
     }
-    const now = getDb().prepare("SELECT content FROM notes WHERE folder = ? AND title = ?").get("Agent Memory Test", "Now") as { content: string } | undefined;
+    const now = getDb().prepare("SELECT content FROM notes WHERE folder = ? AND title = ?").get("Agent Memory Test", "Agent Now") as { content: string } | undefined;
     assert.equal(now?.content, `- [[${note.title}]] — verifying transport\n`, "a task change and replay keep one session entry");
     const status = JSON.parse((await invoke({}, "status")).stdout) as { pending: number; last_verified_save: string | null };
     assert.equal(status.pending, 0);
@@ -154,7 +158,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     assert.equal(finished.saved, true);
     const closed = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "bundle-session" });
     assert.ok("note" in closed);
-    assert.equal(closed.note, null);
+    assert.equal(closed.note?.id, note.id, "finish keeps the checkpoint as a session record");
     assert.equal(closed.closed, true);
 
     advertiseLifecycle = false;

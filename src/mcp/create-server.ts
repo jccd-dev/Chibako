@@ -135,7 +135,7 @@ if (options.memoryPrincipal?.scopes.includes("memory:write")) {
   }, (args) => memoryResult(() => writeMemory(principal, args)));
   if (authorized(["notes:read"])) server.registerTool("memory_session", {
     title: "Maintain one automatic session memory",
-    description: "Read, save, or finish this API key's runtime session checkpoint. Identity is derived from runtime and session_id, not task names. Save updates the same note and Now entry. Finish atomically retains optional wiki/preference knowledge, removes its Now entry, and trashes only its registered session note. Read before updates; use stable request_id values for retries. Stop alone does not mean finished.",
+    description: "Read, save, finish, or continue this API key's runtime session checkpoint. Identity is derived from runtime and session_id, not task names. Continue joins another session's active or finished checkpoint by its title so both save into one note. Save updates the same note and its Agent Now entry; saving into a finished checkpoint needs reopen: true after reading and merging it. Finish atomically retains optional wiki/preference knowledge, closes the checkpoint and removes its Agent Now entry; the note stays as a session record. Read before updates; use stable request_id values for retries. Stop alone does not mean finished.",
     inputSchema: sessionMemorySchema,
     annotations: { ...DESTRUCTIVE, idempotentHint: true },
   }, (args) => memoryResult(() => sessionMemory(principal, args)));

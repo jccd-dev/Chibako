@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   try {
     const execute = async () => {
       const call = connection.call;
-      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), finish: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
+      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), finish: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), continue: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
       const options = { runtime, input, directory: stateDirectory, enabled: true, call, resolveProject, ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
           stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)} --session ${quote(input.session_id)}` } : {}) };

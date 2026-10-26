@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { prepareSessionStage } from "../../scripts/memory/session-stage";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -49,7 +50,7 @@ test("loads the Now index and first prompt recall once, from private state", asy
   const call = caller(calls);
   const start = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart", { prompt: "Resume the memory work" }) });
   assert.equal(calls.filter(({ name }) => name === "get_knowledge_schema").length, 0, "schema is fetched only when a checkpoint is due");
-  assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Now", session_id: "session-1" } });
+  assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } });
   assert.equal(calls.filter(({ name }) => name === "recall").length, 1);
   assert.match(String((start.hookSpecificOutput as { additionalContext: string }).additionalContext), /Automatic memory:/);
   assert.equal((await stat(directory)).mode & 0o077, 0);
@@ -60,10 +61,10 @@ test("loads the Now index and first prompt recall once, from private state", asy
 }));
 
 test("Now is injected capped, and the instruction block appears once per session", async () => withPrivateDirectory(async (directory) => {
-  const call = caller([], async (name) => name === "memory_read" ? { note: { content: "# Now\n" + "- [[Thread]] — x\n".repeat(400) }, revision: "a".repeat(64) } : {});
+  const call = caller([], async (name) => name === "memory_read" ? { note: { content: "# Agent Now\n" + "- [[Thread]] — x\n".repeat(400) }, revision: "a".repeat(64) } : {});
   const start = await runMemoryEvent({ runtime: "codex", directory: join(directory, "second"), enabled: true, call, input: event("SessionStart") });
   const context = (start.hookSpecificOutput as { additionalContext: string }).additionalContext;
-  assert.ok(context.length < 2200, "Now plus instruction stays within a few hundred tokens");
+  assert.ok(context.length < 2400, "Agent Now plus instruction stays within a few hundred tokens");
   const next = await runMemoryEvent({ runtime: "codex", directory: join(directory, "second"), enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t2" }) });
   assert.equal(next.hookSpecificOutput, undefined, "no per-prompt instruction or Now re-injection");
 }));
@@ -87,7 +88,8 @@ test("over the threshold, exactly one Stop request; a verified save resets the c
   for (let turn = 1; turn <= 4; turn++) await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: `t${turn}` }) });
   const requested = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") });
   assert.equal(requested.decision, "block");
-  assert.match(String(requested.reason), /Schema \(evidence/, "schema is delivered with the request");
+  assert.doesNotMatch(String(requested.reason), /Schema \(evidence/, "a checkpoint request carries no vault schema");
+  assert.equal(calls.some(({ name }) => name === "get_knowledge_schema"), false);
   assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, undefined);
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t5" }) });
   assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, undefined, "still one request until a save");
@@ -120,7 +122,7 @@ function nowServer(conflicts = 0) {
   const call: MemoryCall = async (name, args) => {
     if (name === "memory_read") return store.content === null ? { note: null, revision: null } : { note: { content: store.content }, revision: store.revision };
     if (name !== "memory_write") return {};
-    if (args.subject === "Now") {
+    if (args.subject === "Agent Now") {
       if (store.conflicts > 0) { store.conflicts--; store.content = (store.content ?? "# Now") + "\n- [[Other]] — concurrent"; rotate(); throw new Error("revision_conflict"); }
       if (args.expected_revision !== store.revision) throw new Error("revision_conflict");
       store.content = String(args.content); store.writes++; rotate();
@@ -149,9 +151,17 @@ test("legacy pending saves from two runtimes recover their capped Now index", as
   await save(join(directory, "codex"), call, "Alpha", "done");
   const lines = store.content!.split("\n").filter((line) => line.startsWith("- [["));
   assert.deepEqual(lines, ["- [[Alpha]] — done", "- [[Beta]] — review"]);
-  assert.match(store.content!, /^# Now\n/);
+  assert.match(store.content!, /^# Agent Now\n/);
   for (let i = 0; i < 20; i++) await save(join(directory, "codex"), call, `Thread ${i}`, "x");
   assert.equal(store.content!.split("\n").filter((line) => line.startsWith("- [[")).length, 15);
+}));
+
+test("the Agent Now briefing lists the current project's entries first", async () => withPrivateDirectory(async (directory) => {
+  const content = "# Agent Now\n\n- [[Other]] (beta) — b\n- [[Root]] — r\n- [[Mine]] (atlas) — a\n";
+  const call = caller([], async (name) => name === "memory_read" ? { note: { content }, revision: "a".repeat(64) } : {});
+  const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject: () => "atlas", input: event("SessionStart", { cwd: "/work/atlas" }) });
+  const context = (start.hookSpecificOutput as { additionalContext: string }).additionalContext;
+  assert.ok(context.indexOf("[[Mine]]") < context.indexOf("[[Other]]") && context.indexOf("[[Mine]]") < context.indexOf("[[Root]]"));
 }));
 
 test("a stale Now revision is re-read and merged, never blindly replaced", async () => withPrivateDirectory(async (directory) => {
@@ -302,12 +312,12 @@ test("a conflict replacement must identify the pending request and carry a fresh
   assert.deepEqual((await readState(directory)).pending, { turn: "turn-conflict", checkpoint: bound(pending) });
 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: replacement, replaces_request_id: pending.request_id } });
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-conflict", checkpoint: bound(replacement) });
+  assert.deepEqual((await readState(directory)).pending, { turn: "turn-conflict", checkpoint: { ...bound(replacement), reopen: true } }, "a save onto an existing revision carries reopen");
   const result = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
   assert.equal(result.saved, true);
   assert.equal(result.pending, false);
   assert.equal((await readState(directory)).pending, undefined);
-  assert.deepEqual(calls.filter(({ name, args }) => isSave(name, args)).map(({ args }) => args), [bound(replacement)]);
+  assert.deepEqual(calls.filter(({ name, args }) => isSave(name, args)).map(({ args }) => args), [{ ...bound(replacement), reopen: true }]);
 }));
 
 test("Checkpoint reports pending until a verified receipt, and compaction or interrupt warns when unstaged", async () => withPrivateDirectory(async (directory) => {
@@ -445,7 +455,7 @@ test("a lock left by a dead hook is reclaimed, while a live holder still reports
   assert.equal(await withPrivateLock(file, async () => "ran"), "ran", "an expired lock is reclaimed even when its PID is live");
 }));
 
-test("the project resolves once per session and scopes Now, recall and staged checkpoints", async () => withPrivateDirectory(async (directory) => {
+test("the project resolves once per session and scopes Agent Now order, recall and staged checkpoints", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const call = caller(calls);
   let resolved = 0;
@@ -453,7 +463,7 @@ test("the project resolves once per session and scopes Now, recall and staged ch
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("SessionStart", { cwd: "/work/atlas", prompt: "Resume" }) });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("UserPromptSubmit", { cwd: "/elsewhere", turn_id: "turn-1" }) });
   assert.equal(resolved, 1);
-  assert.deepEqual(calls[0], { name: "memory_read", args: { project: "atlas", role: "overview", subject: "Now", session_id: "session-1" } });
+  assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } }, "Agent Now is global; the project only orders it");
   assert.match(String(calls.find(({ name }) => name === "recall")!.args.query), /^atlas Resume/);
   const result = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("Checkpoint"),
     stage: { checkpoint: { title: "Atlas", content: "Progress", expected_revision: null } } });
@@ -461,3 +471,26 @@ test("the project resolves once per session and scopes Now, recall and staged ch
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call: caller(calls, async (_name, args) => ({ saved: true, request_id: args.request_id, note_id: "n", revision: "a".repeat(64), closed: false })), resolveProject, input: event("Checkpoint") });
   assert.equal(calls.find(({ name, args }) => isSave(name, args))!.args.project, "atlas");
 }));
+
+test("staging continue joins another session's checkpoint and returns it for merging", async () => withPrivateDirectory(async (directory) => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const call = caller(calls, async (_name, args) => args.action === "continue"
+    ? { saved: true, request_id: args.request_id, note_id: "shared", revision: "b".repeat(64), closed: false }
+    : { note: { title: "Shared (claude-abc)", content: "Claude progress" }, revision: "b".repeat(64), closed: false });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-1" }) });
+  const result = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { continue: { title: "Shared (claude-abc)" } } });
+  assert.equal(result.continued, true);
+  assert.deepEqual(result.note, { title: "Shared (claude-abc)", content: "Claude progress" });
+  assert.equal(calls.find(({ args }) => args.action === "continue")!.args.title, "Shared (claude-abc)");
+  assert.equal((await readState(directory)).pending, undefined, "continuing stages nothing");
+}));
+
+test("a finished checkpoint is kept, so restaging must merge it; only a trashed one is replaced", async () => {
+  const revision = "c".repeat(64);
+  const stage = { checkpoint: { title: "Resumed", content: "New work" } };
+  const kept: MemoryCall = async () => ({ note: { content: "Finished record" }, revision, closed: true });
+  await assert.rejects(() => prepareSessionStage(kept, "claude", "session-1", stage), /already exists at revision/);
+  const trashed: MemoryCall = async () => ({ note: null, revision, closed: true });
+  const staged = await prepareSessionStage(trashed, "claude", "session-1", stage);
+  assert.equal(staged.checkpoint!.expected_revision, revision);
+});
