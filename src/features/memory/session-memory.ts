@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { getDb, now } from "../../lib/db";
+import { applyFrontmatter } from "../../lib/markdown";
 import { deleteNote, getNote, restoreNote, updateNote, type Note } from "../../lib/notes";
 import type { ApiKeyPrincipal } from "../../server/auth/api-key-authorization";
 import { getMemoryStatus, memoryProject, memoryRevision, writeMemory } from "./memory";
@@ -147,7 +148,12 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
     let noteId = note?.id ?? null;
     let retainedNoteId: string | null = null;
     if (input.action === "continue") noteId = continueCheckpoint(area, record, note, ownerId, subject, input.title);
-    else if (currentRevision !== input.expected_revision) throw new MemoryError("Read current session memory and merge before retrying", 409, "revision_conflict");
+    else if (currentRevision !== input.expected_revision) {
+      // Name the expected value: agents otherwise invent placeholder hashes for a new checkpoint.
+      throw new MemoryError(currentRevision === null
+        ? "No session checkpoint exists yet; use expected_revision null to create it"
+        : `Session memory is at revision ${currentRevision}; read it, merge, and retry with that expected_revision`, 409, "revision_conflict");
+    }
     else if (input.action === "save") {
       if (record?.closed_at === null && note?.deleted_at != null) throw new MemoryError("Session checkpoint is in Trash; finish its cleanup or restore it before saving", 409, "ineligible_note");
       // Finished checkpoints are kept records; older clients would overwrite them without merging.
@@ -155,15 +161,17 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
         throw new MemoryError("This checkpoint is finished and kept as a record; read it, merge, and save with reopen", 409, "reopen_required");
       }
       if (record?.closed_at != null && note) restoreNote(note.id);
+      // status reuses the vault property dictionary so checkpoints can be filtered with prop_key/prop_value.
+      const content = applyFrontmatter(input.content, { status: "active" });
       const title = record?.title ?? `${input.title.slice(0, 87)} (${input.runtime}-${hash([principal.id, input.session_id]).slice(0, 12)})`;
       if (linked && note) {
         // Revision already checked above; the record belongs to the session that created it.
-        if (note.content !== input.content) updateNote(note.id, { content: input.content });
+        if (note.content !== content) updateNote(note.id, { content });
       } else {
         noteId = writeMemory(principal, {
           request_id: `session-save-${hash([principal.id, input]).slice(0, 40)}`,
           project, role: "session", subject, session_id: input.session_id,
-          title, content: input.content, expected_revision: note ? memoryRevision(note) : null,
+          title, content, expected_revision: note ? memoryRevision(note) : null,
         }).note_id;
       }
       db.prepare("UPDATE memory_records SET closed_at = NULL WHERE note_id = ?").run(noteId);
@@ -178,6 +186,7 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
       if (record && note) {
         // The checkpoint is kept as a session record; owner-invoked cleanup decides what to remove.
         updateNow(principal, area, project, input, record.title);
+        if (note.deleted_at == null) updateNote(note.id, { properties: { status: "done" } });
         db.prepare("UPDATE memory_records SET closed_at = COALESCE(closed_at, ?) WHERE note_id = ?").run(now(), note.id);
       }
     }

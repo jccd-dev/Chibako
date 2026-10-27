@@ -7,6 +7,7 @@ import { after, test } from "node:test";
 import { sessionMemory } from "../../src/features/memory/session-memory";
 import { MemoryError } from "../../src/features/memory/types";
 import { getDb } from "../../src/lib/db";
+import { stripFrontmatter } from "../../src/lib/markdown";
 import { createNote, deleteNote, getNote, listNotes, updateNote } from "../../src/lib/notes";
 import type { ApiKeyPrincipal } from "../../src/server/auth/api-key-authorization";
 
@@ -37,7 +38,8 @@ test("task changes and resumed sessions update one stable note; runtimes and act
   assert.equal(first.note_id, second.note_id);
   const note = read().note!;
   assert.match(note.title, /^First task \(claude-/);
-  assert.equal(note.content, "Changed objective");
+  assert.equal(stripFrontmatter(note.content), "Changed objective");
+  assert.equal(note.properties.status, "active");
   const now = listNotes().find(note => note.title === "Agent Now")!;
   assert.equal(getNote(now.id)!.content.split("\n").filter(line => line.startsWith("- [[")).length, 1);
   const other = sessionMemory({ ...actor, id: "other-agent" }, { ...identity, action: "read" });
@@ -45,6 +47,10 @@ test("task changes and resumed sessions update one stable note; runtimes and act
   assert.deepEqual(read({ runtime: "codex" }), { note: null, revision: null, closed: false });
   assert.deepEqual(read({ session_id: "another-session" }), { note: null, revision: null, closed: false });
   rejected(() => receipt(save({ expected_revision: first.revision })), "revision_conflict");
+  assert.throws(() => receipt(save({ session_id: "fresh-session", expected_revision: "0".repeat(64) })), /expected_revision null/);
+  const omitRevision = (input: Record<string, unknown>) => Object.fromEntries(Object.entries(input).filter(([key]) => key !== "expected_revision"));
+  assert.ok(receipt(omitRevision(save({ session_id: "omitted-revision-session" }))).note_id, "an omitted expected_revision creates a new checkpoint");
+  rejected(() => receipt(omitRevision(save())), "revision_conflict");
 });
 
 test("completion preserves durable knowledge, removes only this session from Agent Now and keeps its record", () => {
@@ -66,10 +72,12 @@ test("completion preserves durable knowledge, removes only this session from Age
   assert.deepEqual(receipt(finish), result, "lost-response retries return the original receipt");
   rejected(() => receipt({ ...finish, retain: { ...finish.retain, content: "Changed retry" } }), "request_conflict");
   rejected(() => receipt(save({ expected_revision: read().revision, content: "Old client without merge" })), "reopen_required");
-  assert.equal(getNote(result.note_id!)!.content, "Changed objective", "the kept record is not overwritten without reopen");
+  assert.equal(getNote(result.note_id!)!.properties.status, "done");
+  assert.equal(stripFrontmatter(getNote(result.note_id!)!.content), "Changed objective", "the kept record is not overwritten without reopen");
   const resumed = receipt(save({ expected_revision: read().revision, content: "Follow-up in the same host session", reopen: true }));
   assert.equal(resumed.note_id, result.note_id, "resume restores its own checkpoint rather than duplicating it");
   assert.equal(resumed.closed, false);
+  assert.equal(getNote(resumed.note_id!)!.properties.status, "active", "reopening marks the checkpoint active again");
   assert.deepEqual(receipt(finish), result, "an old finish replay must not close newly resumed work");
   assert.ok(getNote(resumed.note_id!));
 });
@@ -204,13 +212,13 @@ test("another runtime and key can continue one shared checkpoint without duplica
   assert.ok("note" in current && current.note!.id === created.note_id);
   const updated = sessionMemory(codex, { ...codexIdentity, action: "save", request_id: randomUUID(), title: "Ignored", content: "Codex progress", expected_revision: current.revision, now_line: "Codex next" });
   assert.ok("saved" in updated && updated.note_id === created.note_id);
-  assert.equal(getNote(created.note_id!)!.content, "Codex progress");
+  assert.equal(stripFrontmatter(getNote(created.note_id!)!.content), "Codex progress");
   assert.equal(listNotes().filter(note => note.title.startsWith("Shared handoff")).length, 1);
   const now = getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content;
   assert.ok(now.includes(`- [[${title}]] (atlas) — Codex next`));
   rejected(() => receipt(save({ session_id: "handoff-claude", content: "Stale", expected_revision: created.revision })), "revision_conflict");
   const claudeRead = read({ session_id: "handoff-claude" });
-  assert.equal(claudeRead.note!.content, "Codex progress", "the original session sees the continued work");
+  assert.equal(stripFrontmatter(claudeRead.note!.content), "Codex progress", "the original session sees the continued work");
   rejected(() => sessionMemory(codex, { ...codexIdentity, session_id: "busy", action: "continue", request_id: randomUUID(), title: "No such checkpoint" }), "ineligible_note");
   receipt(save({ session_id: "busy-own", title: "Own work" }));
   rejected(() => receipt({ ...identity, session_id: "busy-own", action: "continue", request_id: randomUUID(), title }), "session_active");

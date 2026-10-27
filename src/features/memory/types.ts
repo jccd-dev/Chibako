@@ -29,14 +29,15 @@ export const sessionMemorySchema = z.discriminatedUnion("action", [
     action: z.literal("save"), request_id: identity,
     title: memoryWriteSchema.shape.title.refine((value) => !/[[\]|]/.test(value), "Title cannot contain [, ] or |"),
     content: memoryWriteSchema.shape.content,
-    expected_revision: memoryWriteSchema.shape.expected_revision,
+    // Omitted means a new checkpoint; an existing one still conflicts.
+    expected_revision: memoryWriteSchema.shape.expected_revision.default(null),
     now_line: z.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/),
     // Required to save into a finished (kept) checkpoint, after reading and merging it.
     reopen: z.literal(true).optional(),
   }).strict(),
   sessionIdentity.extend({
     action: z.literal("finish"), request_id: identity,
-    expected_revision: memoryWriteSchema.shape.expected_revision,
+    expected_revision: memoryWriteSchema.shape.expected_revision.default(null),
     retain: retainedMemorySchema.optional(),
   }).strict(),
   // Joins another session's active or finished checkpoint by its title; both sessions then share it.

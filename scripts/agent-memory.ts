@@ -15,6 +15,12 @@ const inputSchema = z.object({
   turn_id: z.string().optional(), prompt: z.string().optional(), stop_hook_active: z.boolean().optional(),
 }).passthrough();
 let countingOnly = false;
+const usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
+  hook     read a host hook event on stdin
+  stage    read {"checkpoint"|"finish"|"skip"|"continue": ...} on stdin; expected_revision may sit inside it or beside it
+  status   show the profile and pending state without the API key
+  doctor   check the connection, scopes and hook files
+`;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 async function readInput(): Promise<unknown> {
   let bytes = 0;
@@ -30,7 +36,8 @@ async function readInput(): Promise<unknown> {
 
 async function main(): Promise<void> {
   if (Number(process.versions.node.split(".")[0]) < 20) throw new MemoryClientError("Chibako Memory requires Node.js 20 or later.");
-  const args = parseArgs({ allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" }, session: { type: "string" } } });
+  const args = parseArgs({ allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" }, session: { type: "string" }, help: { type: "boolean", short: "h" } } });
+  if (args.values.help || !args.positionals[0]) { process.stdout.write(usage); return; }
   const runtime = z.enum(["codex", "claude", "hermes"]).parse(args.positionals[0]);
   const action = args.positionals[1] || "hook";
   const name = args.values.profile || process.env.CHIBAKO_MEMORY_PROFILE || "default";
@@ -63,7 +70,7 @@ async function main(): Promise<void> {
   try {
     const execute = async () => {
       const call = connection.call;
-      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), finish: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), continue: z.unknown().optional(), replaces_request_id: z.unknown().optional() }).parse(payload) : undefined;
+      const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), finish: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), continue: z.unknown().optional(), replaces_request_id: z.unknown().optional(), expected_revision: z.unknown().optional() }).parse(payload) : undefined;
       const options = { runtime, input, directory: stateDirectory, enabled: true, call, resolveProject, ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
           stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)} --session ${quote(input.session_id)}` } : {}) };

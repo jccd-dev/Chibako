@@ -494,3 +494,11 @@ test("a finished checkpoint is kept, so restaging must merge it; only a trashed 
   const staged = await prepareSessionStage(trashed, "claude", "session-1", stage);
   assert.equal(staged.checkpoint!.expected_revision, revision);
 });
+
+test("staging accepts expected_revision beside the checkpoint as well as inside it", async () => {
+  const revision = "d".repeat(64);
+  const unread: MemoryCall = async () => { throw new Error("a supplied revision needs no read"); };
+  const staged = await prepareSessionStage(unread, "claude", "session-1", { checkpoint: { title: "Resumed", content: "Merged" }, expected_revision: revision });
+  assert.equal(staged.checkpoint!.expected_revision, revision);
+  await assert.rejects(() => prepareSessionStage(unread, "claude", "session-1", { checkpoint: { title: "Resumed", content: "Merged", expected_revision: revision }, expected_revision: "e".repeat(64) }), /expected_revision/);
+});

@@ -21,8 +21,12 @@ const stageSchema = z.object({
   skip: z.string().trim().min(1).max(300).optional(),
   continue: z.object({ title: memoryWriteSchema.shape.title }).strict().optional(),
   replaces_request_id: z.string().optional(),
+  // Agents often put it beside the checkpoint; accept it there too.
+  expected_revision: memoryWriteSchema.shape.expected_revision.optional(),
 }).strict().refine(value => [value.checkpoint, value.finish, value.skip, value.continue].filter(Boolean).length === 1, "Provide exactly one of checkpoint, finish, skip or continue")
-  .refine(value => !value.now_line || Boolean(value.checkpoint), "now_line needs a checkpoint");
+  .refine(value => !value.now_line || Boolean(value.checkpoint), "now_line needs a checkpoint")
+  .refine(value => value.expected_revision === undefined || Boolean(value.checkpoint || value.finish), "expected_revision needs a checkpoint or finish")
+  .refine(value => value.expected_revision === undefined || [value.checkpoint?.expected_revision, value.finish?.expected_revision].every(inner => inner === undefined || inner === value.expected_revision), "expected_revision differs between the stage and its checkpoint or finish");
 
 export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, session_id: string, raw: unknown, legacy?: MemoryWriteInput, scope: { project?: string } = {}): Promise<{
   checkpoint?: SessionMutation | MemoryWriteInput; skip?: string; replaces_request_id?: string; now_line?: string; continue?: SessionContinue;
@@ -38,16 +42,17 @@ export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, se
   }
   if (stage.checkpoint?.session_id && stage.checkpoint.session_id !== session_id) throw new MemoryClientError("Checkpoint session mismatch");
   const source = stage.checkpoint ?? stage.finish!;
+  const expected = source.expected_revision !== undefined ? source.expected_revision : stage.expected_revision;
   const candidate = sessionMutationSchema.parse({
-    runtime, session_id, ...scope, request_id: source.request_id ?? randomUUID(), expected_revision: source.expected_revision ?? null,
+    runtime, session_id, ...scope, request_id: source.request_id ?? randomUUID(), expected_revision: expected ?? null,
     ...(stage.checkpoint ? { action: "save", title: stage.checkpoint.title, content: stage.checkpoint.content, now_line: stage.now_line ?? "Work in progress" }
       : { action: "finish", ...(stage.finish?.retain ? { retain: stage.finish.retain } : {}) }),
   });
-  if (source.expected_revision === undefined) {
+  if (expected === undefined) {
     const current = await call("memory_session", { action: "read", runtime, session_id });
     const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
     if (revision && current.note) {
-      throw new MemoryClientError(`This session memory already exists at revision ${revision}. Read memory_session with action read, runtime ${runtime} and the hook session_id, merge the current content, then restage with expected_revision ${revision}.`);
+      throw new MemoryClientError(`This session memory already exists at revision ${revision}. Read memory_session with action read, runtime ${runtime} and the hook session_id, merge the current content, then restage with "expected_revision": "${revision}".`);
     }
     candidate.expected_revision = revision;
   }
