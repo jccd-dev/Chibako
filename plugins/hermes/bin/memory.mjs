@@ -27058,7 +27058,8 @@ var sessionMemorySchema = external_exports.discriminatedUnion("action", [
     request_id: identity,
     title: memoryWriteSchema.shape.title.refine((value) => !/[[\]|]/.test(value), "Title cannot contain [, ] or |"),
     content: memoryWriteSchema.shape.content,
-    expected_revision: memoryWriteSchema.shape.expected_revision,
+    // Omitted means a new checkpoint; an existing one still conflicts.
+    expected_revision: memoryWriteSchema.shape.expected_revision.default(null),
     now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/),
     // Required to save into a finished (kept) checkpoint, after reading and merging it.
     reopen: external_exports.literal(true).optional()
@@ -27066,7 +27067,7 @@ var sessionMemorySchema = external_exports.discriminatedUnion("action", [
   sessionIdentity.extend({
     action: external_exports.literal("finish"),
     request_id: identity,
-    expected_revision: memoryWriteSchema.shape.expected_revision,
+    expected_revision: memoryWriteSchema.shape.expected_revision.default(null),
     retain: retainedMemorySchema.optional()
   }).strict(),
   // Joins another session's active or finished checkpoint by its title; both sessions then share it.
@@ -27192,8 +27193,10 @@ var stageSchema = external_exports.object({
   now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional(),
   skip: external_exports.string().trim().min(1).max(300).optional(),
   continue: external_exports.object({ title: memoryWriteSchema.shape.title }).strict().optional(),
-  replaces_request_id: external_exports.string().optional()
-}).strict().refine((value) => [value.checkpoint, value.finish, value.skip, value.continue].filter(Boolean).length === 1, "Provide exactly one of checkpoint, finish, skip or continue").refine((value) => !value.now_line || Boolean(value.checkpoint), "now_line needs a checkpoint");
+  replaces_request_id: external_exports.string().optional(),
+  // Agents often put it beside the checkpoint; accept it there too.
+  expected_revision: memoryWriteSchema.shape.expected_revision.optional()
+}).strict().refine((value) => [value.checkpoint, value.finish, value.skip, value.continue].filter(Boolean).length === 1, "Provide exactly one of checkpoint, finish, skip or continue").refine((value) => !value.now_line || Boolean(value.checkpoint), "now_line needs a checkpoint").refine((value) => value.expected_revision === void 0 || Boolean(value.checkpoint || value.finish), "expected_revision needs a checkpoint or finish").refine((value) => value.expected_revision === void 0 || [value.checkpoint?.expected_revision, value.finish?.expected_revision].every((inner) => inner === void 0 || inner === value.expected_revision), "expected_revision differs between the stage and its checkpoint or finish");
 async function prepareSessionStage(call, runtime, session_id, raw, legacy, scope = {}) {
   if (legacy) {
     return external_exports.object({ checkpoint: memoryWriteSchema, replaces_request_id: external_exports.string(), now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/).optional() }).strict().refine((value) => !value.now_line || value.checkpoint.role === "overview" && !/[[\]|]/.test(value.checkpoint.title), "now_line needs an overview with a plain title").parse(raw);
@@ -27205,19 +27208,20 @@ async function prepareSessionStage(call, runtime, session_id, raw, legacy, scope
   }
   if (stage.checkpoint?.session_id && stage.checkpoint.session_id !== session_id) throw new MemoryClientError("Checkpoint session mismatch");
   const source = stage.checkpoint ?? stage.finish;
+  const expected = source.expected_revision !== void 0 ? source.expected_revision : stage.expected_revision;
   const candidate = sessionMutationSchema.parse({
     runtime,
     session_id,
     ...scope,
     request_id: source.request_id ?? randomUUID2(),
-    expected_revision: source.expected_revision ?? null,
+    expected_revision: expected ?? null,
     ...stage.checkpoint ? { action: "save", title: stage.checkpoint.title, content: stage.checkpoint.content, now_line: stage.now_line ?? "Work in progress" } : { action: "finish", ...stage.finish?.retain ? { retain: stage.finish.retain } : {} }
   });
-  if (source.expected_revision === void 0) {
+  if (expected === void 0) {
     const current = await call("memory_session", { action: "read", runtime, session_id });
     const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
     if (revision && current.note) {
-      throw new MemoryClientError(`This session memory already exists at revision ${revision}. Read memory_session with action read, runtime ${runtime} and the hook session_id, merge the current content, then restage with expected_revision ${revision}.`);
+      throw new MemoryClientError(`This session memory already exists at revision ${revision}. Read memory_session with action read, runtime ${runtime} and the hook session_id, merge the current content, then restage with "expected_revision": "${revision}".`);
     }
     candidate.expected_revision = revision;
   }
@@ -27487,7 +27491,7 @@ async function runMemoryEvent(options) {
     let context = "";
     const dueNote = async () => {
       state.dueRequested = true;
-      return `Memory checkpoint due. Update this session's ONE checkpoint: {"checkpoint": {"title": "<session label>", "content": "current objective, decisions, evidence, pending work"}, "now_line": "<=140 chars next action"}. When no work remains, use {"finish": {}} to close it and remove its Agent Now entry (the checkpoint stays as a session record), or include retain (wiki/preference role, subject, title, content, expected_revision, confirmation for preferences) to preserve lasting knowledge atomically first. Skip unchanged or trivial work with {"skip": "reason"}. Identity comes from the hook session, never a task name; if this session already continued an Agent Now checkpoint, saves update that shared note. For an existing note, read memory_session with action read and restage with expected_revision. Stop means response end, not task completion. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Checkpoints need no schema; call get_knowledge_schema only before retain or another note write. Runs once.`;
+      return `Memory checkpoint due. Update this session's ONE checkpoint: {"checkpoint": {"title": "<session label>", "content": "current objective, decisions, evidence, pending work"}, "now_line": "<=140 chars next action"}. When no work remains, use {"finish": {}} to close it and remove its Agent Now entry (the checkpoint stays as a session record), or include retain (wiki/preference role, subject, title, content, expected_revision, confirmation for preferences) to preserve lasting knowledge atomically first. Skip unchanged or trivial work with {"skip": "reason"}. Identity comes from the hook session, never a task name; if this session already continued an Agent Now checkpoint, saves update that shared note. For an existing note, read memory_session with action read and restage with its revision as "expected_revision" (inside checkpoint/finish or beside it). Stop means response end, not task completion. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Checkpoints need no schema; call get_knowledge_schema only before retain or another note write. This reminder runs once; a rejected stage changes nothing and can be fixed and rerun.`;
     };
     if (event === "SessionStart" || event === "UserPromptSubmit") {
       try {
@@ -32571,7 +32575,7 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
       const content = external_exports.array(external_exports.object({ type: external_exports.string(), text: external_exports.string().optional() }).passthrough()).safeParse(result.content);
       const message = content.success ? content.data.find((item) => item.type === "text")?.text : void 0;
       if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.");
-      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError("Session memory changed. Read memory_session with action read, merge current content, and restage with its expected_revision and replaces_request_id identifying the pending request.");
+      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`Session memory conflict: ${message.slice("error: revision_conflict:".length).trim().slice(0, 300)} Restage with replaces_request_id identifying the pending request.`);
     }
     if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.");
     return external_exports.record(external_exports.string(), external_exports.unknown()).parse(result.structuredContent);
@@ -36008,6 +36012,12 @@ var inputSchema = external_exports.object({
   stop_hook_active: external_exports.boolean().optional()
 }).passthrough();
 var countingOnly = false;
+var usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
+  hook     read a host hook event on stdin
+  stage    read {"checkpoint"|"finish"|"skip"|"continue": ...} on stdin; expected_revision may sit inside it or beside it
+  status   show the profile and pending state without the API key
+  doctor   check the connection, scopes and hook files
+`;
 var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 async function readInput() {
   let bytes = 0;
@@ -36022,7 +36032,11 @@ async function readInput() {
 }
 async function main() {
   if (Number(process.versions.node.split(".")[0]) < 20) throw new MemoryClientError("Chibako Memory requires Node.js 20 or later.");
-  const args = parseArgs({ allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" }, session: { type: "string" } } });
+  const args = parseArgs({ allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" }, session: { type: "string" }, help: { type: "boolean", short: "h" } } });
+  if (args.values.help || !args.positionals[0]) {
+    process.stdout.write(usage);
+    return;
+  }
   const runtime = external_exports.enum(["codex", "claude", "hermes"]).parse(args.positionals[0]);
   const action = args.positionals[1] || "hook";
   const name = args.values.profile || process.env.CHIBAKO_MEMORY_PROFILE || "default";
@@ -36053,7 +36067,7 @@ async function main() {
   try {
     const execute = async () => {
       const call = connection.call;
-      const staged = action === "stage" ? external_exports.object({ checkpoint: external_exports.unknown().optional(), finish: external_exports.unknown().optional(), now_line: external_exports.unknown().optional(), skip: external_exports.unknown().optional(), continue: external_exports.unknown().optional(), replaces_request_id: external_exports.unknown().optional() }).parse(payload) : void 0;
+      const staged = action === "stage" ? external_exports.object({ checkpoint: external_exports.unknown().optional(), finish: external_exports.unknown().optional(), now_line: external_exports.unknown().optional(), skip: external_exports.unknown().optional(), continue: external_exports.unknown().optional(), replaces_request_id: external_exports.unknown().optional(), expected_revision: external_exports.unknown().optional() }).parse(payload) : void 0;
       const options = {
         runtime,
         input: input2,
