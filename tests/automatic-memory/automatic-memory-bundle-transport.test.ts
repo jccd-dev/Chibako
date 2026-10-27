@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { POST as remote } from "../../src/app/mcp/route";
 import { getDb } from "../../src/lib/db";
+import { stripFrontmatter } from "../../src/lib/markdown";
 import { sessionMemory } from "../../src/features/memory/session-memory";
 import { deleteNote, getNote } from "../../src/lib/notes";
 import { createApiKey } from "../../src/server/auth/api-key-authorization";
@@ -129,7 +130,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     const current = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "bundle-session" });
     assert.ok("note" in current && current.note);
     const note = current.note;
-    assert.equal(note.content, checkpoint.content);
+    assert.equal(stripFrontmatter(note.content), checkpoint.content);
     await invoke({ session_id: "bundle-handoff", hook_event_name: "UserPromptSubmit", turn_id: "handoff-turn" });
     const continued = JSON.parse((await invoke({ session_id: "bundle-handoff", hook_event_name: "Checkpoint", continue: { title: note.title } }, "stage")).stdout) as { continued: boolean; note: { id: string } };
     assert.equal(continued.continued, true, "the compiled runner passes continue through to the server");
@@ -160,6 +161,12 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     assert.ok("note" in closed);
     assert.equal(closed.note?.id, note.id, "finish keeps the checkpoint as a session record");
     assert.equal(closed.closed, true);
+
+    assert.match((await invoke({}, "--help")).stdout, /Usage:.*status/s, "help lists the controls instead of failing");
+    await invoke({ session_id: "conflict-session", hook_event_name: "UserPromptSubmit", turn_id: "conflict-turn" });
+    const conflicted = JSON.parse((await invoke({ session_id: "conflict-session", hook_event_name: "Checkpoint", checkpoint: { title: "Conflict fixture", content: "Invented revision" }, expected_revision: "f".repeat(64) }, "stage")).stdout);
+    assert.equal(conflicted.pending, true, "a top-level expected_revision reaches the server");
+    assert.match(conflicted.systemMessage, /No session checkpoint exists yet; use expected_revision null/, "the server's conflict detail reaches the agent");
 
     advertiseLifecycle = false;
     await invoke({ session_id: "old-server-session", hook_event_name: "UserPromptSubmit", turn_id: "old-server-turn" });

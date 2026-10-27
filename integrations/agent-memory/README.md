@@ -139,7 +139,9 @@ The hook's stage command already carries `--session <id>`; pipe only the checkpo
 (a new session gets `expected_revision: null`). If session memory already exists, staging
 is rejected with its current revision: use `memory_session` action `read` with the
 runtime and hook session ID, merge your update, and restage with
-`"expected_revision": "<revision>"` in the checkpoint. Without `--session`, or for
+`"expected_revision": "<revision>"` in the checkpoint or beside it. A rejected stage
+changes nothing, so fix it and rerun. `memory.mjs --help` lists the commands;
+`status` shows the profile without its API key. Without `--session`, or for
 full legacy payloads, supply the top-level `session_id` and `hook_event_name:
 "Checkpoint"` and every checkpoint field (`request_id`, matching `session_id`,
 `expected_revision`) yourself.

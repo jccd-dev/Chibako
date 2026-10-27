@@ -59,7 +59,8 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
       const content = z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough()).safeParse(result.content);
       const message = content.success ? content.data.find(item => item.type === "text")?.text : undefined;
       if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.");
-      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError("Session memory changed. Read memory_session with action read, merge current content, and restage with its expected_revision and replaces_request_id identifying the pending request.");
+      // The server's detail names the expected revision; it carries no checkpoint content.
+      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`Session memory conflict: ${message.slice("error: revision_conflict:".length).trim().slice(0, 300)} Restage with replaces_request_id identifying the pending request.`);
     }
     if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.");
     return z.record(z.string(), z.unknown()).parse(result.structuredContent);
