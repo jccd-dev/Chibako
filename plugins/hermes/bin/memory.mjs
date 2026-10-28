@@ -3258,8 +3258,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path8) {
-      let input2 = path8;
+    function removeDotSegments(path9) {
+      let input2 = path9;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3668,8 +3668,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path8 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
+        const path9 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path9 && path9 !== "/" ? path9 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7300,13 +7300,18 @@ var require_content_type = __commonJS({
 });
 
 // scripts/memory/client-error.ts
+var failureCategories = ["conflict", "ineligible", "request_conflict", "timeout", "authentication", "http", "connection", "denied", "unsupported", "invalid_receipt", "unknown"];
 var MemoryClientError = class extends Error {
+  constructor(message, failure2) {
+    super(message);
+    this.failure = failure2;
+  }
 };
 
 // scripts/agent-memory.ts
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import path7 from "node:path";
+import path8 from "node:path";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -8125,10 +8130,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema2) {
   return mergeDefs(schema2._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path9) {
+  if (!path9)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path9.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -8468,11 +8473,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path9, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path9);
     return iss;
   });
 }
@@ -8934,16 +8939,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path8 = []) => {
+  const processError = (error63, path9 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -8982,17 +8987,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path8 = []) => {
+  const processError = (error63, path9 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -9031,8 +9036,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path8) {
+  const path9 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path9) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -26170,13 +26175,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path8 = ref.slice(1).split("/").filter(Boolean);
-  if (path8.length === 0) {
+  const path9 = ref.slice(1).split("/").filter(Boolean);
+  if (path9.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path8[0] === defsKey) {
-    const key = path8[1] === void 0 ? void 0 : decodeJSONPointerSegment(path8[1]);
+  if (path9[0] === defsKey) {
+    const key = path9[1] === void 0 ? void 0 : decodeJSONPointerSegment(path9[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -27027,7 +27032,7 @@ function date4(params) {
 
 // scripts/memory/runtime.ts
 import { createHash, randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir2, open as open3, readFile as readFile2, rename as rename2, stat } from "node:fs/promises";
+import { lstat as lstat2, mkdir as mkdir2, open as open3, rename as rename2 } from "node:fs/promises";
 import path3 from "node:path";
 
 // src/features/memory/types.ts
@@ -27051,6 +27056,7 @@ var retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, session_id
   // Defaults to the session's project; null files cross-project knowledge at the area root.
   project: projectSchema.nullable().optional()
 });
+var nowLine = external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/);
 var sessionMemorySchema = external_exports.discriminatedUnion("action", [
   sessionIdentity.extend({ action: external_exports.literal("read") }).strict(),
   sessionIdentity.extend({
@@ -27060,7 +27066,7 @@ var sessionMemorySchema = external_exports.discriminatedUnion("action", [
     content: memoryWriteSchema.shape.content,
     // Omitted means a new checkpoint; an existing one still conflicts.
     expected_revision: memoryWriteSchema.shape.expected_revision.default(null),
-    now_line: external_exports.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/),
+    now_line: nowLine,
     // Required to save into a finished (kept) checkpoint, after reading and merging it.
     reopen: external_exports.literal(true).optional()
   }).strict(),
@@ -27077,6 +27083,16 @@ var sessionMemorySchema = external_exports.discriminatedUnion("action", [
     title: memoryWriteSchema.shape.title
   }).strict()
 ]);
+var sessionMemoryToolSchema = sessionIdentity.extend({
+  action: external_exports.enum(sessionMemorySchema.options.map((option) => option.shape.action.value)),
+  request_id: identity.optional().describe("save, finish, continue: stable per operation; reuse it only to retry the same body"),
+  title: memoryWriteSchema.shape.title.optional().describe("save: checkpoint title; continue: the existing checkpoint to join"),
+  content: memoryWriteSchema.shape.content.optional().describe("save: full checkpoint content"),
+  now_line: nowLine.optional().describe("save: one-line next action for Agent Now"),
+  expected_revision: memoryWriteSchema.shape.expected_revision.optional().describe("save, finish: null or omitted for a new checkpoint, otherwise the revision from action read"),
+  reopen: external_exports.literal(true).optional().describe("save: required to save into a finished checkpoint after reading and merging it"),
+  retain: retainedMemorySchema.optional().describe("finish: optional wiki/preference knowledge to retain")
+}).strict();
 
 // scripts/memory/private-files.ts
 import { mkdir, lstat, open as open2, readFile, rename, unlink } from "node:fs/promises";
@@ -27326,14 +27342,76 @@ var stateSchema = external_exports.object({
     turn: external_exports.string(),
     checkpoint: external_exports.union([sessionMutationSchema, memoryWriteSchema]),
     now_line: external_exports.string().optional(),
-    superseded: sessionMutationSchema.optional()
+    superseded: sessionMutationSchema.optional(),
+    // Last safe failure category; a confirmed conflict blocks resends until an explicit replacement.
+    failure: external_exports.object({
+      category: external_exports.enum(failureCategories),
+      phase: external_exports.enum(["connect", "call"]).optional(),
+      http_status: external_exports.number().int().optional(),
+      elapsed_ms: external_exports.number().int().min(0).optional(),
+      announced: external_exports.boolean().default(false)
+    }).strict().optional()
   }).optional(),
   lastCheckpoint: external_exports.object({ hash: external_exports.string(), revision: external_exports.string() }).optional(),
+  // Latest verified save, kept after delivery so a restart or compaction can replay it without a remote call.
+  receipt: external_exports.object({
+    request_id: external_exports.string(),
+    action: external_exports.enum(["save", "finish", "continue", "write"]),
+    note_id: external_exports.string().nullable(),
+    revision: external_exports.string().nullable(),
+    closed: external_exports.boolean().optional(),
+    retained_note_id: external_exports.string().nullable().optional(),
+    verified_at: external_exports.string(),
+    announced: external_exports.boolean().default(false)
+  }).optional(),
   nowUpdate: external_exports.object({ thread: external_exports.string(), line: external_exports.string() }).optional()
 }).strict();
 var checkpointHash = (checkpoint) => createHash("sha256").update(JSON.stringify([checkpoint.content, checkpoint.now_line])).digest("hex");
 var NOW = { subject: "Agent Now", lines: 15, read: 1800 };
 var verified = (receipt, request_id) => receipt.saved === true && receipt.request_id === request_id && typeof receipt.note_id === "string" && typeof receipt.revision === "string" && /^[a-f0-9]{64}$/.test(receipt.revision);
+function withoutAnnounced(value) {
+  const copy = { ...value };
+  delete copy.announced;
+  return copy;
+}
+var blocked = (pending) => pending?.failure?.category === "conflict";
+var STALE = "Memory checkpoint was REJECTED as stale (revision conflict) and stays UNSAVED locally for recovery; it will not be resent.";
+function pendingSummary(pending, inspectCommand = "the inspect command (see integrations/agent-memory/README.md)") {
+  const { request_id, expected_revision } = pending.checkpoint;
+  const failure2 = pending.failure && withoutAnnounced(pending.failure);
+  const replace = `read memory_session action read for the current content and revision, merge both deliberately, then stage the merged checkpoint (or a finish) without a request_id, with "expected_revision": "<current revision>" and "replaces_request_id": "${request_id}"`;
+  return {
+    request_id,
+    action: "action" in pending.checkpoint ? pending.checkpoint.action : "write",
+    attempted_revision: expected_revision,
+    ...failure2 ? { failure: failure2 } : {},
+    recovery: blocked(pending) ? `Recover it: inspect the pending content with ${inspectCommand}, ${replace}.` : `It is retried unchanged at the next event; an unconfirmed outcome may already have committed. To replace it instead, inspect it with ${inspectCommand}, ${replace}.`
+  };
+}
+function pendingNotice(summary) {
+  return `Memory checkpoint UNSAVED (${summary.failure?.category ?? "not yet sent"}${summary.failure?.category === "conflict" ? ", rejected as stale" : ""}): request_id ${summary.request_id}, attempted revision ${summary.attempted_revision ?? "null (new checkpoint)"}. ${summary.recovery}
+`;
+}
+function receiptNotice(receipt) {
+  const outcome = receipt.action === "continue" ? "joined a checkpoint" : receipt.closed ? "closed the checkpoint" : "saved the checkpoint";
+  const where = receipt.note_id ? ` note ${receipt.note_id}, revision ${receipt.revision}` : " no note (nothing was written to a note)";
+  const kept = receipt.retained_note_id ? `; retained note ${receipt.retained_note_id}` : "";
+  return `Verified memory receipt (past operation, ${receipt.verified_at}): ${outcome}; request_id ${receipt.request_id};${where}${kept}. This is not the current revision: another contributor may have changed the checkpoint since, so read the current checkpoint with memory_session action read and merge before updating.
+`;
+}
+function flushReceipt(checkpoint, receipt) {
+  const session = checkpoint.action !== void 0;
+  return {
+    request_id: checkpoint.request_id,
+    action: session ? checkpoint.action : "write",
+    note_id: typeof receipt.note_id === "string" ? receipt.note_id : null,
+    revision: typeof receipt.revision === "string" ? receipt.revision : null,
+    ...session ? { closed: receipt.closed === true } : {},
+    ...typeof receipt.retained_note_id === "string" ? { retained_note_id: receipt.retained_note_id } : {},
+    verified_at: (/* @__PURE__ */ new Date()).toISOString(),
+    announced: false
+  };
+}
 function mergeNow(content, thread, line) {
   const lines = content.split("\n");
   const key = `- [[${thread}]]`;
@@ -27368,31 +27446,62 @@ async function upsertNow(call, session_id, thread, line) {
     }
   }
 }
+function checkLocation(directory, session_id) {
+  if (!path3.isAbsolute(directory) || !session_id || session_id.length > 200) throw new MemoryClientError("Invalid private memory state location or session");
+}
+async function checkPrivate(directory) {
+  const permissions = await lstat2(directory);
+  if (!permissions.isDirectory() || (permissions.mode & 63) !== 0 || permissions.uid !== process.getuid?.()) throw new MemoryClientError("Memory state directory must be private to the runtime user");
+}
+var stateFile = (directory, runtime, session_id) => path3.join(directory, `${createHash("sha256").update(`${runtime}:${session_id}`).digest("hex")}.json`);
+async function loadState(file2, binding) {
+  let state = stateSchema.parse({});
+  const text = await readOptional(file2);
+  if (text !== null) {
+    if (Buffer.byteLength(text) > 32e4) throw new Error("Memory state exceeds limit");
+    state = stateSchema.parse(JSON.parse(text));
+  }
+  if (binding && (state.binding && JSON.stringify(state.binding) !== JSON.stringify(binding) || !state.binding && state.pending)) {
+    throw new MemoryClientError("Pending state is unbound or belongs to another connection; preserve it for owner review.");
+  }
+  return state;
+}
+async function inspectMemoryState(options) {
+  const { runtime, directory, session_id } = options;
+  checkLocation(directory, session_id);
+  const empty = { runtime, session_id, pending: null, receipt: null };
+  try {
+    await checkPrivate(directory);
+  } catch (error62) {
+    if (error62 && typeof error62 === "object" && "code" in error62 && error62.code === "ENOENT") return empty;
+    throw error62;
+  }
+  const file2 = stateFile(directory, runtime, session_id);
+  return withPrivateLock(`${file2}.lock`, async () => {
+    const { pending, receipt } = await loadState(file2, options.binding);
+    return {
+      ...empty,
+      pending: pending ? {
+        ...pendingSummary(pending, options.inspectCommand),
+        checkpoint: pending.checkpoint,
+        ...pending.now_line ? { now_line: pending.now_line } : {},
+        ...pending.superseded ? { superseded: pending.superseded } : {}
+      } : null,
+      receipt: receipt ? withoutAnnounced(receipt) : null
+    };
+  });
+}
 async function runMemoryEvent(options) {
   if (!options.enabled) return {};
   const { runtime, input: input2, directory, call } = options;
-  if (!path3.isAbsolute(directory) || !input2.session_id || input2.session_id.length > 200) throw new Error("Invalid private memory state location or session");
+  checkLocation(directory, input2.session_id);
   await mkdir2(directory, { recursive: true, mode: 448 });
-  const permissions = await stat(directory);
-  if ((permissions.mode & 63) !== 0 || permissions.uid !== process.getuid?.()) throw new Error("Memory state directory must be private to the runtime user");
-  const key = createHash("sha256").update(`${runtime}:${input2.session_id}`).digest("hex");
-  const file2 = path3.join(directory, `${key}.json`);
+  await checkPrivate(directory);
+  const file2 = stateFile(directory, runtime, input2.session_id);
   const release = await acquirePrivateLock(`${file2}.lock`);
   try {
-    let state = stateSchema.parse({});
-    try {
-      const bytes = await readFile2(file2);
-      if (bytes.length > 32e4) throw new Error("Memory state exceeds limit");
-      state = stateSchema.parse(JSON.parse(bytes.toString("utf8")));
-    } catch (error62) {
-      if (!(error62 && typeof error62 === "object" && "code" in error62 && error62.code === "ENOENT")) throw error62;
-    }
-    if (options.binding) {
-      if (state.binding && JSON.stringify(state.binding) !== JSON.stringify(options.binding) || !state.binding && state.pending) {
-        throw new Error("Pending state is unbound or belongs to another connection; preserve it for owner review.");
-      }
-      state.binding = options.binding;
-    }
+    const state = await loadState(file2, options.binding);
+    if (options.binding) state.binding = options.binding;
     if (state.project === void 0 && options.resolveProject && options.stage === void 0) state.project = options.resolveProject(input2.cwd) ?? null;
     const scope = state.project ? { project: state.project } : {};
     const save = async () => {
@@ -27411,12 +27520,13 @@ async function runMemoryEvent(options) {
       const legacy = state.pending && !("action" in state.pending.checkpoint) ? state.pending.checkpoint : void 0;
       const staged = await prepareSessionStage(call, runtime, input2.session_id, options.stage, legacy, scope);
       if (staged.continue) {
-        if (state.pending) throw new Error("Unsaved checkpoint exists; flush or resolve it before continuing another");
+        if (state.pending) throw new MemoryClientError(`Unsaved checkpoint exists; resolve it before continuing another. ${pendingSummary(state.pending, options.inspectCommand).recovery}`);
         const receipt = await call("memory_session", staged.continue);
         if (!verified(receipt, staged.continue.request_id)) throw new Error("Unverified continue receipt");
         const current = await call("memory_session", { action: "read", runtime, session_id: input2.session_id });
         state.topic = staged.continue.title;
         state.lastCheckpoint = void 0;
+        state.receipt = { request_id: staged.continue.request_id, action: "continue", note_id: String(receipt.note_id), revision: String(receipt.revision), verified_at: (/* @__PURE__ */ new Date()).toISOString(), announced: true };
         await save();
         return { continued: true, receipt, note: current.note, revision: current.revision };
       }
@@ -27424,8 +27534,11 @@ async function runMemoryEvent(options) {
         const pending = state.pending.checkpoint;
         const replacement = staged.checkpoint;
         const sameOperation = replacement && ("action" in pending ? "action" in replacement && (replacement.action === pending.action || pending.action === "save" && replacement.action === "finish") : !("action" in replacement) && replacement.role === pending.role && replacement.subject === pending.subject && replacement.title === pending.title);
-        if (!replacement || !sameOperation || staged.replaces_request_id !== pending.request_id || replacement.request_id === pending.request_id || replacement.expected_revision === null) {
-          throw new Error("Unsaved checkpoint exists; flush or resolve it before staging another");
+        const retainRevision = (value) => "action" in value && value.action === "finish" ? value.retain?.expected_revision : void 0;
+        const unread = replacement && (blocked(state.pending) ? replacement.expected_revision === pending.expected_revision && retainRevision(replacement) === retainRevision(pending) : replacement.expected_revision === null);
+        if (!replacement || !sameOperation || staged.replaces_request_id !== pending.request_id || replacement.request_id === pending.request_id || unread) {
+          const summary = pendingSummary(state.pending, options.inspectCommand);
+          throw new MemoryClientError(`Unsaved checkpoint exists (request_id ${summary.request_id}, attempted revision ${summary.attempted_revision ?? "null"}); nothing changed. ${summary.recovery}`);
         }
       }
       const unchanged = !state.pending && staged.checkpoint && "action" in staged.checkpoint && staged.checkpoint.action === "save" && state.lastCheckpoint?.hash === checkpointHash(staged.checkpoint) && state.lastCheckpoint?.revision === staged.checkpoint.expected_revision;
@@ -27461,13 +27574,15 @@ async function runMemoryEvent(options) {
     }
     let warning = "";
     let savedReceipt;
-    if (state.pending) {
+    if (state.pending && !blocked(state.pending)) {
+      const pending = state.pending;
       try {
         const checkpoint = state.pending.checkpoint;
         const receipt = await call("action" in checkpoint ? "memory_session" : "memory_write", checkpoint);
         const emptyFinish = "action" in checkpoint && checkpoint.action === "finish" && receipt.saved === true && receipt.request_id === checkpoint.request_id && receipt.note_id === null && receipt.revision === null;
-        if (!verified(receipt, checkpoint.request_id) && !emptyFinish || "action" in checkpoint && (receipt.closed !== (checkpoint.action === "finish") || checkpoint.action === "finish" && checkpoint.retain && typeof receipt.retained_note_id !== "string")) throw new Error("Unverified checkpoint receipt");
+        if (!verified(receipt, checkpoint.request_id) && !emptyFinish || "action" in checkpoint && (receipt.closed !== (checkpoint.action === "finish") || checkpoint.action === "finish" && checkpoint.retain && typeof receipt.retained_note_id !== "string")) throw new MemoryClientError("The server receipt could not be verified.", { category: "invalid_receipt" });
         savedReceipt = receipt;
+        state.receipt = flushReceipt(checkpoint, receipt);
         state.acknowledged = state.pending.turn;
         state.last_saved_at = (/* @__PURE__ */ new Date()).toISOString();
         state.users = state.tools = 0;
@@ -27477,7 +27592,8 @@ async function runMemoryEvent(options) {
         } else if (state.pending.now_line) state.nowUpdate = { thread: checkpoint.title, line: `- [[${checkpoint.title}]]${checkpoint.project ? ` (${checkpoint.project})` : ""} \u2014 ${state.pending.now_line}` };
         state.pending = void 0;
       } catch (error62) {
-        warning = "Memory checkpoint remains UNSAVED. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite." + (error62 instanceof MemoryClientError ? ` ${error62.message}` : "");
+        pending.failure = { ...error62 instanceof MemoryClientError && error62.failure ? error62.failure : { category: "unknown" }, announced: false };
+        warning = (blocked(pending) ? STALE : "Memory checkpoint remains UNSAVED locally; if the server outcome was not confirmed it is unverified and may have committed. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite.") + (error62 instanceof MemoryClientError ? ` ${error62.message}` : "");
       }
     }
     if (state.nowUpdate && !state.pending) {
@@ -27511,7 +27627,15 @@ ${JSON.stringify(await call("recall", { query: `${state.project ? `${state.proje
           state.briefed = true;
         }
       } catch {
-        warning = "Memory retrieval unavailable. Continue ordinary work and report missing context.";
+        warning = `${warning ? `${warning} ` : ""}Memory retrieval unavailable. Continue ordinary work and report missing context.`;
+      }
+      if (state.receipt && (event === "SessionStart" || !state.receipt.announced)) {
+        context += receiptNotice(state.receipt);
+        state.receipt.announced = true;
+      }
+      if (state.pending?.failure && (event === "SessionStart" || !state.pending.failure.announced)) {
+        context += pendingNotice(pendingSummary(state.pending, options.inspectCommand));
+        state.pending.failure.announced = true;
       }
       if (!state.instructed) {
         context += `Automatic memory: update one session checkpoint across tasks. If an Agent Now entry is this same task or handoff, continue it: stage {"continue": {"title": "<entry title>"}} and merge into it. Recall on topic changes. Save meaningful work when due; skip trivial turns. Finish existing memory when no work remains; retain lasting facts first. Stop is not completion. No secrets/transcripts. Verify receipts. Stage: ${options.stageCommand || "see integrations/agent-memory/README.md"}.
@@ -27528,7 +27652,20 @@ ${JSON.stringify(await call("recall", { query: `${state.project ? `${state.proje
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
     }
-    if (event === "Checkpoint") output2 = { saved: !state.pending, pending: Boolean(state.pending), ...savedReceipt ? { receipt: savedReceipt } : {} };
+    if (event === "Checkpoint") {
+      if (state.receipt && !state.receipt.announced) {
+        savedReceipt ??= { ...state.receipt, announced: void 0 };
+        state.receipt.announced = true;
+      }
+      if (state.pending?.failure) state.pending.failure.announced = true;
+      if (blocked(state.pending)) warning ||= STALE;
+      output2 = {
+        saved: !state.pending,
+        pending: Boolean(state.pending),
+        ...savedReceipt ? { receipt: savedReceipt } : {},
+        ...state.pending ? { pending_request: pendingSummary(state.pending, options.inspectCommand) } : {}
+      };
+    }
     if (warning) output2.systemMessage = warning;
     await save();
     return output2;
@@ -32543,13 +32680,32 @@ function validateMemoryStatus(raw) {
   if (!status.enabled || !status.area) throw new MemoryClientError("Server memory is disabled. Ask the owner to configure a non-root memory area.");
   return status;
 }
+function classify(error62, phase, started) {
+  const elapsed_ms = Date.now() - started;
+  if (error62 instanceof UnauthorizedError) return { category: "authentication", phase, elapsed_ms };
+  if (error62 instanceof StreamableHTTPError && error62.code && error62.code > 0) {
+    return { category: [401, 403].includes(error62.code) ? "authentication" : "http", phase, http_status: error62.code, elapsed_ms };
+  }
+  if (error62 instanceof McpError && error62.code === ErrorCode.RequestTimeout || error62 instanceof Error && ["TimeoutError", "AbortError"].includes(error62.name)) {
+    return { category: "timeout", phase, elapsed_ms };
+  }
+  if (error62 instanceof TypeError) return { category: "connection", phase, elapsed_ms };
+  return { category: "unknown", phase, elapsed_ms };
+}
+function conflictMessage(detail) {
+  const revision = /\brevision ([a-f0-9]{64})\b/.exec(detail)?.[1];
+  if (revision) return `Session memory conflict: the checkpoint is at revision ${revision}.`;
+  if (detail.includes("No session checkpoint exists yet")) return "Session memory conflict: no session checkpoint exists yet; use expected_revision null to create it.";
+  return "Session memory conflict: a revision changed (session or retained note).";
+}
 function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
   let client;
   let verified2 = false;
   let status;
   let calls = 0;
   const invoke = async (name, args) => {
-    if (!key) throw new MemoryClientError("A restricted Chibako API key is required.");
+    if (!key) throw new MemoryClientError("A restricted Chibako API key is required.", { category: "authentication", phase: "connect" });
+    const started = Date.now();
     if (!client) {
       const connecting = new Client({ name: "chibako-memory-plugin", version: "1" });
       try {
@@ -32558,26 +32714,28 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
           fetch: (input2, init) => fetch(input2, { ...init, redirect: "error", signal: AbortSignal.timeout(MEMORY_REQUEST_TIMEOUT_MS) })
         }));
         client = connecting;
-      } catch {
+      } catch (error62) {
         await connecting.close().catch(() => {
         });
-        throw new MemoryClientError("Chibako connection or authentication failed. Check the URL, network and key; no credentials were logged.");
+        throw new MemoryClientError("Chibako connection or authentication failed before any write was sent. Check the URL, network and key; no credentials were logged.", classify(error62, "connect", started));
       }
     }
     calls++;
     let result;
     try {
       result = await client.callTool({ name, arguments: args }, void 0, { timeout: MEMORY_REQUEST_TIMEOUT_MS });
-    } catch {
-      throw new MemoryClientError("Memory request failed. Check the connection and server status; pending checkpoints are retained.");
+    } catch (error62) {
+      const failure2 = classify(error62, "call", started);
+      throw new MemoryClientError(`Memory request failed (${failure2.category}${failure2.http_status ? ` ${failure2.http_status}` : ""} after ${failure2.elapsed_ms} ms); the outcome is unverified and a write may have committed. Pending checkpoints are retained and retried with the same request.`, failure2);
     }
     if (result.isError && name === "memory_session") {
       const content = external_exports.array(external_exports.object({ type: external_exports.string(), text: external_exports.string().optional() }).passthrough()).safeParse(result.content);
       const message = content.success ? content.data.find((item) => item.type === "text")?.text : void 0;
-      if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.");
-      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`Session memory conflict: ${message.slice("error: revision_conflict:".length).trim().slice(0, 300)} Restage with replaces_request_id identifying the pending request.`);
+      if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.", { category: "ineligible", phase: "call" });
+      if (typeof message === "string" && message.startsWith("error: request_conflict:")) throw new MemoryClientError("This request_id was already used with different content. Restage without a request_id so a fresh one is generated.", { category: "request_conflict", phase: "call" });
+      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`${conflictMessage(message)} Read and merge the current checkpoint, then restage with replaces_request_id identifying the pending request.`, { category: "conflict", phase: "call" });
     }
-    if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.");
+    if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.", { category: "denied", phase: "call" });
     return external_exports.record(external_exports.string(), external_exports.unknown()).parse(result.structuredContent);
   };
   return {
@@ -32587,12 +32745,12 @@ function connectMemory(endpoint, key, expectedPrincipal, expectedArea) {
     call: async (name, args) => {
       if (expectedPrincipal && !verified2) {
         status = validateMemoryStatus(await invoke("memory_status", {}));
-        if (status.principal_id !== expectedPrincipal || expectedArea && status.area !== expectedArea) throw new MemoryClientError("Connection identity changed. Keep pending work with its original profile and run setup again.");
+        if (status.principal_id !== expectedPrincipal || expectedArea && status.area !== expectedArea) throw new MemoryClientError("Connection identity changed. Keep pending work with its original profile and run setup again.", { category: "authentication", phase: "connect" });
         verified2 = true;
       }
       if (name === "memory_session") {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
-        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.");
+        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.", { category: "unsupported", phase: "connect" });
       }
       if ("project" in args) {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
@@ -35891,11 +36049,22 @@ function redactedPreview(preview) {
 }
 
 // scripts/memory/controls.ts
-async function runControl(runtime, action, directory, name) {
+import path6 from "node:path";
+async function runControl(runtime, action, directory, name, session) {
   if (process.platform === "win32") throw new MemoryClientError("Windows private storage is not supported yet.");
   const configured = await readProfile(directory);
   if (configured && configured.runtime !== runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
   if (action === "status") return localStatus(directory);
+  if (action === "inspect") {
+    if (!configured) throw new MemoryClientError("No configured profile. Run setup first.");
+    if (!session) throw new MemoryClientError("Inspect needs --session with the hook session_id.");
+    return inspectMemoryState({
+      runtime,
+      directory: path6.join(directory, "state"),
+      session_id: session,
+      binding: { endpoint: configured.endpoint, principal_id: configured.principal_id, area: configured.area }
+    });
+  }
   if (action === "pause") {
     await setEnabled(directory, false);
     return { enabled: false, pending_retained: true };
@@ -35927,7 +36096,7 @@ async function runControl(runtime, action, directory, name) {
         host_events: "Actual host delivery and native hook consent require verification; connection alone is insufficient."
       };
     }
-    throw new MemoryClientError("Unknown control. Use setup, status, doctor, pause, resume or disconnect.");
+    throw new MemoryClientError("Unknown control. Use setup, status, inspect, doctor, pause, resume or disconnect.");
   } finally {
     await connection.close();
   }
@@ -35980,7 +36149,7 @@ Automatic mode stays off until enabled. Close concurrent host configuration edit
 
 // scripts/memory/project.ts
 import { execFileSync } from "node:child_process";
-import path6 from "node:path";
+import path7 from "node:path";
 function projectSlug(name) {
   const slug = name.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64);
   return projectSchema.safeParse(slug).success ? slug : void 0;
@@ -35994,12 +36163,12 @@ function git(cwd, args) {
 }
 function resolveProject(cwd, override = process.env.CHIBAKO_MEMORY_PROJECT) {
   if (override) return projectSlug(override);
-  if (!cwd || !path6.isAbsolute(cwd)) return void 0;
+  if (!cwd || !path7.isAbsolute(cwd)) return void 0;
   const origin = git(cwd, ["remote", "get-url", "origin"]);
   const fromOrigin = origin && projectSlug(origin.replace(/\/+$/, "").split(/[/:]/).pop() ?? "");
   if (fromOrigin) return fromOrigin;
   const root = git(cwd, ["rev-parse", "--show-toplevel"]);
-  return root ? projectSlug(path6.basename(root)) : void 0;
+  return root ? projectSlug(path7.basename(root)) : void 0;
 }
 
 // scripts/agent-memory.ts
@@ -36012,9 +36181,10 @@ var inputSchema = external_exports.object({
   stop_hook_active: external_exports.boolean().optional()
 }).passthrough();
 var countingOnly = false;
-var usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
+var usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|inspect|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
   hook     read a host hook event on stdin
   stage    read {"checkpoint"|"finish"|"skip"|"continue": ...} on stdin; expected_revision may sit inside it or beside it
+  inspect  show this session's pending checkpoint and latest receipt (needs --session; read-only, offline)
   status   show the profile and pending state without the API key
   doctor   check the connection, scopes and hook files
 `;
@@ -36041,9 +36211,9 @@ async function main() {
   const action = args.positionals[1] || "hook";
   const name = args.values.profile || process.env.CHIBAKO_MEMORY_PROFILE || "default";
   const directory = args.values["profile-dir"] || profileDirectory(runtime, name);
-  if (!path7.isAbsolute(directory)) throw new Error("Profile directory must be absolute.");
+  if (!path8.isAbsolute(directory)) throw new Error("Profile directory must be absolute.");
   if (!["hook", "stage"].includes(action)) {
-    const result = await runControl(runtime, action, directory, name);
+    const result = await runControl(runtime, action, directory, name, args.values.session);
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
     return;
   }
@@ -36062,9 +36232,10 @@ async function main() {
   const input2 = inputSchema.parse(payload);
   countingOnly = action === "hook" && input2.hook_event_name === "PostToolUse";
   const connection = connectMemory(profile?.endpoint || process.env.CHIBAKO_MEMORY_MCP_URL || "", profile?.api_key || process.env.CHIBAKO_MEMORY_API_KEY || "", profile?.principal_id, profile?.area);
-  const stateDirectory = profile ? path7.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
+  const stateDirectory = profile ? path8.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
   const start = Date.now();
   try {
+    const command = (verb) => `node ${quote(fileURLToPath(import.meta.url))} ${runtime} ${verb} --profile-dir ${quote(directory)} --session ${quote(input2.session_id)}`;
     const execute = async () => {
       const call = connection.call;
       const staged = action === "stage" ? external_exports.object({ checkpoint: external_exports.unknown().optional(), finish: external_exports.unknown().optional(), now_line: external_exports.unknown().optional(), skip: external_exports.unknown().optional(), continue: external_exports.unknown().optional(), replaces_request_id: external_exports.unknown().optional(), expected_revision: external_exports.unknown().optional() }).parse(payload) : void 0;
@@ -36078,7 +36249,8 @@ async function main() {
         ...profile?.thresholds ? { thresholds: profile.thresholds } : {},
         ...profile ? {
           binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
-          stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)} --session ${quote(input2.session_id)}`
+          stageCommand: command("stage"),
+          inspectCommand: command("inspect")
         } : {}
       };
       const result = await runMemoryEvent({ ...options, ...staged ? { stage: staged } : {} });

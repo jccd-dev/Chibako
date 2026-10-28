@@ -12,7 +12,7 @@
       "name": "chibako",
       "source": "./plugins/claude",
       "description": "Automatic Chibako memory for Claude Code: bounded recall and session checkpoints.",
-      "version": "0.5.1"
+      "version": "0.6.0"
     }
   ]
 }
