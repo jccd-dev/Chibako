@@ -9,7 +9,7 @@ import { createAccount } from "../../src/features/finance/accounts";
 import { createObligation, getObligation } from "../../src/features/finance/obligations";
 import { createApiKey } from "../../src/server/auth/api-key-authorization";
 import { GET as list, POST as create } from "../../src/app/api/finance/obligations/route";
-import { GET as inspect, PATCH as update } from "../../src/app/api/finance/obligations/[id]/route";
+import { GET as inspect, PATCH as update, DELETE as destroy } from "../../src/app/api/finance/obligations/[id]/route";
 import { POST as post } from "../../src/app/api/finance/obligations/movements/route";
 import { POST as postPayment } from "../../src/app/api/finance/obligations/payments/route";
 import { POST as close } from "../../src/app/api/finance/obligations/[id]/close/route";
@@ -149,4 +149,28 @@ test("payment and write-off tools keep write/manage/read scopes independent and 
   assert.equal(JSON.parse(closeAudit.after_json).obligation.written_off_cents, 1500);
   assert.equal(JSON.parse(closeAudit.after_json).write_off.reason, "Synthetic forgiveness");
   assert.equal(JSON.stringify([paymentAudit, closeAudit]).includes(write.key), false);
+});
+
+test("REST/MCP delete require finance:manage, refuse active cash, and remove the obligation", async () => {
+  const account = createAccount(owner, { request_id: randomUUID(), name: "Delete protocol cash", opening_balance: "10", kind: "money", currency: "PHP" }).account;
+  const { key: reader } = createApiKey("Obligation delete reader", ["finance:read", "finance:write"]);
+  const { key: manager } = createApiKey("Obligation delete manager", ["finance:read", "finance:write", "finance:manage"]);
+  const first = createObligation(owner, { request_id: randomUUID(), name: "REST mistake", kind: "debt", principal: "5" }).obligation;
+  const body = (id: string) => ({ request_id: randomUUID(), version: getObligation(owner, id).version });
+  assert.equal((await destroy(req(reader, "DELETE", `obligations/${first.id}`, body(first.id)), context(first.id))).status, 403);
+  assert.equal(((await rpc(reader, "tools/list")).tools as { name: string }[]).some(tool => tool.name === "delete_finance_obligation"), false);
+  const moved = await post(req(manager, "POST", "obligations/movements", { request_id: randomUUID(), type: "borrowing", obligation_id: first.id, version: first.version, account_id: account.id, amount: "1", transaction_date: "2026-10-02" }), context());
+  assert.equal(moved.status, 201);
+  const refused = await destroy(req(manager, "DELETE", `obligations/${first.id}`, body(first.id)), context(first.id));
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).code, "has_cash_activity");
+  const second = createObligation(owner, { request_id: randomUUID(), name: "REST clean mistake", kind: "receivable" }).obligation;
+  const removed = await destroy(req(manager, "DELETE", `obligations/${second.id}`, body(second.id)), context(second.id));
+  assert.equal(removed.status, 200);
+  assert.deepEqual(await removed.json(), { deleted: true, id: second.id });
+  assert.equal((await inspect(req(manager, "GET", `obligations/${second.id}`), context(second.id))).status, 404);
+  const third = createObligation(owner, { request_id: randomUUID(), name: "MCP mistake", kind: "debt" }).obligation;
+  const result = await rpc(manager, "tools/call", { name: "delete_finance_obligation", arguments: { id: third.id, ...body(third.id) } });
+  assert.notEqual(result.isError, true);
+  assert.throws(() => getObligation(owner, third.id), (error: { code?: string }) => error.code === "not_found");
 });

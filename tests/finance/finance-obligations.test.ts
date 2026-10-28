@@ -23,6 +23,8 @@ import {
   listObligations,
   updateObligation,
   postObligationMovement,
+  deleteObligation,
+  getObligationPaymentHistory,
 } from "../../src/features/finance/obligations";
 import {
   getActivityTotals,
@@ -1040,4 +1042,68 @@ test("hidden, reverted, or previously refunded cash activity cannot be linked", 
   assert.equal(candidates.transactions[0].id, eligible.id);
   tryLink(eligible.id, eligible.version);
   assert.equal(listTransactions(owner, { payment_matchable: true }).total, 0);
+});
+
+test("definitions record already paid, counterparty type and notes without cash", () => {
+  assert.throws(() => createObligation(owner, { request_id: request(), kind: "debt", name: "Too much paid", principal: "10", already_paid: "10.01" }),
+    (error: { code?: string }) => error.code === "invalid_input");
+  const debt = createObligation(owner, { request_id: request(), kind: "debt", name: "Good Samaritan", principal: "1500", already_paid: "500",
+    counterparty_type: "organization", notes: "Paid half last month" }).obligation;
+  assert.equal(debt.outstanding_cents, 100000);
+  assert.equal(debt.paid_cents, 50000);
+  assert.equal(debt.counterparty_type, "organization");
+  assert.equal(debt.notes, "Paid half last month");
+  const updated = updateObligation(owner, debt.id, { request_id: request(), version: debt.version, counterparty_type: null, notes: "" }).obligation;
+  assert.equal(updated.counterparty_type, null);
+  assert.equal(updated.notes, "");
+  assert.equal(updated.outstanding_cents, 100000);
+});
+
+test("history lists borrowing and lending alongside payments", () => {
+  const cash = createAccount(owner, { request_id: request(), name: "History cash", kind: "money", opening_balance: "100", currency: "PHP" }).account;
+  const lent = postObligationMovement(owner, { request_id: request(), type: "lending", name: "Louie", counterparty_type: "person", notes: "Lunch",
+    account_id: cash.id, amount: "40", transaction_date: "2026-10-02" });
+  assert.equal(lent.obligation.counterparty_type, "person");
+  assert.equal(lent.obligation.notes, "Lunch");
+  const history = getObligationPaymentHistory(owner, lent.obligation.id, { include_details: true });
+  assert.equal(history.total, 1);
+  assert.equal(history.entries[0].kind, "lending");
+  assert.equal(history.entries[0].amount_cents, 4000);
+  assert.equal(history.entries[0].cash_activity?.account_name, "History cash");
+  assert.throws(() => postObligationMovement(owner, { request_id: request(), type: "lending", obligation_id: lent.obligation.id,
+    version: lent.obligation.version, notes: "Not allowed", account_id: cash.id, amount: "1", transaction_date: "2026-10-02" }),
+  (error: { code?: string }) => error.code === "invalid_input");
+});
+
+test("delete refuses active cash or linked plans, then removes the obligation for good without changing balances", async () => {
+  const { listPlans } = await import("../../src/features/finance/planning");
+  const { createSchedule, deleteSchedule, catchUpPlans } = await import("../../src/features/finance/recurrence");
+  const cash = createAccount(owner, { request_id: request(), name: "Delete cash", kind: "money", opening_balance: "100", currency: "PHP" }).account;
+  const borrowed = postObligationMovement(owner, { request_id: request(), type: "borrowing", name: "Mistake", account_id: cash.id, amount: "25", transaction_date: "2026-10-02" });
+  const auditCount = () => (getDb().prepare("SELECT COUNT(*) AS n FROM finance_audit WHERE operation='obligation.delete'").get() as { n: number }).n;
+  assert.throws(() => deleteObligation(owner, borrowed.obligation.id, { request_id: request(), version: borrowed.obligation.version }),
+    (error: { code?: string }) => error.code === "has_cash_activity");
+  const reverted = revertActivity(owner, borrowed.transaction.id, { request_id: request(), version: borrowed.transaction.version, obligation_version: borrowed.obligation.version });
+  assert.equal(getAccount(owner, cash.id).balance_cents, 10000);
+  const schedule = createSchedule(owner, { request_id: request(), type: "expense", account_id: cash.id, amount: "5", interval_count: 1,
+    interval_unit: "month", start_date: "2026-10-01", obligation_id: borrowed.obligation.id }).schedule;
+  catchUpPlans(owner, { request_id: request(), through_date: "2026-10-01" });
+  const plan = listPlans(owner, { schedule_id: schedule.id }).plans[0];
+  const current = getObligation(owner, borrowed.obligation.id);
+  assert.equal(reverted.obligation?.version, current.version);
+  assert.throws(() => deleteObligation(owner, current.id, { request_id: request(), version: current.version }),
+    (error: { code?: string }) => error.code === "has_linked_plans");
+  deleteSchedule(owner, schedule.id, { request_id: request(), version: schedule.version });
+  assert.throws(() => deleteObligation(owner, current.id, { request_id: request(), version: current.version - 1 }),
+    (error: { code?: string }) => error.code === "version_conflict");
+  assert.equal(auditCount(), 0);
+  const requestId = request();
+  assert.deepEqual(deleteObligation(owner, current.id, { request_id: requestId, version: current.version }), { deleted: true, id: current.id });
+  assert.deepEqual(deleteObligation(owner, current.id, { request_id: requestId, version: current.version }), { deleted: true, id: current.id });
+  assert.equal(auditCount(), 1);
+  assert.throws(() => getObligation(owner, current.id), (error: { code?: string }) => error.code === "not_found");
+  assert.equal(listObligations(owner, { archived: "all" }).obligations.some(row => row.id === current.id), false);
+  assert.equal((getDb().prepare("SELECT COUNT(*) AS n FROM finance_obligation_movements WHERE obligation_id=?").get(current.id) as { n: number }).n, 0);
+  assert.equal((getDb().prepare("SELECT obligation_id FROM finance_plans WHERE id=?").get(plan.id) as { obligation_id: string | null }).obligation_id, null);
+  assert.equal(getAccount(owner, cash.id).balance_cents, 10000);
 });
