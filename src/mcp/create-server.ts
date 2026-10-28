@@ -1,6 +1,6 @@
 import { getMemoryStatus, readMemory, writeMemory } from "../features/memory/memory";
 import { sessionMemory } from "../features/memory/session-memory";
-import { MemoryError, memoryReadSchema, memoryWriteSchema, sessionMemorySchema } from "../features/memory/types";
+import { MemoryError, memoryReadSchema, memoryWriteSchema, sessionMemoryToolSchema } from "../features/memory/types";
 import type { ApiKeyPrincipal } from "../server/auth/api-key-authorization";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -136,7 +136,7 @@ if (options.memoryPrincipal?.scopes.includes("memory:write")) {
   if (authorized(["notes:read"])) server.registerTool("memory_session", {
     title: "Maintain one automatic session memory",
     description: "Read, save, finish, or continue this API key's runtime session checkpoint. Identity is derived from runtime and session_id, not task names. Continue joins another session's active or finished checkpoint by its title so both save into one note. Save updates the same note and its Agent Now entry; saving into a finished checkpoint needs reopen: true after reading and merging it. Finish atomically retains optional wiki/preference knowledge, closes the checkpoint and removes its Agent Now entry; the note stays as a session record. expected_revision is null for a new checkpoint (read returns revision null), otherwise the revision from action read; never invent one. Use stable request_id values for retries. Stop alone does not mean finished.",
-    inputSchema: sessionMemorySchema,
+    inputSchema: sessionMemoryToolSchema,
     annotations: { ...DESTRUCTIVE, idempotentHint: true },
   }, (args) => memoryResult(() => sessionMemory(principal, args)));
   if (authorized(["notes:read"])) server.registerTool("memory_read", {

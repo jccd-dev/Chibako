@@ -113,7 +113,11 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
   }
   if (!status.enabled || !status.area) throw new MemoryError("Automatic memory is disabled", 403, "memory_disabled");
   const parsed = sessionMemorySchema.safeParse(raw);
-  if (!parsed.success) throw new MemoryError("Invalid session memory operation", 400, "invalid_input");
+  if (!parsed.success) {
+    // Name the failing fields so agents can correct the call; issue messages never echo input values.
+    const issues = parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ");
+    throw new MemoryError(`Invalid session memory operation (${issues})`, 400, "invalid_input");
+  }
   const input = parsed.data;
   const area = status.area;
   const db = getDb();
