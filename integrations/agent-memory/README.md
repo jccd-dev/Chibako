@@ -195,6 +195,13 @@ After reading and merging a conflicting update, stage the replacement with
 `replaces_request_id` equal to the pending identity, a new checkpoint request_id,
 and the freshly read expected_revision. No transcript is parsed or stored.
 
+A verified save also stores one bounded latest receipt (request ID, resulting revision,
+note and completion status, verification time) in the session's private state. Stage
+output shows it. A retry that succeeds at Stop or another flush-only event cannot reach
+the model, so the receipt is delivered once in the next prompt or Hermes `pre_llm_call`
+context. Hosts with a start event (Codex, Claude Code) also replay it at every session start or resume without a remote call; Hermes has none, so its receipt is delivered once. It describes
+a past operation, not the current revision: read and merge before updating.
+
 Stop requests a due checkpoint once; its continuation guard prevents loops.
 Hermes instead gets a "checkpoint due" note on its next `pre_llm_call` (it also counts
 `post_tool_call`). Stop ends a response, not a session; neither Stop nor app closure

@@ -502,3 +502,121 @@ test("staging accepts expected_revision beside the checkpoint as well as inside 
   assert.equal(staged.checkpoint!.expected_revision, revision);
   await assert.rejects(() => prepareSessionStage(unread, "claude", "session-1", { checkpoint: { title: "Resumed", content: "Merged", expected_revision: revision }, expected_revision: "e".repeat(64) }), /expected_revision/);
 });
+
+// Session server with the real rules: changing revisions, stale-revision rejection and request replay.
+function sessionServer() {
+  const store = { revision: null as string | null, version: 0, mutations: 0, receipts: new Map<string, Record<string, unknown>>(), loseResponses: 0, offline: false };
+  const call: MemoryCall = async (name, args) => {
+    if (name !== "memory_session" || args.action === "read") return {};
+    if (store.offline) throw new Error("offline");
+    const request_id = String(args.request_id);
+    let receipt = store.receipts.get(request_id);
+    if (!receipt) {
+      if (args.expected_revision !== store.revision) throw new Error("revision_conflict");
+      store.mutations++;
+      store.version++;
+      store.revision = args.action === "finish" ? store.revision : String(store.version).padStart(64, "0");
+      receipt = { saved: true, request_id, note_id: args.action === "finish" && store.version === 0 ? null : "note-1", revision: store.revision, closed: args.action === "finish" };
+      store.receipts.set(request_id, receipt);
+    }
+    if (store.loseResponses > 0) { store.loseResponses--; throw new Error("response lost"); }
+    return receipt;
+  };
+  return { store, call };
+}
+const runner = (runtime: "codex" | "claude" | "hermes", directory: string, call: MemoryCall) =>
+  (hook: string, overrides: Partial<HookInput> = {}, extra: object = {}) => runMemoryEvent({ runtime, directory, enabled: true, call, input: event(hook, overrides), ...extra });
+const additionalContext = (output: Record<string, unknown>) => (output.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext ?? "";
+
+for (const runtime of ["codex", "claude", "hermes"] as const) {
+  test(`${runtime}: a receipt saved by a background retry reaches the next prompt context, survives replay, and the next save works`, async () => withPrivateDirectory(async (directory) => {
+    const { store, call } = sessionServer();
+    const run = runner(runtime, directory, call);
+    await run("UserPromptSubmit", { turn_id: "t1" });
+    store.offline = true;
+    const saved = checkpoint();
+    await run("Checkpoint", {}, { stage: { checkpoint: saved } });
+    assert.match(String((await run("Checkpoint")).systemMessage), /UNSAVED/, "the first attempt fails");
+
+    store.offline = false;
+    const stopped = await run("Stop");
+    assert.equal(additionalContext(stopped), "", "Stop output cannot reach the model, so nothing is promised there");
+    assert.equal(store.mutations, 1);
+    const persisted = (await readState(directory)).receipt as Record<string, unknown>;
+    assert.equal(persisted.request_id, saved.request_id);
+    assert.equal(persisted.revision, store.revision);
+
+    const prompt = additionalContext(await run("UserPromptSubmit", { turn_id: "t2" }));
+    assert.match(prompt, new RegExp(saved.request_id));
+    assert.match(prompt, new RegExp(String(store.revision)));
+    assert.match(prompt, /read the current checkpoint/i);
+    assert.equal(additionalContext(await run("UserPromptSubmit", { turn_id: "t3" })), "", "delivered once per prompt");
+    assert.ok((await readState(directory)).receipt, "emission does not delete the only verified metadata");
+
+    const calls = store.mutations;
+    if (runtime !== "hermes") { // Hermes has no start event: its receipt is delivered once at the next pre_llm_call.
+      const resumed = additionalContext(await run("SessionStart"));
+      assert.match(resumed, new RegExp(saved.request_id), "resume or compaction replays it without extra turns");
+      assert.equal(store.mutations, calls, "replay makes no remote write");
+    }
+
+    const next = { ...checkpoint(), content: "More work", expected_revision: store.revision };
+    await run("Checkpoint", {}, { stage: { checkpoint: next } });
+    assert.equal((await run("Checkpoint")).pending, false);
+    assert.equal(((await readState(directory)).receipt as Record<string, unknown>).request_id, next.request_id, "only the latest receipt is retained");
+  }));
+}
+
+test("a committed save whose response is lost replays the original request once and surfaces its receipt", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const run = runner("claude", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  store.loseResponses = 1;
+  const saved = checkpoint();
+  await run("Checkpoint", {}, { stage: { checkpoint: saved } });
+  const first = await run("Checkpoint");
+  assert.match(String(first.systemMessage), /unverified/i, "a lost response is unverified, not proof nothing saved");
+  assert.equal(store.mutations, 1);
+  await run("Stop");
+  assert.equal(store.mutations, 1, "the identical request replays instead of writing twice");
+  assert.match(additionalContext(await run("UserPromptSubmit", { turn_id: "t2" })), new RegExp(saved.request_id));
+}));
+
+test("stage output shows the receipt, and a no-note finish receipt is described without inventing a note", async () => withPrivateDirectory(async (directory) => {
+  const call: MemoryCall = async (name, args) => isSave(name, args) ? { saved: true, request_id: args.request_id, note_id: null, revision: null, closed: true, retained_note_id: null } : {};
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1" }) });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { finish: { expected_revision: null } } });
+  const flushed = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
+  assert.equal(flushed.pending, false);
+  const receipt = (await readState(directory)).receipt as Record<string, unknown>;
+  assert.deepEqual([receipt.note_id, receipt.revision, receipt.closed], [null, null, true]);
+  const notice = additionalContext(await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart") }));
+  assert.match(notice, /no note/i);
+  assert.equal(notice.includes("null"), false);
+}));
+
+test("a receipt describes a past save: another contributor's later edit still requires a current read", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const run = runner("codex", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  await run("Checkpoint", {}, { stage: { checkpoint: checkpoint() } });
+  await run("Checkpoint");
+  const receiptRevision = store.revision;
+  store.version++; store.revision = String(store.version).padStart(64, "0"); // another contributor
+  const notice = additionalContext(await run("SessionStart"));
+  assert.match(notice, new RegExp(String(receiptRevision)));
+  assert.equal(notice.includes(String(store.revision)), false);
+  assert.match(notice, /may have changed|not the current/i);
+  const stale = { ...checkpoint(), content: "Edited after receipt", expected_revision: receiptRevision };
+  await run("Checkpoint", {}, { stage: { checkpoint: stale } });
+  assert.match(String((await run("Checkpoint")).systemMessage), /UNSAVED/, "the historical receipt never bypasses the revision check");
+}));
+
+test("a receipt is never shown to another session", async () => withPrivateDirectory(async (directory) => {
+  const { call } = sessionServer();
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1" }) });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { checkpoint: checkpoint() } });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
+  const other = additionalContext(await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart", { session_id: "session-2" }) }));
+  assert.doesNotMatch(other, /request_id|revision/i);
+}));

@@ -26,6 +26,12 @@ const stateSchema = z.object({
     superseded: sessionMutationSchema.optional(),
   }).optional(),
   lastCheckpoint: z.object({ hash: z.string(), revision: z.string() }).optional(),
+  // Latest verified save, kept after delivery so a restart or compaction can replay it without a remote call.
+  receipt: z.object({
+    request_id: z.string(), action: z.enum(["save", "finish", "continue", "write"]), note_id: z.string().nullable(),
+    revision: z.string().nullable(), closed: z.boolean().optional(), retained_note_id: z.string().nullable().optional(),
+    verified_at: z.string(), announced: z.boolean().default(false),
+  }).optional(),
   nowUpdate: z.object({ thread: z.string(), line: z.string() }).optional(),
 }).strict();
 const checkpointHash = (checkpoint: { content: string; now_line: string }) =>
@@ -33,6 +39,23 @@ const checkpointHash = (checkpoint: { content: string; now_line: string }) =>
 const NOW = { subject: "Agent Now", lines: 15, read: 1800 };
 const verified = (receipt: Record<string, unknown>, request_id: string) =>
   receipt.saved === true && receipt.request_id === request_id && typeof receipt.note_id === "string" && typeof receipt.revision === "string" && /^[a-f0-9]{64}$/.test(receipt.revision);
+type Receipt = NonNullable<z.infer<typeof stateSchema>["receipt"]>;
+function receiptNotice(receipt: Receipt): string {
+  const outcome = receipt.action === "continue" ? "joined a checkpoint" : receipt.closed ? "closed the checkpoint" : "saved the checkpoint";
+  const where = receipt.note_id ? ` note ${receipt.note_id}, revision ${receipt.revision}` : " no note (nothing was written to a note)";
+  const kept = receipt.retained_note_id ? `; retained note ${receipt.retained_note_id}` : "";
+  return `Verified memory receipt (past operation, ${receipt.verified_at}): ${outcome}; request_id ${receipt.request_id};${where}${kept}. This is not the current revision: another contributor may have changed the checkpoint since, so read the current checkpoint with memory_session action read and merge before updating.\n`;
+}
+// Only reached with a receipt that passed verification (or a valid no-note finish).
+function flushReceipt(checkpoint: { request_id: string; action?: string }, receipt: Record<string, unknown>): Receipt {
+  const session = checkpoint.action !== undefined;
+  return {
+    request_id: checkpoint.request_id, action: session ? (checkpoint.action as "save" | "finish") : "write",
+    note_id: typeof receipt.note_id === "string" ? receipt.note_id : null, revision: typeof receipt.revision === "string" ? receipt.revision : null,
+    ...(session ? { closed: receipt.closed === true } : {}), ...(typeof receipt.retained_note_id === "string" ? { retained_note_id: receipt.retained_note_id } : {}),
+    verified_at: new Date().toISOString(), announced: false,
+  };
+}
 // Deterministic: newest first, one line per [[Thread]], capped.
 function mergeNow(content: string, thread: string, line: string): string {
   const lines = content.split("\n");
@@ -125,6 +148,7 @@ export async function runMemoryEvent(options: {
         const current = await call("memory_session", { action: "read", runtime, session_id: input.session_id });
         state.topic = staged.continue.title;
         state.lastCheckpoint = undefined;
+        state.receipt = { request_id: staged.continue.request_id, action: "continue", note_id: String(receipt.note_id), revision: String(receipt.revision), verified_at: new Date().toISOString(), announced: true };
         await save();
         return { continued: true, receipt, note: current.note, revision: current.revision };
       }
@@ -179,6 +203,7 @@ export async function runMemoryEvent(options: {
         const emptyFinish = "action" in checkpoint && checkpoint.action === "finish" && receipt.saved === true && receipt.request_id === checkpoint.request_id && receipt.note_id === null && receipt.revision === null;
         if ((!verified(receipt, checkpoint.request_id) && !emptyFinish) || ("action" in checkpoint && (receipt.closed !== (checkpoint.action === "finish") || (checkpoint.action === "finish" && checkpoint.retain && typeof receipt.retained_note_id !== "string")))) throw new Error("Unverified checkpoint receipt");
         savedReceipt = receipt;
+        state.receipt = flushReceipt(checkpoint, receipt);
         state.acknowledged = state.pending.turn;
         state.last_saved_at = new Date().toISOString();
         state.users = state.tools = 0;
@@ -187,7 +212,7 @@ export async function runMemoryEvent(options: {
           state.lastCheckpoint = checkpoint.action === "save" ? { hash: checkpointHash(checkpoint), revision: String(receipt.revision) } : undefined;
         } else if (state.pending.now_line) state.nowUpdate = { thread: checkpoint.title, line: `- [[${checkpoint.title}]]${checkpoint.project ? ` (${checkpoint.project})` : ""} — ${state.pending.now_line}` };
         state.pending = undefined;
-      } catch (error) { warning = "Memory checkpoint remains UNSAVED. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite." + (error instanceof MemoryClientError ? ` ${error.message}` : ""); }
+      } catch (error) { warning = "Memory checkpoint remains UNSAVED locally; if the server outcome was not confirmed it is unverified and may have committed. Retry uses the same request identity; resolve revision conflicts by reading and merging, never blind overwrite." + (error instanceof MemoryClientError ? ` ${error.message}` : ""); }
     }
     if (state.nowUpdate && !state.pending) {
       try {
@@ -214,6 +239,11 @@ export async function runMemoryEvent(options: {
           state.briefed = true;
         }
       } catch { warning = "Memory retrieval unavailable. Continue ordinary work and report missing context."; }
+      // A start (resume or compaction) replays the latest receipt; prompts deliver it once.
+      if (state.receipt && (event === "SessionStart" || !state.receipt.announced)) {
+        context += receiptNotice(state.receipt);
+        state.receipt.announced = true;
+      }
       if (!state.instructed) {
         context += `Automatic memory: update one session checkpoint across tasks. If an Agent Now entry is this same task or handoff, continue it: stage {"continue": {"title": "<entry title>"}} and merge into it. Recall on topic changes. Save meaningful work when due; skip trivial turns. Finish existing memory when no work remains; retain lasting facts first. Stop is not completion. No secrets/transcripts. Verify receipts. Stage: ${options.stageCommand || "see integrations/agent-memory/README.md"}.\n`;
         state.instructed = true;
@@ -228,7 +258,11 @@ export async function runMemoryEvent(options: {
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
     }
-    if (event === "Checkpoint") output = { saved: !state.pending, pending: Boolean(state.pending), ...(savedReceipt ? { receipt: savedReceipt } : {}) };
+    if (event === "Checkpoint") {
+      // Stage output is the agent's own tool result, so it counts as delivery.
+      if (state.receipt && !state.receipt.announced) { savedReceipt ??= { ...state.receipt, announced: undefined }; state.receipt.announced = true; }
+      output = { saved: !state.pending, pending: Boolean(state.pending), ...(savedReceipt ? { receipt: savedReceipt } : {}) };
+    }
     if (warning) output.systemMessage = warning;
     await save();
     return output;
