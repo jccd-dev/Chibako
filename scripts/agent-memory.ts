@@ -15,9 +15,10 @@ const inputSchema = z.object({
   turn_id: z.string().optional(), prompt: z.string().optional(), stop_hook_active: z.boolean().optional(),
 }).passthrough();
 let countingOnly = false;
-const usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
+const usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|inspect|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
   hook     read a host hook event on stdin
   stage    read {"checkpoint"|"finish"|"skip"|"continue": ...} on stdin; expected_revision may sit inside it or beside it
+  inspect  show this session's pending checkpoint and latest receipt (needs --session; read-only, offline)
   status   show the profile and pending state without the API key
   doctor   check the connection, scopes and hook files
 `;
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
   const directory = args.values["profile-dir"] || profileDirectory(runtime, name);
   if (!path.isAbsolute(directory)) throw new Error("Profile directory must be absolute.");
   if (!["hook", "stage"].includes(action)) {
-    const result = await runControl(runtime, action, directory, name);
+    const result = await runControl(runtime, action, directory, name, args.values.session);
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
     return;
   }
@@ -68,12 +69,13 @@ async function main(): Promise<void> {
   const stateDirectory = profile ? path.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
   const start = Date.now();
   try {
+    const command = (verb: string) => `node ${quote(fileURLToPath(import.meta.url))} ${runtime} ${verb} --profile-dir ${quote(directory)} --session ${quote(input.session_id)}`;
     const execute = async () => {
       const call = connection.call;
       const staged = action === "stage" ? z.object({ checkpoint: z.unknown().optional(), finish: z.unknown().optional(), now_line: z.unknown().optional(), skip: z.unknown().optional(), continue: z.unknown().optional(), replaces_request_id: z.unknown().optional(), expected_revision: z.unknown().optional() }).parse(payload) : undefined;
       const options = { runtime, input, directory: stateDirectory, enabled: true, call, resolveProject, ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
-          stageCommand: `node ${quote(fileURLToPath(import.meta.url))} ${runtime} stage --profile-dir ${quote(directory)} --session ${quote(input.session_id)}` } : {}) };
+          stageCommand: command("stage"), inspectCommand: command("inspect") } : {}) };
       const result = await runMemoryEvent({ ...options, ...(staged ? { stage: staged } : {}) });
       const flushed = staged?.checkpoint || staged?.finish ? await runMemoryEvent({ ...options, input: { ...input, hook_event_name: "Checkpoint" } }) : {};
       process.stdout.write(JSON.stringify({ ...result, ...flushed }) + "\n");

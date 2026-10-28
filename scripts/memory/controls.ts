@@ -6,13 +6,21 @@ import { localStatus, readProfile } from "./profile";
 import { applySetup, prepareSetup, redactedPreview, inspectConnection, duplicateHookFiles, disconnect, setEnabled, writeConnectionCheck } from "./setup";
 import { readOptional } from "./private-files";
 import { renderHostConfig } from "./host-config";
-import type { Runtime } from "./runtime";
+import { inspectMemoryState, type Runtime } from "./runtime";
+import path from "node:path";
 
-export async function runControl(runtime: Runtime, action: string, directory: string, name: string): Promise<object> {
+export async function runControl(runtime: Runtime, action: string, directory: string, name: string, session?: string): Promise<object> {
   if (process.platform === "win32") throw new MemoryClientError("Windows private storage is not supported yet.");
   const configured = await readProfile(directory);
   if (configured && configured.runtime !== runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
   if (action === "status") return localStatus(directory);
+  if (action === "inspect") {
+    if (!configured) throw new MemoryClientError("No configured profile. Run setup first.");
+    if (!session) throw new MemoryClientError("Inspect needs --session with the hook session_id.");
+    // Explicitly requested private evidence for this session only; the profile key is never read into the result.
+    return inspectMemoryState({ runtime, directory: path.join(directory, "state"), session_id: session,
+      binding: { endpoint: configured.endpoint, principal_id: configured.principal_id, area: configured.area } });
+  }
   if (action === "pause") { await setEnabled(directory, false); return { enabled: false, pending_retained: true }; }
   if (action === "disconnect") { await disconnect(directory); return { enabled: false, disconnected: true, pending_retained: true, key_revocation: "owner action" }; }
   if (action === "setup") return setupWizard(runtime, directory, name);
@@ -32,7 +40,7 @@ export async function runControl(runtime: Runtime, action: string, directory: st
         ...(await localStatus(directory)), node: process.version, platform: process.platform,
         host_events: "Actual host delivery and native hook consent require verification; connection alone is insufficient." };
     }
-    throw new MemoryClientError("Unknown control. Use setup, status, doctor, pause, resume or disconnect.");
+    throw new MemoryClientError("Unknown control. Use setup, status, inspect, doctor, pause, resume or disconnect.");
   } finally { await connection.close(); }
 }
 

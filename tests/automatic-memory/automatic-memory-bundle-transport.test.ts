@@ -31,6 +31,8 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
   const hostFile = path.join(hostHome, "config.toml");
   const profileDirectory = path.join(root, "private-profile");
   let advertiseLifecycle = true;
+  let delaySaves = false;
+  let saveCalls = 0;
 
   const server = createServer(async (incoming, outgoing) => {
     try {
@@ -48,6 +50,12 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       assert.ok(listener && typeof listener !== "string");
       const request = new Request(`http://127.0.0.1:${listener.port}${incoming.url || "/mcp"}`, { method, headers, ...(body ? { body } : {}) });
       const response = await remote(request);
+      const rpc = body ? JSON.parse(body.toString()) : undefined;
+      if (rpc?.params?.name === "memory_session" && rpc.params.arguments?.action !== "read") {
+        saveCalls++;
+        // The write has committed; only its response is late, so the client cannot know the outcome.
+        if (delaySaves) await new Promise((resolve) => setTimeout(resolve, 5_500));
+      }
       let responseBody = Buffer.from(await response.arrayBuffer());
       if (!advertiseLifecycle && body && JSON.parse(body.toString()).params?.name === "memory_status") {
         const payload = JSON.parse(responseBody.toString());
@@ -90,8 +98,8 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       CHIBAKO_DATA_DIR: process.env.CHIBAKO_DATA_DIR,
       CHIBAKO_MEMORY_PROFILE_DIR: undefined,
     } satisfies NodeJS.ProcessEnv;
-    const invoke = async (input: object, action = "hook") => {
-      const child = execFile(process.execPath, [runner, "codex", action, "--profile-dir", profileDirectory], {
+    const invoke = async (input: object, action = "hook", extra: string[] = [], allowFailure = false) => {
+      const child = execFile(process.execPath, [runner, "codex", action, "--profile-dir", profileDirectory, ...extra], {
         cwd: root, env: environment, encoding: "utf8", timeout: 15_000,
       }, (error, stdout, stderr) => {
         if (error) Object.assign(error, { stdout, stderr });
@@ -101,7 +109,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
         child.on("close", (code, signal) => {
           const stdout = output.stdout;
           const stderr = output.stderr;
-          if (code !== 0) reject(new Error(`runner exited ${code ?? signal}: ${stderr || stdout}`));
+          if (code !== 0 && !allowFailure) reject(new Error(`runner exited ${code ?? signal}: ${stderr || stdout}`));
           else resolve({ stdout, stderr });
         });
       });
@@ -166,7 +174,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     await invoke({ session_id: "conflict-session", hook_event_name: "UserPromptSubmit", turn_id: "conflict-turn" });
     const conflicted = JSON.parse((await invoke({ session_id: "conflict-session", hook_event_name: "Checkpoint", checkpoint: { title: "Conflict fixture", content: "Invented revision" }, expected_revision: "f".repeat(64) }, "stage")).stdout);
     assert.equal(conflicted.pending, true, "a top-level expected_revision reaches the server");
-    assert.match(conflicted.systemMessage, /No session checkpoint exists yet; use expected_revision null/, "the server's conflict detail reaches the agent");
+    assert.match(conflicted.systemMessage, /no session checkpoint exists yet; use expected_revision null/i, "the server's conflict detail reaches the agent");
 
     advertiseLifecycle = false;
     await invoke({ session_id: "old-server-session", hook_event_name: "UserPromptSubmit", turn_id: "old-server-turn" });
@@ -189,6 +197,76 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     assert.equal(resolved.saved, true);
     assert.equal(resolved.pending, false);
     assert.equal(getNote(trashState.note.id), null);
+
+    // Black-box recovery: the runner generates the request ID; the agent learns it only from output and inspect.
+    const session_id = "recovery-session";
+    const stage = async (input: object, allowFailure = false) => JSON.parse((await invoke({ session_id, hook_event_name: "Checkpoint", ...input }, "stage", ["--session", session_id], allowFailure)).stdout);
+    const inspect = async (session = session_id) => {
+      const result = await invoke({}, "inspect", ["--session", session]);
+      assert.equal(`${result.stdout}${result.stderr}`.includes(key.key), false, "inspect never exposes the profile key");
+      return JSON.parse(result.stdout);
+    };
+    await invoke({ session_id, hook_event_name: "UserPromptSubmit", turn_id: "recovery-turn" });
+    const created = await stage({ checkpoint: { title: "Recovery fixture", content: "Base" }, expected_revision: null });
+    assert.equal(created.saved, true);
+    sessionMemory(principal, { action: "save", runtime: "codex", session_id, request_id: "other-contributor", title: "Recovery fixture", content: "Base + theirs", expected_revision: created.receipt.revision, now_line: "theirs" });
+    const stale = await stage({ checkpoint: { title: "Recovery fixture", content: "Base + mine" }, expected_revision: created.receipt.revision });
+    assert.equal(stale.pending, true);
+    assert.equal(stale.pending_request.failure.category, "conflict");
+    assert.equal(stale.pending_request.attempted_revision, created.receipt.revision);
+    assert.match(stale.pending_request.recovery, /inspect/);
+    const request_id = stale.pending_request.request_id as string;
+    const attempts = saveCalls;
+    const nextPrompt = await invoke({ session_id, hook_event_name: "UserPromptSubmit", turn_id: "recovery-turn-2" });
+    await invoke({ session_id, hook_event_name: "Stop" });
+    assert.equal(saveCalls, attempts, "a confirmed stale request is not resent by later hooks");
+    assert.equal(nextPrompt.stdout.includes("Base + mine"), false, "routine hook output never carries the pending body");
+
+    const inspected = await inspect();
+    assert.equal(inspected.pending.request_id, request_id);
+    assert.equal(inspected.pending.checkpoint.content, "Base + mine");
+    assert.equal(JSON.stringify(await inspect("bundle-session")).includes("Base + mine"), false, "another session cannot see this contribution");
+    const statusOutput = (await invoke({}, "status")).stdout;
+    assert.equal(statusOutput.includes(key.key) || statusOutput.includes("Base + mine"), false, "status excludes keys and bodies");
+
+    const latestRead = sessionMemory(principal, { action: "read", runtime: "codex", session_id });
+    assert.ok("note" in latestRead && latestRead.note);
+    const merged = `${stripFrontmatter(latestRead.note.content)} + mine`;
+    for (const rejected of [
+      { checkpoint: { title: "Recovery fixture", content: merged }, expected_revision: latestRead.revision, replaces_request_id: "not-the-pending-request" },
+      { checkpoint: { title: "Recovery fixture", content: merged }, expected_revision: latestRead.revision },
+      { checkpoint: { title: "Recovery fixture", content: merged, request_id }, expected_revision: latestRead.revision, replaces_request_id: request_id },
+      { checkpoint: { title: "Recovery fixture", content: merged }, expected_revision: created.receipt.revision, replaces_request_id: request_id },
+      { checkpoint: { title: "Recovery fixture", content: merged }, expected_revision: "not-a-revision", replaces_request_id: request_id },
+    ]) {
+      const result = await stage(rejected, true);
+      assert.match(result.systemMessage, /Unsaved checkpoint exists|Invalid memory payload/);
+      assert.equal(result.systemMessage.includes(merged), false);
+    }
+    assert.deepEqual(await inspect(), inspected, "rejected replacements leave the pending contribution intact");
+    const untouched = sessionMemory(principal, { action: "read", runtime: "codex", session_id });
+    assert.ok("note" in untouched);
+    assert.equal(untouched.revision, latestRead.revision, "rejected replacements leave remote data intact");
+
+    const recovered = await stage({ checkpoint: { title: "Recovery fixture", content: merged }, expected_revision: latestRead.revision, replaces_request_id: request_id });
+    assert.deepEqual([recovered.saved, recovered.pending], [true, false]);
+    const final = sessionMemory(principal, { action: "read", runtime: "codex", session_id });
+    assert.ok("note" in final && final.note);
+    assert.equal(stripFrontmatter(final.note.content), "Base + theirs + mine", "both contributions survive");
+    assert.equal((await inspect()).pending, null);
+
+    // A timeout after the server committed is unverified, never reported as a clean failure.
+    await invoke({ session_id: "timeout-session", hook_event_name: "UserPromptSubmit", turn_id: "timeout-turn" });
+    delaySaves = true;
+    const timedOut = JSON.parse((await invoke({ session_id: "timeout-session", hook_event_name: "Checkpoint", checkpoint: { title: "Timeout fixture", content: "Late response" }, expected_revision: null }, "stage", ["--session", "timeout-session"])).stdout);
+    delaySaves = false;
+    assert.equal(timedOut.pending, true);
+    assert.deepEqual([timedOut.pending_request.failure.category, timedOut.pending_request.failure.phase], ["timeout", "call"]);
+    assert.equal(typeof timedOut.pending_request.failure.elapsed_ms, "number");
+    assert.match(timedOut.systemMessage, /unverified/);
+    assert.equal(/Abort|aborted|127\.0\.0\.1/.test(JSON.stringify(timedOut)), false, "no raw exception detail or endpoint");
+    const replayed = JSON.parse((await invoke({ session_id: "timeout-session", hook_event_name: "Checkpoint" })).stdout);
+    assert.equal(replayed.saved, true, "the original request replays its committed receipt");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
