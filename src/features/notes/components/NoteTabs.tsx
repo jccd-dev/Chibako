@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useHydrated } from "@/lib/use-hydrated";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -60,6 +60,13 @@ export function NoteTabs() {
     return response.json();
   }), []);
 
+  const activeIdRef = useRef(activeId);
+  const tabsRef = useRef(tabs);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+    tabsRef.current = tabs;
+  });
+
   const hydrated = useHydrated();
   if (hydrated && !loaded) {
     setTabs(restoreNoteTabs(readTabs(), tabs));
@@ -76,6 +83,14 @@ export function NoteTabs() {
             const next = current.filter((tab) => tab.id === "new" || ids.has(tab.id));
             return next.length === current.length ? current : next;
           });
+          // The open note was deleted elsewhere (e.g. over MCP): leave its page.
+          const active = activeIdRef.current;
+          if (active && active !== "new" && ids.size > 0 && !ids.has(active)) {
+            const rest = tabsRef.current.filter((tab) => tab.id === "new" || ids.has(tab.id));
+            const index = tabsRef.current.findIndex((tab) => tab.id === active);
+            const fallback = rest[Math.min(Math.max(index - 1, 0), rest.length - 1)];
+            router.push(fallback ? `/app/note/${fallback.id}` : "/app");
+          }
         })
         .catch(() => { /* transient fetch failure — keep current tabs */ });
     };
@@ -93,13 +108,18 @@ export function NoteTabs() {
         return next;
       });
     };
+    // Notes can change outside this browser tab (MCP, REST, another window);
+    // refresh every note consumer when the user comes back.
+    const onFocus = () => window.dispatchEvent(new Event("chibako:notes-changed"));
     window.addEventListener("chibako:note-tab", onTab);
     window.addEventListener("chibako:notes-changed", onNotesChanged);
+    window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("chibako:note-tab", onTab);
       window.removeEventListener("chibako:notes-changed", onNotesChanged);
+      window.removeEventListener("focus", onFocus);
     };
-  }, [treeCache]);
+  }, [treeCache, router]);
 
   useEffect(() => {
     if (!loaded) return;

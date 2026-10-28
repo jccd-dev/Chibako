@@ -555,7 +555,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox" id="sidebar-search-results">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1.5" role="listbox" id="sidebar-search-results">
         {searchQuery.trim() === "" ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             <p>Search across titles and note content.</p>
@@ -588,15 +588,15 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
             >
               <div className="flex items-center gap-1.5 font-medium text-foreground">
                 <IconFile size={13} className="shrink-0 text-muted-foreground" />
-                <span className="truncate">{r.title}</span>
+                <span className="min-w-0 truncate">{r.title}</span>
                 {r.folder && (
-                  <span className="ml-auto shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                  <span className="ml-auto max-w-[50%] shrink-0 truncate rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground" title={r.folder}>
                     {r.folder}
                   </span>
                 )}
               </div>
               {r.snippet && (
-                <div className="mt-0.5 line-clamp-2 pl-4 text-[11px] leading-tight text-muted-foreground">
+                <div className="mt-0.5 line-clamp-2 pl-4 text-[11px] leading-tight wrap-anywhere text-muted-foreground">
                   {r.snippet.split(/(<mark>|<\/mark>)/).map((part, idx, parts) =>
                     part === "<mark>" || part === "</mark>"
                       ? null

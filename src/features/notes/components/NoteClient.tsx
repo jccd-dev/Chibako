@@ -7,6 +7,7 @@ import type { Note, NoteKind, NoteSummary } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { applyFrontmatter, parseFrontmatter, serializeFrontmatter, type PropValue } from "@/lib/markdown";
 import { PROPERTY_TYPES, type PropertyDef, type PropertyType } from "@/lib/property-types";
+import { PropDateInput } from "@/features/notes/components/PropDateInput";
 import { MarkdownPreview } from "@/features/notes/components/MarkdownPreview";
 import { RichTextEditor } from "@/features/notes/components/editor/RichTextEditor";
 import {
@@ -83,7 +84,7 @@ function PropTextEditor({ initial, onCommit, placeholder, type, ariaLabel }: {
   initial: string;
   onCommit: (raw: string) => void;
   placeholder?: string;
-  type: "text" | "number" | "date";
+  type: "text" | "number";
   ariaLabel: string;
 }) {
   return (
@@ -873,10 +874,12 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
                     {def.options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              ) : type === "date" ? (
+                <PropDateInput value={text} ariaLabel={`Property ${key}`} onCommit={(raw) => setPropText(key, raw)} />
               ) : (
                 <PropTextEditor
                   initial={text}
-                  type={type === "number" ? "number" : type === "date" ? "date" : "text"}
+                  type={type === "number" ? "number" : "text"}
                   placeholder={type === "list" || type === "tags" ? "comma, separated" : "—"}
                   ariaLabel={`Property ${key}`}
                   onCommit={(raw) => setPropText(key, raw)}

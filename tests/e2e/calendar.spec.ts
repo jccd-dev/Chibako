@@ -82,6 +82,8 @@ test("Calendar spans a Note across its inclusive date range", async ({ page }) =
     await page.goto(`/app/calendar?date=${day}`);
     await expect(page.getByTestId("calendar-note-list").getByText(`Trip ${suffix}`)).toBeVisible();
   }
+  // The random year decides whether April's grid shows March 31, so view March.
+  await page.goto(`/app/calendar?date=${year}-03-31`);
   await expect(page.getByRole("button", { name: new RegExp(`March 31, ${year}, 2 Notes`) })).toBeVisible();
 
   await page.goto(`/app/calendar?date=${year}-04-03`);
@@ -100,13 +102,13 @@ test("Connections shows Calendar only for a dated Note and opens the selected da
   const undated = (await undatedResponse.json()).note as { id: string };
 
   await page.goto(`/app/note/${dated.id}`);
-  await expect(page.getByRole("heading", { name: "Connections" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Note details" })).toBeVisible();
   await expect(page.getByRole("button", { name: new RegExp(`February 3, ${year}, 1 Note`) })).toBeVisible();
   await page.getByRole("button", { name: new RegExp(`February 4, ${year}, 1 Note`) }).click();
   await expect(page).toHaveURL(`/app/calendar?date=${year}-02-04`);
 
   await page.goto(`/app/note/${undated.id}`);
-  await expect(page.getByRole("heading", { name: "Connections" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Note details" })).toBeVisible();
   await expect(page.locator('[data-slot="calendar"]')).toHaveCount(0);
 });
 
@@ -123,12 +125,12 @@ test("Calendar starts a dated draft without creating an abandoned Note", async (
   await page.getByRole("button", { name: "New note" }).click();
 
   await expect(page).toHaveURL(`/app/note/new?date=${selectedDate}`);
-  await expect(page.getByRole("textbox", { name: "Property date" })).toHaveValue(selectedDate);
+  await expect(page.getByRole("button", { name: "Property date", exact: true })).toHaveText(`Jun 15, ${year}`);
   await page.waitForTimeout(900);
   expect(creates).toBe(0);
 
   await page.getByRole("textbox", { name: "Note title" }).fill(`Dated draft ${Date.now()}`);
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toHaveText("Saved", { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/app\/note\/(?!new\b)[^/?]+$/, { timeout: 15_000 });
   expect(creates).toBe(1);
-  await expect(page.getByRole("textbox", { name: "Property date" })).toHaveValue(selectedDate);
+  await expect(page.getByRole("button", { name: "Property date", exact: true })).toHaveText(`Jun 15, ${year}`);
 });
