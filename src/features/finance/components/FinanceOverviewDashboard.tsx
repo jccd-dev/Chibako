@@ -559,12 +559,6 @@ export function FinanceOverviewDashboard({
                       : plan.type === "income"
                         ? IconArrowDownLeft
                         : IconArrowUpRight;
-                    const dueState =
-                      plan.due_date < today
-                        ? "Overdue"
-                        : plan.due_date === today
-                          ? "Due today"
-                          : "Upcoming";
                     return (
                       <button
                         key={plan.id}
@@ -583,8 +577,9 @@ export function FinanceOverviewDashboard({
                             {plan.text || plan.category_name || plan.type}
                           </span>
                           <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                            {plan.schedule_id ? "Recurring · " : ""}
-                            {dueState} · due {plan.due_date}
+                            {formatHistoryDate(plan.due_date)}
+                            {plan.due_date < today ? " · Overdue" : ""}
+                            {plan.schedule_id ? " · Recurring" : ""}
                           </span>
                         </span>
                         <span className="shrink-0 text-right">
@@ -665,7 +660,7 @@ export function FinanceOverviewDashboard({
                 ref={trackRef}
                 aria-label="Accounts list"
                 onScroll={(event) => syncBounds(event.currentTarget)}
-                className="grid w-full grid-flow-col auto-cols-[85%] gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 motion-reduce:scroll-auto sm:auto-cols-[calc((100%-0.75rem)/2)] xl:auto-cols-[85%]"
+                className="grid w-full grid-flow-col auto-cols-[85%] gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 scrollbar-none motion-reduce:scroll-auto sm:auto-cols-[calc((100%-0.75rem)/2)] xl:auto-cols-[85%]"
               >
                 {accounts.map((account) => (
                   <button

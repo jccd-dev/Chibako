@@ -50,8 +50,8 @@ import { getBudget, setBudget, getFinanceReport } from "../features/finance/budg
 import { getFinanceAttention, getFinanceOverview } from "../features/finance/overview";
 import { createObligation, updateObligation, getObligation, listObligations, postObligationMovement, postObligationPayment, closeObligation, getObligationPaymentHistory, deleteObligation } from "../features/finance/obligations";
 import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema, postObligationPaymentSchema, closeObligationSchema, obligationHistorySchema, deleteObligationSchema } from "../features/finance/obligation-types";
-import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts, moveGoalMoney } from "../features/finance/goals";
-import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema, moveGoalMoneySchema } from "../features/finance/goal-types";
+import { createGoal, getGoal, listGoals, updateGoal, setGoalAllocation, listGoalAccounts, moveGoalMoney, deleteGoal } from "../features/finance/goals";
+import { createGoalSchema, getGoalSchema, listGoalsSchema, updateGoalSchema, setGoalAllocationSchema, listGoalAccountsSchema, moveGoalMoneySchema, deleteGoalSchema } from "../features/finance/goal-types";
 import { getBudgetSchema, setBudgetSchema, financeReportSchema } from "../features/finance/budget-types";
 import { financeAttentionSchema } from "../features/finance/overview-types";
 import { createClassification, updateClassification, listClassifications } from "../features/finance/classifications";
@@ -647,6 +647,10 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       title: "Edit or archive savings goal", description: "Update name, target, due date or linked_account_id, or archive an empty goal. Changing linked_account_id requires finance:write too and moves the saved balance between backing locations; null holds money in the goal. Withdraw all money before archiving. Requires request_id and current version.",
       inputSchema: updateGoalSchema.safeExtend({ id: getGoalSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateGoal(actor, id, args)));
+    server.registerTool("delete_finance_goal", {
+      title: "Permanently delete a savings goal", description: "Remove a mistaken goal and its movement history for good. Refused when its deposits, withdrawals or relocations left any account balance changed (return the money to its source or archive instead). Linked-account reservations are released. Never changes balances. Requires finance:manage, request_id and current version.",
+      inputSchema: deleteGoalSchema.extend({ id: getGoalSchema.shape.id }), annotations: DESTRUCTIVE,
+    }, ({ id, ...args }) => financeResult("finance:manage", actor => deleteGoal(actor, id, args)));
     if (financeAuthorized("finance:write")) server.registerTool("set_finance_goal_allocation", {
       title: "Set goal funding from an account", description: "Compatibility absolute per-source PHP holding. Increasing moves the difference out of the source into the goal's linked account or goal-held money. Decreasing returns the difference to that account. Requires finance:manage, finance:write, request_id and goal version. Prefer move_finance_goal_money for new deposits or withdrawals. Never income or spending.",
       inputSchema: setGoalAllocationSchema.extend({ id: getGoalSchema.shape.id }), annotations,

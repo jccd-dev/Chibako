@@ -18,6 +18,12 @@ async function authenticate(page: Page) {
   await expect(page).toHaveURL(/\/app/);
 }
 
+// Finance sections are sidebar links driven by ?tab=; the mobile sidebar is collapsed, so navigate by URL.
+async function openFinanceTab(page: Page, tab: "overview" | "activity" | "planning" | "accounts") {
+  await page.goto(`/app/finance?tab=${tab}`);
+  await expect(page.getByRole("heading", { name: "Finance", exact: true })).toBeVisible();
+}
+
 async function addAccount(page: Page, name: string, balance: string, kind = "money") {
   await page.getByRole("button", { name: "Add account", exact: true }).click();
   await page.getByLabel("Account name", { exact: true }).fill(name);
@@ -50,7 +56,7 @@ test("goal withdrawals validate available money and show progress", async ({ pag
   expect(rejected.status()).toBe(409);
   await page.getByRole("link", { name: "Finance", exact: true }).click();
   await page.getByRole("link", { name: "Planning", exact: true }).click();
-  const row = page.getByRole("button", { name: `Edit goal ${goal.name}`, exact: true });
+  const row = page.getByRole("button", { name: new RegExp(`^Edit goal ${goal.name}:`) });
   await expect(row).toContainText("25%");
   await row.click();
   await page.getByLabel("Action", { exact: true }).selectOption("withdrawal");
@@ -69,6 +75,11 @@ test("goal withdrawals validate available money and show progress", async ({ pag
   await expect(page.locator("#goal-movement-amount")).toHaveValue("");
   const refreshed = await (await page.request.get(`/api/finance/goals/${goal.id}`)).json();
   expect(refreshed.goal.saved_cents).toBe(0);
+  // Money went back to its source, so the mistaken goal can be deleted for good.
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(row).toHaveCount(0);
+  expect((await page.request.get(`/api/finance/goals/${goal.id}`)).status()).toBe(404);
 });
 
 for (const device of ["desktop", "mobile"]) test(device + " finance account workflow, keyboard and both themes", async ({ page, request }) => {
@@ -83,11 +94,13 @@ for (const device of ["desktop", "mobile"]) test(device + " finance account work
   } else await page.getByRole("link", { name: "Finance", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Finance", exact: true })).toBeVisible();
   const before = await (await page.request.get("/api/finance/summary")).json();
-  const cash = device + " cash", wallet = device + " wallet", asset = device + " asset";
-  await page.getByRole("tab", { name: "Accounts", exact: true }).click();
+  // The vault is shared across runs, so suffix names to keep "View <name>" unique.
+  const run = randomUUID().slice(0, 8);
+  const cash = `${device} cash ${run}`, wallet = `${device} wallet ${run}`, asset = `${device} asset ${run}`;
+  await openFinanceTab(page, "accounts");
   await addAccount(page, cash, "123.45");
   await addAccount(page, asset, "456.78", "asset");
-  await addAccount(page, device + " negative", "-10.01");
+  await addAccount(page, `${device} negative ${run}`, "-10.01");
   await expect(page.getByText("Negative balance. Review this account.", { exact: true }).first()).toBeVisible();
   const expected = { money: before.money.balance_cents + 11344, assets: before.assets.balance_cents + 45678 };
   const position = await (await page.request.get("/api/finance/summary")).json();
@@ -102,13 +115,13 @@ for (const device of ["desktop", "mobile"]) test(device + " finance account work
   await page.getByLabel("Account name", { exact: true }).fill(wallet);
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "Accounts", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/[?&]tab=accounts\b/);
   await page.getByRole("button", { name: "View " + wallet, exact: true }).click();
   await page.getByRole("button", { name: "Edit account", exact: true }).click();
   await page.getByRole("button", { name: "Archive account", exact: true }).click();
   await expect(page.getByRole("button", { name: "View " + wallet, exact: true })).toHaveCount(0);
   expect((await (await page.request.get("/api/finance/summary")).json()).money.balance_cents).toBe(expected.money);
-  await page.getByLabel("Show archived accounts").check();
+  await page.getByRole("checkbox", { name: "Show archived accounts" }).check();
   await page.getByRole("button", { name: "View " + wallet, exact: true }).click();
   await page.getByRole("button", { name: "Edit account", exact: true }).click();
   await page.getByRole("button", { name: "Restore account", exact: true }).click();
@@ -132,15 +145,23 @@ for (const device of ["desktop", "mobile"]) test(device + " finance account work
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   if (device === "mobile") {
-    await addAccount(page, "Maximum exact negative", "-90071992547409.91");
+    await addAccount(page, `Maximum exact negative ${run}`, "-90071992547409.91");
     await page.setViewportSize({ width: 320, height: 844 });
   }
-  for (const tab of ["History", "Planning", "Overview"]) await page.getByRole("tab", { name: tab, exact: true }).click();
+  for (const tab of ["activity", "planning", "overview"] as const) await openFinanceTab(page, tab);
   await expect(page.getByTestId("finance-money-total")).toBeVisible();
   for (const theme of ["light", "dark"]) {
     await page.evaluate(value => document.documentElement.classList.toggle("dark", value === "dark"), theme);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.getByTestId("finance-asset-total")).toBeVisible();
+  }
+  if (device === "mobile") {
+    // Leave no extreme balance behind: a second one in a shared vault overflows combined totals.
+    const extreme = (await (await page.request.get("/api/finance/accounts?limit=100&archived=all")).json()).accounts
+      .find((row: { name: string }) => row.name === `Maximum exact negative ${run}`);
+    expect((await page.request.patch(`/api/finance/accounts/${extreme.id}`, { data: {
+      request_id: randomUUID(), version: extreme.version, include_in_summary: false, archived: true,
+    } })).ok()).toBe(true);
   }
   expect(errors).toEqual([]);
 });
@@ -152,35 +173,36 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
     await page.getByRole("button", { name: "More workspace actions" }).click();
     await page.getByRole("menuitem", { name: "Finance", exact: true }).click();
   } else await page.getByRole("link", { name: "Finance", exact: true }).click();
-  await page.getByRole("tab", { name: "Accounts", exact: true }).click();
-  const cash = device + " planned cash";
+  await openFinanceTab(page, "accounts");
+  const run = randomUUID().slice(0, 8);
+  const cash = `${device} planned cash ${run}`, planText = `${device} expected expense ${run}`;
   await addAccount(page, cash, "500.00");
   const balance = async () => (await (await page.request.get("/api/finance/accounts")).json()).accounts
     .find((row: { name: string }) => row.name === cash).balance_cents;
   expect(await balance()).toBe(50000);
 
-  await page.getByRole("tab", { name: "Planning", exact: true }).click();
-  await page.getByRole("button", { name: "Add plan", exact: true }).click();
-  await page.locator("#plan-amount").fill("35.50");
-  await page.getByLabel("Expected account", { exact: true }).selectOption({ label: cash });
-  await chooseFinanceDate(page, "Due date", "2026-10-02");
-  await page.locator("#plan-text").fill(device + " expected expense");
-  await page.getByRole("button", { name: "Save plan", exact: true }).click();
+  await openFinanceTab(page, "planning");
+  await page.getByRole("button", { name: "Add plan", exact: true }).first().click();
+  // New plans default to recurring; this flow covers a one-time plan.
+  await page.getByRole("switch", { name: "Set as recurring expense" }).click();
+  await page.locator("#schedule-text").fill(planText);
+  await page.locator("#schedule-amount").fill("35.50");
+  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await chooseFinanceDate(page, "Logged at", "2026-10-02");
+  await page.getByRole("button", { name: "Save expense plan", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText("Plan saved. Balances unchanged.", { exact: true })).toBeVisible();
   expect(await balance()).toBe(50000);
 
   const plans = await (await page.request.get("/api/finance/plans?status=pending&include_details=true")).json();
-  const plan = plans.plans.find((row: { text: string }) => row.text === device + " expected expense");
+  const plan = plans.plans.find((row: { text: string }) => row.text === planText);
   expect(plan.amount_cents).toBe(3550);
 
-  // Scope by text so a sibling device's identically priced plan in the shared vault cannot match.
-  await page.getByRole("button", { name: /^Review expense plan PHP 35\.50/ })
-    .filter({ hasText: device + " expected expense" }).click();
-  await page.getByRole("button", { name: "Post actual activity", exact: true }).click();
-  await page.getByLabel("Actual account", { exact: true }).selectOption({ label: cash });
-  await chooseFinanceDate(page, "Actual transaction date", "2026-10-04");
-  await page.getByRole("button", { name: "Confirm and post", exact: true }).click();
+  await page.getByRole("button", { name: `Open ${planText}`, exact: true }).click();
+  await page.getByRole("button", { name: "Log payment", exact: true }).click();
+  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await chooseFinanceDate(page, "Date paid", "2026-10-04");
+  await page.getByRole("button", { name: "Confirm payment", exact: true }).click();
   await expect(page.getByText("Actual activity posted once. Account balance: PHP 464.50.", { exact: true })).toBeVisible();
   expect(await balance()).toBe(46450);
 
@@ -190,9 +212,9 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
   expect(retry.status()).toBe(409);
   expect(await balance()).toBe(46450);
 
-  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await openFinanceTab(page, "activity");
   // The vault is shared across specs, so scope to this device's own account row.
-  await page.getByRole("button", { name: new RegExp(`Inspect expense PHP 35\\.50 on 2026-10-04`) })
+  await page.getByRole("button", { name: "Inspect expense PHP 35.50 on Oct 4, 2026", exact: true })
     .filter({ hasText: cash }).click();
   await page.getByRole("button", { name: "Delete (hide)", exact: true }).click();
   await page.getByRole("button", { name: "Delete (hide only)", exact: true }).click();
