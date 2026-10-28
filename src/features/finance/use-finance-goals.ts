@@ -164,9 +164,23 @@ export function useFinanceGoals() {
     if (!editing) return;
     if (await mutate(`/${editing.id}`, "PATCH", { version: editing.version, archived: true })) closePanel();
   }
+  async function remove() {
+    if (!editing || saving.current || inspecting) return;
+    const target = editing, input = { version: target.version };
+    const fingerprint = JSON.stringify({ path: `/${target.id}`, method: "DELETE", input });
+    if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, requestId: crypto.randomUUID() };
+    saving.current = true; setBusy(true); setSaveError(""); setNotice("");
+    try {
+      await fetch(`/api/finance/goals/${target.id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, request_id: pending.current.requestId }) }).then(financeJson<{ deleted: true; id: string }>);
+      closePanel();
+      await refresh();
+      window.dispatchEvent(new Event("finance-changed"));
+    } catch (error) { setSaveError(error instanceof Error ? error.message : "Could not delete goal. Try again."); }
+    finally { saving.current = false; setBusy(false); }
+  }
   return { page, archived, changeArchived: (value: boolean) => { setArchived(value); setOffset(0); }, offset, setOffset, accounts, loading, loadError, busy, inspecting, panel, editing,
     name, setName, target, setTarget, dueDate, setDueDate,
     linkedAccount, selectLinkedAccount, direction, selectDirection,
-    accountId, selectAccount, amount, setAmount, saveError, notice, refresh, save, moveMoney, archive, openCreate, openEdit, openForAccount, closePanel };
+    accountId, selectAccount, amount, setAmount, saveError, notice, refresh, save, moveMoney, archive, remove, openCreate, openEdit, openForAccount, closePanel };
 }
 export type FinanceGoalsController = ReturnType<typeof useFinanceGoals>;

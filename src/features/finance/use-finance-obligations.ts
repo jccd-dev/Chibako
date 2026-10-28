@@ -13,10 +13,11 @@ export function useFinanceObligations(activity: FinanceActivityController) {
   const [page, setPage] = useState<FinanceObligationList | null>(null);
   const [archived, setArchived] = useState(false), [overdue, setOverdue] = useState(false), [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState("");
-  const [panel, setPanel] = useState<"definition" | "movement" | "payment" | "closure" | null>(null), [editing, setEditing] = useState<FinanceObligation | null>(null);
+  const [panel, setPanel] = useState<"create" | "definition" | "movement" | "payment" | "closure" | null>(null), [editing, setEditing] = useState<FinanceObligation | null>(null);
   const [inspecting, setInspecting] = useState(false), [inspectError, setInspectError] = useState("");
   const [kind, setKind] = useState<"debt" | "receivable">("debt");
-  const [name, setName] = useState(""), [principal, setPrincipal] = useState("0"), [dueDate, setDueDate] = useState("");
+  const [name, setName] = useState(""), [alreadyPaid, setAlreadyPaid] = useState(""), [dueDate, setDueDate] = useState("");
+  const [counterparty, setCounterparty] = useState<FinanceObligation["counterparty_type"]>(null), [notes, setNotes] = useState("");
   const [amount, setAmount] = useState(""), [accountId, setAccountId] = useState(""), [date, setDate] = useState(localCalendarDate()), [text, setText] = useState("");
   const [busy, setBusy] = useState(false), [saveError, setSaveError] = useState(""), [notice, setNotice] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -34,6 +35,7 @@ export function useFinanceObligations(activity: FinanceActivityController) {
   const pending = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const paymentPending = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const closePending = useRef<{ fingerprint: string; requestId: string } | null>(null);
+  const deletePending = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   async function loadHistory(id: string, nextOffset = 0) {
     const run = ++historySequence.current;
@@ -64,9 +66,9 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     changed(); window.addEventListener("finance-changed", changed);
     return () => { requests.current++; window.removeEventListener("finance-changed", changed); };
   }, [refresh]);
-  function populate(record: FinanceObligation) { setEditing(record); setKind(record.kind); setName(record.name); setDueDate(record.due_date ?? ""); }
+  function populate(record: FinanceObligation) { setEditing(record); setKind(record.kind); setName(record.name); setDueDate(record.due_date ?? ""); setCounterparty(record.counterparty_type); setNotes(record.notes); }
   function resetDraft() {
-    pending.current = null; paymentPending.current = null; closePending.current = null;
+    pending.current = null; paymentPending.current = null; closePending.current = null; deletePending.current = null;
     activity.resetSave(); setSaveError(""); setInspectError(""); setErrors({}); setNotice("");
     setAmount(""); setAccountId(""); setDate(localCalendarDate()); setText("");
     setPSource("new"); setPSelected(null); setPCandidates([]); setPTotal(0); setPOffset(0); setPLoading(false); setPError("");
@@ -74,8 +76,8 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     candidates.current++;
     historySequence.current++; setHistory(null); setHistoryOffset(0); setHistoryLoading(false); setHistoryError("");
   }
-  function openCreate(mode: "definition" | "movement") {
-    inspection.current++; setInspecting(false); resetDraft(); setEditing(null); setKind("debt"); setName(""); setPrincipal("0"); setDueDate(""); setPanel(mode);
+  function openCreate(direction: FinanceObligation["kind"]) {
+    inspection.current++; setInspecting(false); resetDraft(); setEditing(null); setKind(direction); setName(""); setAlreadyPaid(""); setDueDate(""); setCounterparty(null); setNotes(""); setPanel("create");
   }
   async function openEdit(record: FinanceObligation) {
     const run = ++inspection.current;
@@ -139,20 +141,28 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     const fields: Record<string, string> = {};
     if (!parsed.success) for (const issue of parsed.error.issues) fields[String(issue.path[0] ?? "form")] = issue.message;
     if (!fields.amount && Number((input as { amount: string }).amount) <= 0) fields.amount = "Use a positive PHP amount with at most two decimal places.";
+    if (!fields.amount && editing) {
+      try { if (decimalCents((input as { amount: string }).amount) > editing.outstanding_cents) fields.amount = `Cannot exceed the remaining ${formatPHP(editing.outstanding_cents)}.`; } catch { fields.amount = "Use an amount within the supported exact-cent range."; }
+    }
     if (matched && !fields.amount && (input as { amount: string }).amount !== decimalPHPInput(matched.amount_cents)) fields.amount = "The amount must equal the selected activity exactly.";
     if (matched && !fields.account_id && (input as { account_id: string }).account_id !== matched.account_id) fields.account_id = "The account must be the one on the selected activity.";
     if (matched && !fields.transaction_date && (input as { transaction_date: string }).transaction_date !== matched.transaction_date) fields.transaction_date = "The date must be the one on the selected activity.";
     if (Object.keys(fields).length) { setErrors(fields); return null; }
     setErrors({}); return input;
   }
+  // Reuse the account of the latest live cash movement so logging starts where the money last moved.
+  function lastMovementAccount() {
+    const id = history?.entries.find(entry => !entry.reverted && entry.cash_activity)?.cash_activity?.account_id;
+    return id && activity.accounts.some(account => account.id === id && account.kind === "money" && !account.archived) ? id : "";
+  }
   function startPayment() {
     if (!editing) return;
     activity.resetSave(); setSaveError(""); setErrors({}); setNotice("");
-    setAmount(""); setAccountId(""); setDate(localCalendarDate()); setText("");
+    setAmount(""); setAccountId(lastMovementAccount()); setDate(localCalendarDate()); setText("");
     setPSource("new"); setPSelected(null); setPaymentReview(null);
     setPanel("payment");
   }
-  function startMovement() { activity.resetSave(); setSaveError(""); setErrors({}); setNotice(""); setAmount(""); setPanel("movement"); }
+  function startMovement() { activity.resetSave(); setSaveError(""); setErrors({}); setNotice(""); setAmount(""); setAccountId(lastMovementAccount()); setDate(localCalendarDate()); setText(""); setPanel("movement"); }
   async function payConfirmed(input: object): Promise<PostedObligationPayment | null> {
     if (saving.current || activity.busy || inspecting || inspectError || !editing) return null;
     const fingerprint = JSON.stringify({ path: "/api/finance/obligations/payments", input });
@@ -243,36 +253,75 @@ export function useFinanceObligations(activity: FinanceActivityController) {
     } catch (error) { setSaveError(error instanceof Error ? error.message : "Could not save obligation."); return null; }
     finally { saving.current = false; setBusy(false); }
   }
+  async function saveCreate(another: boolean) {
+    if (saving.current || activity.busy) return;
+    const cents = (value: string) => { try { return decimalCents(value || "0"); } catch { return NaN; } };
+    if (!(cents(amount) > 0)) { setErrors({ amount: "Use a positive PHP amount with at most two decimal places." }); return; }
+    const details = { name, due_date: dueDate || null, counterparty_type: counterparty, notes };
+    if (accountId) {
+      const input = { type: kind === "debt" ? "borrowing" : "lending", ...details, account_id: accountId, amount, transaction_date: date, text };
+      if (!validate(input, postObligationMovementSchema)) return;
+      saving.current = true;
+      try {
+        const result = await activity.postObligation(input);
+        if (!result) return;
+        if (another) { openCreate(kind); setAccountId(accountId); setDate(date); }
+        else { populate(result.obligation); setPanel("definition"); }
+        setNotice(`Cash movement recorded. Outstanding principal: ${formatPHP(result.obligation.outstanding_cents)}.${another ? " Enter the next entry." : " Inspect corrections in Activity."}`);
+        await refresh(); return true;
+      } finally { saving.current = false; }
+    }
+    const paid = alreadyPaid.trim() || "0";
+    if (!(cents(paid) >= 0 && cents(paid) <= cents(amount))) { setErrors({ already_paid: "Already paid must be an amount from zero up to the total." }); return; }
+    const input = { kind, ...details, principal: amount, already_paid: paid };
+    if (validate(input, createObligationSchema) && await mutate(input)) {
+      if (another) openCreate(kind);
+      setNotice("Obligation saved. No cash moved."); return true;
+    }
+  }
   async function save(another = false) {
+    if (panel === "create") return saveCreate(another);
+    if (!editing) return;
     if (panel === "movement") {
       if (saving.current || activity.busy || inspecting || inspectError) return;
-      const input = { type: kind === "debt" ? "borrowing" : "lending", ...(editing ? { obligation_id: editing.id, version: editing.version } : { name, due_date: dueDate || null }), account_id: accountId, amount, transaction_date: date, text };
+      const input = { type: kind === "debt" ? "borrowing" : "lending", obligation_id: editing.id, version: editing.version, account_id: accountId, amount, transaction_date: date, text };
       if (!validate(input, postObligationMovementSchema)) return;
       saving.current = true;
       try {
         const result = await activity.postObligation(input);
         if (result) {
-          if (another) { openCreate("movement"); setKind(kind); setAccountId(accountId); setDate(date); }
-          else { populate(result.obligation); setPanel("definition"); setAmount(""); }
-          setNotice(`Cash movement recorded. Outstanding principal: ${formatPHP(result.obligation.outstanding_cents)}.${another ? " Enter the next borrowing or lending." : " Inspect corrections in Activity."}`);
+          populate(result.obligation); setPanel("definition"); setAmount("");
+          setNotice(`Cash movement recorded. Outstanding principal: ${formatPHP(result.obligation.outstanding_cents)}. Inspect corrections in Activity.`);
           await refresh(); return true;
         }
       } finally { saving.current = false; }
     } else {
-      const input = editing ? { version: editing.version, name, due_date: dueDate || null } : { kind, name, principal, due_date: dueDate || null };
-      if (validate(input, editing ? updateObligationSchema : createObligationSchema) && await mutate(input)) {
-        if (another) { openCreate("definition"); setKind(kind); }
-        setNotice("Obligation saved. No cash moved."); return true;
-      }
+      const input = { version: editing.version, name, due_date: dueDate || null, counterparty_type: counterparty, notes };
+      if (validate(input, updateObligationSchema) && await mutate(input)) { setNotice("Obligation saved. No cash moved."); return true; }
     }
+  }
+  async function remove(): Promise<boolean> {
+    if (saving.current || inspecting || inspectError || !editing) return false;
+    const target = editing, input = { version: target.version };
+    const fingerprint = JSON.stringify({ path: `/api/finance/obligations/${target.id}`, input });
+    if (deletePending.current?.fingerprint !== fingerprint) deletePending.current = { fingerprint, requestId: crypto.randomUUID() };
+    saving.current = true; setBusy(true); setSaveError("");
+    try {
+      await fetch(`/api/finance/obligations/${target.id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, request_id: deletePending.current.requestId }) }).then(financeJson<{ deleted: true; id: string }>);
+      deletePending.current = null; close();
+      setNotice(`${target.name} was deleted permanently. No account balance changed.`);
+      await refresh(); window.dispatchEvent(new Event("finance-changed"));
+      return true;
+    } catch (error) { setSaveError(error instanceof Error ? error.message : "Could not delete the obligation."); return false; }
+    finally { saving.current = false; setBusy(false); }
   }
   async function archive() {
     if (!editing) return;
     if (await mutate({ version: editing.version, archived: !editing.archived })) setNotice("Archive state saved. Cash, paid and written-off amounts are retained.");
   }
   return { page, archived, overdue, offset, setOffset, setArchived: (v: boolean) => { setArchived(v); setOffset(0); }, setOverdue: (v: boolean) => { setOverdue(v); setOffset(0); }, loading, loadError, refresh,
-    panel, setPanel, editing, inspecting, inspectError, openCreate, openEdit, openById, close, kind, setKind, name, setName, principal, setPrincipal, dueDate, setDueDate, amount, setAmount, accountId, setAccountId, date, setDate, text, setText,
-    busy: busy || activity.busy, saveError: saveError || activity.saveError, notice, errors, save, archive, startMovement,
+    panel, setPanel, editing, inspecting, inspectError, openCreate, openEdit, openById, close, kind, setKind, name, setName, alreadyPaid, setAlreadyPaid, counterparty, setCounterparty, notes, setNotes, dueDate, setDueDate, amount, setAmount, accountId, setAccountId, date, setDate, text, setText,
+    busy: busy || activity.busy, saveError: saveError || activity.saveError, notice, errors, save, archive, remove, startMovement,
     pSource, choosePaymentSource, pSelected, selectCandidate, clearCandidate, pCandidates, pTotal, pOffset, pLoading, pError, loadCandidates, startPayment, pay, payConfirmed, setPaymentReview, paymentReview, paymentShortfall,
     closeReason, setCloseReason, startClose, reviewClose, closureReview, setClosureReview, executeClose,
     history, historyOffset, historyLoading, historyError, changeHistoryOffset };

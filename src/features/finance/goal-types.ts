@@ -7,6 +7,7 @@ const requestId = createAccountSchema.shape.request_id;
 const name = createAccountSchema.shape.name;
 
 export const getGoalSchema = z.object({ id }).strict();
+export const deleteGoalSchema = z.object({ request_id: requestId, version: updateAccountSchema.shape.version }).strict();
 export const listGoalsSchema = z.object({
   limit: z.number().int().min(1).max(100).default(50),
   offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),

@@ -1,4 +1,4 @@
-import { getGoal, updateGoal } from "@/features/finance/goals";
+import { deleteGoal, getGoal, updateGoal } from "@/features/finance/goals";
 import { financeJsonBody, withFinanceAuth } from "../../_adapter";
 
 export const runtime = "nodejs";
@@ -11,4 +11,9 @@ export const GET = withFinanceAuth("finance:read", async (_request, actor, conte
 export const PATCH = withFinanceAuth("finance:manage", async (request, actor, context) => {
   const { id } = await context.params;
   return Response.json(updateGoal(actor, id, await financeJsonBody(request)));
+});
+
+export const DELETE = withFinanceAuth("finance:manage", async (request, actor, context) => {
+  const { id } = await context.params;
+  return Response.json(deleteGoal(actor, id, await financeJsonBody(request)));
 });

@@ -177,6 +177,9 @@ body {
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: color-mix(in oklch, var(--muted-foreground) 50%, transparent); border-radius: var(--radius); }
 ::-webkit-scrollbar-track { background: transparent; }
+/* Unlayered so it beats the global `*` scrollbar rule above. */
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
 
 textarea {
   font-family: inherit;

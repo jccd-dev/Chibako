@@ -19,7 +19,7 @@ let _dbIdentity: string | null = null;
  * as any migration an older image cannot run against, so downgrades are refused
  * before any write. Images that predate the stamp cannot enforce it.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export class SchemaTooNewError extends Error {
   constructor(public found: number) {
@@ -552,6 +552,8 @@ function openDb(): Database.Database {
     ); CREATE INDEX IF NOT EXISTS idx_finance_obligation_writeoffs_obligation ON finance_obligation_writeoffs(obligation_id, created_at, id);`);
     const obligationColumns = new Set((db.prepare("PRAGMA table_info(finance_obligations)").all() as Array<{ name: string }>).map(column => column.name));
     if (!obligationColumns.has("starting_progress_cents")) db.exec("ALTER TABLE finance_obligations ADD COLUMN starting_progress_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(starting_progress_cents) = 'integer' AND starting_progress_cents BETWEEN 0 AND opening_principal_cents)");
+    if (!obligationColumns.has("counterparty_type")) db.exec("ALTER TABLE finance_obligations ADD COLUMN counterparty_type TEXT CHECK (counterparty_type IS NULL OR counterparty_type IN ('person','entity','organization'))");
+    if (!obligationColumns.has("notes")) db.exec("ALTER TABLE finance_obligations ADD COLUMN notes TEXT NOT NULL DEFAULT '' CHECK (length(notes) <= 2000)");
     db.exec(`CREATE TABLE IF NOT EXISTS finance_import_migrations (
       id TEXT PRIMARY KEY, source_hash TEXT NOT NULL UNIQUE, proposal_hash TEXT NOT NULL,
       created_at INTEGER NOT NULL, result_json TEXT NOT NULL

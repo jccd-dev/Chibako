@@ -23,6 +23,7 @@ export const retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, s
   // Defaults to the session's project; null files cross-project knowledge at the area root.
   project: projectSchema.nullable().optional(),
 });
+const nowLine = z.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/);
 export const sessionMemorySchema = z.discriminatedUnion("action", [
   sessionIdentity.extend({ action: z.literal("read") }).strict(),
   sessionIdentity.extend({
@@ -31,7 +32,7 @@ export const sessionMemorySchema = z.discriminatedUnion("action", [
     content: memoryWriteSchema.shape.content,
     // Omitted means a new checkpoint; an existing one still conflicts.
     expected_revision: memoryWriteSchema.shape.expected_revision.default(null),
-    now_line: z.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/),
+    now_line: nowLine,
     // Required to save into a finished (kept) checkpoint, after reading and merging it.
     reopen: z.literal(true).optional(),
   }).strict(),
@@ -47,6 +48,19 @@ export const sessionMemorySchema = z.discriminatedUnion("action", [
   }).strict(),
 ]);
 export type SessionMemoryInput = z.infer<typeof sessionMemorySchema>;
+// MCP discovery serializes a discriminated union as an empty schema, so tools/list advertises this flat
+// contract instead; sessionMemorySchema stays authoritative for each action (no defaults applied here).
+export const sessionMemoryToolSchema = sessionIdentity.extend({
+  action: z.enum(sessionMemorySchema.options.map((option) => option.shape.action.value)),
+  request_id: identity.optional().describe("save, finish, continue: stable per operation; reuse it only to retry the same body"),
+  title: memoryWriteSchema.shape.title.optional().describe("save: checkpoint title; continue: the existing checkpoint to join"),
+  content: memoryWriteSchema.shape.content.optional().describe("save: full checkpoint content"),
+  now_line: nowLine.optional().describe("save: one-line next action for Agent Now"),
+  expected_revision: memoryWriteSchema.shape.expected_revision.optional()
+    .describe("save, finish: null or omitted for a new checkpoint, otherwise the revision from action read"),
+  reopen: z.literal(true).optional().describe("save: required to save into a finished checkpoint after reading and merging it"),
+  retain: retainedMemorySchema.optional().describe("finish: optional wiki/preference knowledge to retain"),
+}).strict();
 
 export class MemoryError extends Error {
   constructor(message: string, public status: number, public code: string) {

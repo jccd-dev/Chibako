@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { cn } from "cn";
 import { GoalProgressGauge } from "./GoalProgressGauge";
 import {
@@ -377,11 +378,21 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
             </Field>
           )}
         </FieldGroup>
-        {!readOnly && (
-          <div className="mt-4 flex justify-end">
-            <Button type="submit" disabled={disabled}>
-              {goals.busy ? "Saving…" : goal ? "Save goal changes" : "Add goal"}
-            </Button>
+        {(goal || !readOnly) && (
+          <div className="mt-4 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {goal && <GoalRemovalActions goal={goal} goals={goals} readOnly={readOnly} />}
+              {!readOnly && (
+                <Button type="submit" disabled={disabled}>
+                  {goals.busy ? "Saving…" : goal ? "Save goal changes" : "Add goal"}
+                </Button>
+              )}
+            </div>
+            {goal && !readOnly && goal.saved_cents > 0 && (
+              <p className="text-right text-xs text-muted-foreground">
+                Withdraw the {formatPHP(goal.saved_cents)} still held before archiving.
+              </p>
+            )}
           </div>
         )}
       </form>
@@ -416,7 +427,6 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
         </section>
       )}
       <div className={financeDrawerFooter}>
-        {goal && !readOnly && <ArchiveButton goal={goal} goals={goals} />}
         <Button
           variant="outline"
           disabled={goals.busy}
@@ -544,31 +554,47 @@ function GoalAllocationRow({ row }: { row: FinanceGoalAllocation }) {
   );
 }
 
-function ArchiveButton({ goal, goals }: { goal: FinanceGoal; goals: FinanceGoalsController }) {
-  const [confirming, setConfirming] = useState(false);
-  const funded = goal.saved_cents > 0;
+function GoalRemovalActions({ goal, goals, readOnly }: { goal: FinanceGoal; goals: FinanceGoalsController; readOnly: boolean }) {
+  const [confirm, setConfirm] = useState<"archive" | "delete" | null>(null);
+  const locked = goals.busy || goals.inspecting;
   return (
-    <div className="flex flex-col gap-2">
-      {confirming && (
-        <p className="text-sm">
-          Archive this goal? History is kept.
-        </p>
-      )}
-      {funded && (
-        <p className="text-xs text-muted-foreground">
-          Withdraw the money first; nothing may remain saved when archiving ({formatPHP(goal.saved_cents)} still held).
-        </p>
-      )}
+    <>
       <Button
-        variant="outline"
-        disabled={goals.busy || goals.inspecting || funded}
-        onClick={() => {
-          if (confirming) void goals.archive();
-          else setConfirming(true);
-        }}
+        type="button"
+        variant="ghost"
+        className="mr-auto text-destructive hover:text-destructive"
+        disabled={locked}
+        onClick={() => setConfirm("delete")}
       >
-        {confirming ? "Confirm archive" : "Archive goal"}
+        Delete
       </Button>
-    </div>
+      {!readOnly && (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={locked || goal.saved_cents > 0}
+          onClick={() => setConfirm("archive")}
+        >
+          Archive
+        </Button>
+      )}
+      <ConfirmDialog
+        open={confirm === "archive"}
+        onOpenChange={open => !open && setConfirm(null)}
+        title={`Archive ${goal.name}?`}
+        description="The goal becomes read-only and moves to archived goals. Its history is kept."
+        confirmLabel="Archive goal"
+        onConfirm={() => { setConfirm(null); void goals.archive(); }}
+      />
+      <ConfirmDialog
+        open={confirm === "delete"}
+        onOpenChange={open => !open && setConfirm(null)}
+        destructive
+        title={`Delete ${goal.name} permanently?`}
+        description="This removes the goal and its history for good and cannot be undone. If it moved money between accounts, return the money to where it came from first; Chibako refuses to delete while balances would change."
+        confirmLabel="Delete permanently"
+        onConfirm={() => { setConfirm(null); void goals.remove(); }}
+      />
+    </>
   );
 }

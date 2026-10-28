@@ -69,7 +69,8 @@ COPY --from=build /app/dist ./dist
 
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
-  && mkdir -p /app/data && chown -R node:node /app/data
+  && mkdir -p /app/data /app/.next/cache \
+  && chown -R node:node /app/data /app/.next/cache
 
 EXPOSE 3000
 

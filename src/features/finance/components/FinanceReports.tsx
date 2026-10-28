@@ -161,12 +161,10 @@ export function FinanceBudgets({
   const spent = report?.spending_cents ?? 0;
   const spendPercent = limitCents > 0 ? Math.min(100, Math.round((spent / limitCents) * 100)) : 0;
   const overLimit = limitCents > 0 && spent > limitCents;
-  const categoryRows = report ? [...report.categories].sort((a, b) => {
-    if (a.overspent !== b.overspent) return a.overspent ? -1 : 1;
-    const budgetedA = a.budget_cents !== null, budgetedB = b.budget_cents !== null;
-    if (budgetedA !== budgetedB) return budgetedA ? -1 : 1;
-    return b.spending_cents - a.spending_cents;
-  }) : [];
+  // Only categories with a limit this month; unlimited spending is summed in "Unbudgeted spending".
+  const categoryRows = (report?.categories ?? [])
+    .filter((row): row is typeof row & { budget_cents: number } => row.budget_cents !== null)
+    .sort((a, b) => a.overspent !== b.overspent ? (a.overspent ? -1 : 1) : b.spending_cents - a.spending_cents);
   function reviewCategory(categoryId: string) {
     void activity.ensureClassification(categoryId).finally(() => budget.openForReview(categoryId, reportMonth));
   }
@@ -208,10 +206,10 @@ export function FinanceBudgets({
                 </div>
                 {report.unbudgeted_cents !== 0 && <p className="mt-1.5 text-xs text-muted-foreground">Unbudgeted spending · <span className="tabular-nums">{money(report.unbudgeted_cents)}</span></p>}
               </div>
-              {report.categories.length ? <>
+              {categoryRows.length ? <>
                 <div className="flex flex-col divide-y divide-border/60">
                   {categoryRows.map(row => {
-                    const rowPercent = row.budget_cents !== null && row.budget_cents > 0 ? Math.min(100, Math.round((row.spending_cents / row.budget_cents) * 100)) : 0;
+                    const rowPercent = row.budget_cents > 0 ? Math.min(100, Math.round((row.spending_cents / row.budget_cents) * 100)) : 0;
                     return <button
                       key={row.category_id ?? "uncategorized"}
                       type="button"
@@ -223,14 +221,10 @@ export function FinanceBudgets({
                       <span className="min-w-0 flex-1">
                         <span className="block break-words text-xs font-medium">{row.name}</span>
                         <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs tabular-nums">
-                          {row.budget_cents === null
-                            ? <span className="text-muted-foreground">No budget for this month</span>
-                            : <>
-                              <span className="text-muted-foreground">{money(row.spending_cents)} of {money(row.budget_cents)}</span>
-                              {row.overspent && <span className="text-destructive">{row.budget_cents > 0 ? `${Math.round((row.spending_cents / row.budget_cents) * 100)}% spent` : "Any spending is over the zero limit"}</span>}
-                            </>}
+                          <span className="text-muted-foreground">{money(row.spending_cents)} of {money(row.budget_cents)}</span>
+                          {row.overspent && <span className="text-destructive">{row.budget_cents > 0 ? `${Math.round((row.spending_cents / row.budget_cents) * 100)}% spent` : "Any spending is over the zero limit"}</span>}
                         </span>
-                        {row.budget_cents !== null && row.budget_cents > 0 && <span
+                        {row.budget_cents > 0 && <span
                           role="progressbar"
                           aria-label={`${row.name} spending against its limit`}
                           aria-valuemin={0}
@@ -248,7 +242,7 @@ export function FinanceBudgets({
                 {report.total > report.categories.length && <p className="text-xs text-muted-foreground">Spending covers all categories; these limits cover the first {report.categories.length} of {report.total}. See Detailed spending reports in Overview for the rest.</p>}
               </> : <Empty className="py-2">
                 <EmptyHeader>
-                  <EmptyTitle>No spending or budgets for {monthLabel}</EmptyTitle>
+                  <EmptyTitle>No budgets for {monthLabel}</EmptyTitle>
                   <EmptyDescription>Set a category limit to start planning this month.</EmptyDescription>
                 </EmptyHeader>
                 <Button variant="outline" onClick={() => setOpen(true)}>Set budget</Button>

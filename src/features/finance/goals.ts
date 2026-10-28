@@ -6,7 +6,7 @@ import { decimalCents, exactCents } from "./money";
 import { readAccountBalance, listAccounts, requireSufficientFunds } from "./accounts";
 import { reservedAccountCents, reservationAmounts } from "./reservations";
 import { FinanceError, type FinanceActor } from "./types";
-import { createGoalSchema, updateGoalSchema, listGoalsSchema, getGoalSchema, listGoalAccountsSchema, setGoalAllocationSchema, moveGoalMoneySchema, type FinanceGoal, type FinanceGoalList, type FinanceReservationAccount } from "./goal-types";
+import { createGoalSchema, updateGoalSchema, listGoalsSchema, getGoalSchema, listGoalAccountsSchema, setGoalAllocationSchema, deleteGoalSchema, moveGoalMoneySchema, type FinanceGoal, type FinanceGoalList, type FinanceReservationAccount } from "./goal-types";
 
 type GoalRow = Omit<FinanceGoal, "archived" | "allocations" | "achieved" | "linked_account_name"> & { archived: number };
 
@@ -254,5 +254,31 @@ export function setGoalAllocation(actor: FinanceActor, id: string, input: unknow
     const after = readGoal(id), account = readReservationAccount(payload.account_id);
     return { result: { goal: after, account, warnings: [] },
       affectedIds: [...new Set([id, payload.account_id, ...(before.linked_account_id ? [before.linked_account_id] : [])])], before, after };
+  });
+}
+
+// Removes a mistaken goal for good. Refused when its movements left any account changed, so balances never change;
+// linked-account reservations without movements are simply released.
+export function deleteGoal(actor: FinanceActor, id: string, input: unknown): { deleted: true; id: string } {
+  authorizeFinance(actor, "finance:manage");
+  parseFinance(getGoalSchema, { id });
+  const payload = parseFinance(deleteGoalSchema, input);
+  return financeMutation(actor, payload.request_id, "goal.delete", { id, version: payload.version }, () => {
+    const before = readGoal(id), db = getDb();
+    if (payload.version !== before.version) throw new FinanceError("Goal changed; refresh before editing", 409, "version_conflict");
+    const movements = db.prepare("SELECT * FROM finance_goal_movements WHERE goal_id = ?").all(id) as Array<{ source_account_id: string | null; destination_account_id: string | null; amount_cents: number }>;
+    const net = new Map<string, bigint>();
+    for (const row of movements) {
+      if (row.source_account_id === row.destination_account_id) continue;
+      if (row.source_account_id) net.set(row.source_account_id, (net.get(row.source_account_id) ?? 0n) - BigInt(row.amount_cents));
+      if (row.destination_account_id) net.set(row.destination_account_id, (net.get(row.destination_account_id) ?? 0n) + BigInt(row.amount_cents));
+    }
+    if ([...net.values()].some(cents => cents !== 0n)) {
+      throw new FinanceError("This goal moved money between accounts. Return it to the account it came from, or archive the goal instead", 409, "has_cash_activity");
+    }
+    db.prepare("DELETE FROM finance_goal_allocations WHERE goal_id = ?").run(id);
+    db.prepare("DELETE FROM finance_goal_movements WHERE goal_id = ?").run(id);
+    db.prepare("DELETE FROM finance_goals WHERE id = ?").run(id);
+    return { result: { deleted: true, id }, affectedIds: [id, ...net.keys()], before: { goal: before, movements }, after: null };
   });
 }

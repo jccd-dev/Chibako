@@ -9,7 +9,7 @@ import { readAccountBalance, requireSufficientFunds } from "./accounts";
 import { insertTransaction, readTransaction, validateTransactionClassifications } from "./activity";
 import { financeBalanceWarnings } from "./reservations";
 import { createObligationSchema, updateObligationSchema, getObligationSchema, listObligationsSchema, postObligationMovementSchema,
-  postObligationPaymentSchema, closeObligationSchema, obligationHistorySchema,
+  postObligationPaymentSchema, closeObligationSchema, obligationHistorySchema, deleteObligationSchema,
   type FinanceObligation, type FinanceObligationList, type FinanceObligationHistory, type FinanceObligationHistoryEntry,
   type PostedObligationMovement, type PostedObligationPayment } from "./obligation-types";
 
@@ -50,18 +50,20 @@ export function bumpObligation(id: string) {
   if (record.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Obligation version limit reached", 409, "version_conflict");
   getDb().prepare("UPDATE finance_obligations SET version = version + 1, updated_at = ? WHERE id = ?").run(now(), id);
 }
-function insertObligation(kind: FinanceObligation["kind"], name: string, principal: number, dueDate: string | null) {
+type ObligationDefinition = Pick<FinanceObligation, "kind" | "name" | "due_date" | "counterparty_type" | "notes"> & { principal: number; alreadyPaid: number };
+function insertObligation(definition: ObligationDefinition) {
   const id = randomUUID(), timestamp = now();
-  getDb().prepare("INSERT INTO finance_obligations (id,kind,name,opening_principal_cents,due_date,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
-    .run(id, kind, name, principal, dueDate, timestamp, timestamp);
+  getDb().prepare("INSERT INTO finance_obligations (id,kind,name,opening_principal_cents,starting_progress_cents,due_date,counterparty_type,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .run(id, definition.kind, definition.name, definition.principal, definition.alreadyPaid, definition.due_date, definition.counterparty_type, definition.notes, timestamp, timestamp);
   return id;
 }
 export function createObligation(actor: FinanceActor, input: unknown): { obligation: FinanceObligation } {
   authorizeFinance(actor, "finance:manage");
   const { request_id, ...payload } = parseFinance(createObligationSchema, input);
-  const principal = decimalCents(payload.principal);
+  const principal = decimalCents(payload.principal), alreadyPaid = decimalCents(payload.already_paid);
+  if (alreadyPaid > principal) throw new FinanceError("Already paid cannot exceed the principal", 400, "invalid_input");
   return financeMutation(actor, request_id, "obligation.create", payload, () => {
-    const id = insertObligation(payload.kind, payload.name, principal, payload.due_date);
+    const id = insertObligation({ ...payload, principal, alreadyPaid });
     const obligation = readObligation(id);
     return { result: { obligation }, affectedIds: [id], before: null, after: obligation };
   });
@@ -73,8 +75,9 @@ export function updateObligation(actor: FinanceActor, id: string, input: unknown
   return financeMutation(actor, request_id, "obligation.update", { id, ...patch }, () => {
     const before = readObligation(id);
     checkObligationVersion(before, patch.version);
-    getDb().prepare("UPDATE finance_obligations SET name = ?, due_date = ?, archived = ? WHERE id = ?")
-      .run(patch.name ?? before.name, patch.due_date === undefined ? before.due_date : patch.due_date, Number(patch.archived ?? before.archived), id);
+    getDb().prepare("UPDATE finance_obligations SET name = ?, due_date = ?, archived = ?, counterparty_type = ?, notes = ? WHERE id = ?")
+      .run(patch.name ?? before.name, patch.due_date === undefined ? before.due_date : patch.due_date, Number(patch.archived ?? before.archived),
+        patch.counterparty_type === undefined ? before.counterparty_type : patch.counterparty_type, patch.notes ?? before.notes, id);
     bumpObligation(id);
     const obligation = readObligation(id);
     return { result: { obligation }, affectedIds: [id], before, after: obligation };
@@ -143,7 +146,8 @@ export function postObligationMovement(actor: FinanceActor, input: unknown): Pos
       checkObligationVersion(before, payload.version);
       if (before.kind !== kind || before.archived) throw new FinanceError("Choose an active obligation of the matching kind", 400, "invalid_obligation");
     }
-    const obligationId = before?.id ?? insertObligation(kind, payload.name!, 0, payload.due_date ?? null);
+    const obligationId = before?.id ?? insertObligation({ kind, name: payload.name!, principal: 0, alreadyPaid: 0, due_date: payload.due_date ?? null,
+      counterparty_type: payload.counterparty_type ?? null, notes: payload.notes ?? "" });
     const id = randomUUID(), timestamp = now();
     getDb().prepare("INSERT INTO finance_obligation_movements (id,obligation_id,type,account_id,amount_cents,transaction_date,text,tag_ids,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .run(id, obligationId, payload.type, account.id, amount, payload.transaction_date, payload.text, JSON.stringify(payload.tag_ids), timestamp, timestamp);
@@ -242,16 +246,19 @@ export function getObligationPaymentHistory(actor: FinanceActor, id: string, inp
   const query = parseFinance(obligationHistorySchema, { ...input as object, id }), db = getDb();
   return db.transaction(() => {
     if (!db.prepare("SELECT 1 FROM finance_obligations WHERE id=?").get(id)) throw new FinanceError("Obligation not found", 404, "not_found");
-    const union = `SELECT p.id,'payment' AS kind,p.amount_cents,t.transaction_date,t.version,t.hidden,t.reverted,
+    const union = `SELECT m.id,m.type AS kind,m.amount_cents,m.transaction_date,m.version,m.hidden,m.reverted,
+      m.id AS cash_activity_id,m.text,NULL AS reason,a.id AS account_id,a.name AS account_name,m.type AS cash_type,m.amount_cents AS cash_amount,m.transaction_date AS cash_date,m.version AS cash_version,m.created_at
+      FROM finance_obligation_movements m JOIN finance_accounts a ON a.id=m.account_id WHERE m.obligation_id=?
+      UNION ALL SELECT p.id,'payment' AS kind,p.amount_cents,t.transaction_date,t.version,t.hidden,t.reverted,
       p.cash_activity_id,t.text,NULL AS reason,a.id AS account_id,a.name AS account_name,t.type AS cash_type,t.amount_cents AS cash_amount,t.transaction_date AS cash_date,t.version AS cash_version,p.created_at
       FROM finance_obligation_payments p JOIN finance_transactions t ON t.id=p.cash_activity_id JOIN finance_accounts a ON a.id=t.account_id WHERE p.obligation_id=?
       UNION ALL SELECT w.id,'write_off',w.amount_cents,NULL,1,0,0,NULL,NULL,w.reason,NULL,NULL,NULL,NULL,NULL,NULL,w.created_at
       FROM finance_obligation_writeoffs w WHERE w.obligation_id=?`;
-    const { total } = db.prepare(`SELECT COUNT(*) AS total FROM (${union})`).get(id, id) as { total: number };
-    const rows = db.prepare(`SELECT * FROM (${union}) ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`).all(id, id, query.limit, query.offset) as Array<{
-      id: string; kind: "payment" | "write_off"; amount_cents: number; transaction_date: string | null; version: number;
+    const { total } = db.prepare(`SELECT COUNT(*) AS total FROM (${union})`).get(id, id, id) as { total: number };
+    const rows = db.prepare(`SELECT * FROM (${union}) ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`).all(id, id, id, query.limit, query.offset) as Array<{
+      id: string; kind: FinanceObligationHistoryEntry["kind"]; amount_cents: number; transaction_date: string | null; version: number;
       hidden: number; reverted: number; cash_activity_id: string | null; text: string | null; reason: string | null;
-      account_id: string | null; account_name: string | null; cash_type: "income" | "expense" | null;
+      account_id: string | null; account_name: string | null; cash_type: NonNullable<FinanceObligationHistoryEntry["cash_activity"]>["type"] | null;
       cash_amount: number | null; cash_date: string | null; cash_version: number | null;
     }>;
     const entries: FinanceObligationHistoryEntry[] = rows.map(row => ({ id: row.id, kind: row.kind, amount_cents: row.amount_cents,
@@ -262,4 +269,35 @@ export function getObligationPaymentHistory(actor: FinanceActor, id: string, inp
       } : null } : {}) }));
     return { entries, total, limit: query.limit, offset: query.offset };
   })();
+}
+
+// Removes a mistaken obligation for good. Active cash must be reverted first, so balances never change here.
+export function deleteObligation(actor: FinanceActor, id: string, input: unknown): { deleted: true; id: string } {
+  authorizeFinance(actor, "finance:manage");
+  parseFinance(getObligationSchema, { id });
+  const payload = parseFinance(deleteObligationSchema, input);
+  return financeMutation(actor, payload.request_id, "obligation.delete", { id, version: payload.version }, () => {
+    const before = readObligation(id), db = getDb();
+    checkObligationVersion(before, payload.version);
+    const { active } = db.prepare(`SELECT (SELECT COUNT(*) FROM finance_obligation_movements WHERE obligation_id=? AND reverted=0)
+      + (SELECT COUNT(*) FROM finance_obligation_payments p JOIN finance_transactions t ON t.id=p.cash_activity_id WHERE p.obligation_id=? AND t.reverted=0) AS active`).get(id, id) as { active: number };
+    if (active) throw new FinanceError(`Revert this obligation's ${active} cash record${active === 1 ? "" : "s"} in Activity before deleting it`, 409, "has_cash_activity");
+    const { linked } = db.prepare(`SELECT (SELECT COUNT(*) FROM finance_schedules WHERE obligation_id=? AND deleted_at IS NULL)
+      + (SELECT COUNT(*) FROM finance_plans WHERE obligation_id=? AND status='pending') AS linked`).get(id, id) as { linked: number };
+    if (linked) throw new FinanceError("Delete its recurring payments and pending plans before deleting it", 409, "has_linked_plans");
+    const rows = {
+      movements: db.prepare("SELECT * FROM finance_obligation_movements WHERE obligation_id=?").all(id) as Array<{ id: string }>,
+      payments: db.prepare("SELECT * FROM finance_obligation_payments WHERE obligation_id=?").all(id),
+      write_offs: db.prepare("SELECT * FROM finance_obligation_writeoffs WHERE obligation_id=?").all(id),
+    };
+    const unlinkNotes = db.prepare("DELETE FROM finance_note_links WHERE activity_id=?");
+    for (const movement of rows.movements) unlinkNotes.run(movement.id);
+    db.prepare("DELETE FROM finance_obligation_movements WHERE obligation_id=?").run(id);
+    db.prepare("DELETE FROM finance_obligation_payments WHERE obligation_id=?").run(id);
+    db.prepare("DELETE FROM finance_obligation_writeoffs WHERE obligation_id=?").run(id);
+    db.prepare("UPDATE finance_schedules SET obligation_id=NULL WHERE obligation_id=?").run(id);
+    db.prepare("UPDATE finance_plans SET obligation_id=NULL WHERE obligation_id=?").run(id);
+    db.prepare("DELETE FROM finance_obligations WHERE id=?").run(id);
+    return { result: { deleted: true, id }, affectedIds: [id, ...rows.movements.map(row => row.id)], before: { obligation: before, ...rows }, after: null };
+  });
 }

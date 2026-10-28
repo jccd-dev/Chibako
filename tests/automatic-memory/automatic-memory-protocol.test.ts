@@ -81,6 +81,17 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   const key = createApiKey("Session fixture", ["memory:write", "notes:read"]);
   const other = createApiKey("Other session fixture", ["memory:write", "notes:read"]);
   const writeOnly = createApiKey("No session reads", ["memory:write"]);
+  const tools = (await rpc(key.key, "tools/list")).tools as Array<{ name: string; inputSchema: { type: string; properties: Record<string, { enum?: string[] }>; required?: string[] } }>;
+  const tool = tools.find((item) => item.name === "memory_session");
+  assert.ok(tool, "memory_session is listed");
+  const advertised = tool.inputSchema;
+  assert.equal(advertised.type, "object");
+  for (const field of ["action", "runtime", "session_id", "project", "request_id", "title", "content", "now_line", "expected_revision", "reopen", "retain"]) {
+    assert.ok(field in advertised.properties, `memory_session advertises ${field}`);
+  }
+  assert.deepEqual(advertised.properties.action.enum, ["read", "save", "finish", "continue"]);
+  assert.deepEqual(advertised.properties.runtime.enum, ["codex", "claude", "hermes"]);
+  assert.deepEqual([...(advertised.required ?? [])].sort(), ["action", "runtime", "session_id"]);
   const input = { action: "save", runtime: "codex", session_id: "fixture-session", request_id: randomUUID(), title: "Protocol session", content: "Useful work", now_line: "Continue", expected_revision: null };
   const response = await postMemory(rest(key.key, "POST", input));
   assert.equal(response.status, 200);
@@ -98,4 +109,25 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   assert.deepEqual(await (await postMemory(rest(key.key, "POST", finish))).json(), done);
   const kept = (await rpc(key.key, "tools/call", "memory_session", read)).structuredContent;
   assert.deepEqual([kept.note.id, kept.closed], [receipt.note_id, true], "finish keeps the checkpoint as a closed session record");
+
+  // Fields valid for another action, missing action fields and unknown fields fail before any write.
+  const fresh = { action: "save", runtime: "claude", session_id: "discovery-session", title: "Discovery session", content: "Discovered", now_line: "Next" };
+  const freshRead = { action: "read", runtime: "claude", session_id: fresh.session_id };
+  for (const [label, malformed, error] of [
+    ["read with save fields", { ...freshRead, content: "x" }, /invalid_input: .*"content"/],
+    ["save without content", { ...fresh, request_id: randomUUID(), content: undefined }, /invalid_input: .*\(content: /],
+    ["save with a bracketed title", { ...fresh, request_id: randomUUID(), title: "Bad [title]" }, /invalid_input: .*title: Title cannot contain/],
+    ["unknown field", { ...fresh, request_id: randomUUID(), extra: 1 }, /Input validation error/],
+    ["unknown action", { ...freshRead, action: "delete" }, /Input validation error/],
+  ] as const) {
+    const result = await rpc(key.key, "tools/call", "memory_session", malformed);
+    assert.equal(result.isError, true, label);
+    assert.match(result.content[0].text, error, label);
+  }
+  assert.equal((await rpc(key.key, "tools/call", "memory_session", freshRead)).structuredContent.note, null, "rejections wrote nothing");
+  const created = (await rpc(key.key, "tools/call", "memory_session", { ...fresh, request_id: randomUUID() })).structuredContent;
+  assert.equal(created.saved, true, "omitted expected_revision creates a new checkpoint");
+  const { title } = (await rpc(key.key, "tools/call", "memory_session", freshRead)).structuredContent.note;
+  const joined = (await rpc(other.key, "tools/call", "memory_session", { action: "continue", runtime: "hermes", session_id: "joiner", request_id: randomUUID(), title })).structuredContent;
+  assert.equal(joined.note_id, created.note_id, "continue joins the checkpoint through the advertised contract");
 });

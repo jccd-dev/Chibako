@@ -13,3 +13,8 @@ export function decimalCents(decimal: string): number {
   const cents = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
   return exactCents(negative ? -cents : cents);
 }
+
+// Live previews only: invalid or empty drafts count as zero, while submission still validates exactly.
+export function previewCents(decimal: string): number {
+  try { return decimalCents(decimal || "0"); } catch { return 0; }
+}

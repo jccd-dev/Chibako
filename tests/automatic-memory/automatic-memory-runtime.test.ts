@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { prepareSessionStage } from "../../scripts/memory/session-stage";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runMemoryEvent, type HookInput, type MemoryCall } from "../../scripts/memory/runtime";
+import { inspectMemoryState, runMemoryEvent, type HookInput, type MemoryCall } from "../../scripts/memory/runtime";
 import { MemoryClientError } from "../../scripts/memory/client-error";
+import { conflictMessage } from "../../scripts/memory/connection";
+import { createHash } from "node:crypto";
 import { withPrivateLock } from "../../scripts/memory/private-files";
 
 async function withPrivateDirectory<T>(run: (directory: string) => Promise<T>): Promise<T> {
@@ -124,7 +126,7 @@ function nowServer(conflicts = 0) {
     if (name !== "memory_write") return {};
     if (args.subject === "Agent Now") {
       if (store.conflicts > 0) { store.conflicts--; store.content = (store.content ?? "# Now") + "\n- [[Other]] — concurrent"; rotate(); throw new Error("revision_conflict"); }
-      if (args.expected_revision !== store.revision) throw new Error("revision_conflict");
+      if (args.expected_revision !== store.revision) throw new MemoryClientError("Session memory conflict: stale revision.", { category: "conflict", phase: "call" });
       store.content = String(args.content); store.writes++; rotate();
       return { saved: true, request_id: args.request_id, note_id: "now", revision: store.revision };
     }
@@ -248,11 +250,13 @@ test("failed flush and malformed receipt retain the same request for retry", asy
   await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: saved } });
   const failed = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("Stop") });
   assert.match(String(failed.systemMessage), /UNSAVED/);
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: bound(saved, "hermes") });
+  const retained = async () => { const { turn, checkpoint } = (await readState(directory)).pending as Record<string, unknown>; return { turn, checkpoint }; };
+  assert.deepEqual(await retained(), { turn: "turn-1", checkpoint: bound(saved, "hermes") });
 
   const malformed = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-2" }) });
   assert.match(String(malformed.systemMessage), /UNSAVED/);
-  assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: bound(saved, "hermes") });
+  assert.deepEqual(await retained(), { turn: "turn-1", checkpoint: bound(saved, "hermes") });
+  assert.equal(((await readState(directory)).pending as { failure: { category: string } }).failure.category, "invalid_receipt");
   await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("Stop") });
   const writes = calls.filter(({ name, args }) => isSave(name, args));
   assert.equal(writes.length, 3);
@@ -501,4 +505,266 @@ test("staging accepts expected_revision beside the checkpoint as well as inside 
   const staged = await prepareSessionStage(unread, "claude", "session-1", { checkpoint: { title: "Resumed", content: "Merged" }, expected_revision: revision });
   assert.equal(staged.checkpoint!.expected_revision, revision);
   await assert.rejects(() => prepareSessionStage(unread, "claude", "session-1", { checkpoint: { title: "Resumed", content: "Merged", expected_revision: revision }, expected_revision: "e".repeat(64) }), /expected_revision/);
+});
+
+// Session server with the real rules: changing revisions, stale-revision rejection and request replay.
+function sessionServer() {
+  const store = { revision: null as string | null, version: 0, mutations: 0, receipts: new Map<string, Record<string, unknown>>(), loseResponses: 0, offline: false };
+  const call: MemoryCall = async (name, args) => {
+    if (name !== "memory_session" || args.action === "read") return {};
+    if (store.offline) throw new Error("offline");
+    const request_id = String(args.request_id);
+    let receipt = store.receipts.get(request_id);
+    if (!receipt) {
+      if (args.expected_revision !== store.revision) throw new MemoryClientError("Session memory conflict: stale revision.", { category: "conflict", phase: "call" });
+      store.mutations++;
+      store.version++;
+      store.revision = args.action === "finish" ? store.revision : String(store.version).padStart(64, "0");
+      receipt = { saved: true, request_id, note_id: args.action === "finish" && store.version === 0 ? null : "note-1", revision: store.revision, closed: args.action === "finish" };
+      store.receipts.set(request_id, receipt);
+    }
+    if (store.loseResponses > 0) { store.loseResponses--; throw new Error("response lost"); }
+    return receipt;
+  };
+  return { store, call };
+}
+const runner = (runtime: "codex" | "claude" | "hermes", directory: string, call: MemoryCall) =>
+  (hook: string, overrides: Partial<HookInput> = {}, extra: object = {}) => runMemoryEvent({ runtime, directory, enabled: true, call, input: event(hook, overrides), ...extra });
+const additionalContext = (output: Record<string, unknown>) => (output.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext ?? "";
+
+for (const runtime of ["codex", "claude", "hermes"] as const) {
+  test(`${runtime}: a receipt saved by a background retry reaches the next prompt context, survives replay, and the next save works`, async () => withPrivateDirectory(async (directory) => {
+    const { store, call } = sessionServer();
+    const run = runner(runtime, directory, call);
+    await run("UserPromptSubmit", { turn_id: "t1" });
+    store.offline = true;
+    const saved = checkpoint();
+    await run("Checkpoint", {}, { stage: { checkpoint: saved } });
+    assert.match(String((await run("Checkpoint")).systemMessage), /UNSAVED/, "the first attempt fails");
+
+    store.offline = false;
+    const stopped = await run("Stop");
+    assert.equal(additionalContext(stopped), "", "Stop output cannot reach the model, so nothing is promised there");
+    assert.equal(store.mutations, 1);
+    const persisted = (await readState(directory)).receipt as Record<string, unknown>;
+    assert.equal(persisted.request_id, saved.request_id);
+    assert.equal(persisted.revision, store.revision);
+
+    const prompt = additionalContext(await run("UserPromptSubmit", { turn_id: "t2" }));
+    assert.match(prompt, new RegExp(saved.request_id));
+    assert.match(prompt, new RegExp(String(store.revision)));
+    assert.match(prompt, /read the current checkpoint/i);
+    assert.equal(additionalContext(await run("UserPromptSubmit", { turn_id: "t3" })), "", "delivered once per prompt");
+    assert.ok((await readState(directory)).receipt, "emission does not delete the only verified metadata");
+
+    const calls = store.mutations;
+    if (runtime !== "hermes") { // Hermes has no start event: its receipt is delivered once at the next pre_llm_call.
+      const resumed = additionalContext(await run("SessionStart"));
+      assert.match(resumed, new RegExp(saved.request_id), "resume or compaction replays it without extra turns");
+      assert.equal(store.mutations, calls, "replay makes no remote write");
+    }
+
+    const next = { ...checkpoint(), content: "More work", expected_revision: store.revision };
+    await run("Checkpoint", {}, { stage: { checkpoint: next } });
+    assert.equal((await run("Checkpoint")).pending, false);
+    assert.equal(((await readState(directory)).receipt as Record<string, unknown>).request_id, next.request_id, "only the latest receipt is retained");
+  }));
+}
+
+test("a committed save whose response is lost replays the original request once and surfaces its receipt", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const run = runner("claude", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  store.loseResponses = 1;
+  const saved = checkpoint();
+  await run("Checkpoint", {}, { stage: { checkpoint: saved } });
+  const first = await run("Checkpoint");
+  assert.match(String(first.systemMessage), /unverified/i, "a lost response is unverified, not proof nothing saved");
+  assert.equal(store.mutations, 1);
+  await run("Stop");
+  assert.equal(store.mutations, 1, "the identical request replays instead of writing twice");
+  assert.match(additionalContext(await run("UserPromptSubmit", { turn_id: "t2" })), new RegExp(saved.request_id));
+}));
+
+test("stage output shows the receipt, and a no-note finish receipt is described without inventing a note", async () => withPrivateDirectory(async (directory) => {
+  const call: MemoryCall = async (name, args) => isSave(name, args) ? { saved: true, request_id: args.request_id, note_id: null, revision: null, closed: true, retained_note_id: null } : {};
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1" }) });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { finish: { expected_revision: null } } });
+  const flushed = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
+  assert.equal(flushed.pending, false);
+  const receipt = (await readState(directory)).receipt as Record<string, unknown>;
+  assert.deepEqual([receipt.note_id, receipt.revision, receipt.closed], [null, null, true]);
+  const notice = additionalContext(await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart") }));
+  assert.match(notice, /no note/i);
+  assert.equal(notice.includes("null"), false);
+}));
+
+test("a receipt describes a past save: another contributor's later edit still requires a current read", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const run = runner("codex", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  await run("Checkpoint", {}, { stage: { checkpoint: checkpoint() } });
+  await run("Checkpoint");
+  const receiptRevision = store.revision;
+  store.version++; store.revision = String(store.version).padStart(64, "0"); // another contributor
+  const notice = additionalContext(await run("SessionStart"));
+  assert.match(notice, new RegExp(String(receiptRevision)));
+  assert.equal(notice.includes(String(store.revision)), false);
+  assert.match(notice, /may have changed|not the current/i);
+  const stale = { ...checkpoint(), content: "Edited after receipt", expected_revision: receiptRevision };
+  await run("Checkpoint", {}, { stage: { checkpoint: stale } });
+  assert.match(String((await run("Checkpoint")).systemMessage), /UNSAVED/, "the historical receipt never bypasses the revision check");
+}));
+
+test("a receipt is never shown to another session", async () => withPrivateDirectory(async (directory) => {
+  const { call } = sessionServer();
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1" }) });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { checkpoint: checkpoint() } });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
+  const other = additionalContext(await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart", { session_id: "session-2" }) }));
+  assert.doesNotMatch(other, /request_id|revision/i);
+}));
+
+test("a confirmed conflict is preserved for recovery and not resent, while transient failures keep retrying", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const run = runner("claude", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  const stale = { ...checkpoint(), request_id: undefined, expected_revision: "f".repeat(64) };
+  store.offline = true;
+  await run("Checkpoint", {}, { stage: { checkpoint: stale } });
+  assert.equal(((await run("Checkpoint")).pending_request as { failure: { category: string } }).failure.category, "unknown");
+  store.offline = false;
+  assert.equal(additionalContext(await run("Stop")), "", "the background retry finds the conflict");
+  let resent = 0;
+  const counting: MemoryCall = async (name, args) => { if (isSave(name, args)) resent++; return call(name, args); };
+  const later = runner("claude", directory, counting);
+  const prompt = await later("UserPromptSubmit", { turn_id: "t2" });
+  assert.match(additionalContext(prompt), /UNSAVED \(conflict, rejected as stale\): request_id [0-9a-f-]{36}, attempted revision f{64}/, "model context names the pending request");
+  assert.match(additionalContext(prompt), /merge/);
+  assert.equal(additionalContext(await later("UserPromptSubmit", { turn_id: "t3" })), "", "the recovery notice is delivered once per prompt, not looped");
+  await later("Stop");
+  await later("PreCompact");
+  const failed = await later("Checkpoint");
+  const pending = failed.pending_request as { request_id: string; attempted_revision: string; failure: { category: string }; recovery: string };
+  assert.equal(failed.pending, true);
+  assert.match(pending.request_id, /^[0-9a-f-]{36}$/, "the generated request ID is returned to the agent");
+  assert.equal(pending.attempted_revision, "f".repeat(64));
+  assert.equal(pending.failure.category, "conflict");
+  assert.match(pending.recovery, /inspect/);
+  assert.match(pending.recovery, new RegExp(`"replaces_request_id": "${pending.request_id}"`));
+  assert.match(String(failed.systemMessage), /stale/i);
+  assert.doesNotMatch(String(failed.systemMessage), /may have committed/, "a confirmed rejection is not described as unverified");
+
+  assert.match(additionalContext(prompt), new RegExp(pending.request_id));
+  assert.equal(resent, 0, "a confirmed stale request is not resent at every hook");
+  assert.match(additionalContext(await later("SessionStart")), new RegExp(pending.request_id), "a start replays it");
+
+}));
+
+test("a transient failure keeps the original request for retry and says it is unverified", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const run = runner("codex", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  store.offline = true;
+  await run("Checkpoint", {}, { stage: { checkpoint: checkpoint() } });
+  const failed = await run("Checkpoint");
+  const pending = failed.pending_request as { failure: { category: string } };
+  assert.equal(pending.failure.category, "unknown", "an unclassified error stays explicitly unknown");
+  assert.match(String(failed.systemMessage), /unverified/);
+  store.offline = false;
+  await run("Stop");
+  assert.equal(store.mutations, 1, "the Stop retry resends the original request");
+}));
+
+test("a conflicted request is replaced only by a fresh revision naming it; rejections are actionable and change nothing", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const run = runner("codex", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  await run("Checkpoint", {}, { stage: { checkpoint: { title: "Created", content: "First" }, expected_revision: null } });
+  await run("Checkpoint");
+  await run("Checkpoint", {}, { stage: { checkpoint: { title: "Stale", content: "Mine" }, expected_revision: "f".repeat(64) } });
+  const { request_id } = (await run("Checkpoint")).pending_request as { request_id: string };
+  const before = await readState(directory);
+  const mutations = store.mutations;
+  for (const stage of [
+    { checkpoint: { title: "Stale", content: "Merged" }, expected_revision: "f".repeat(64), replaces_request_id: request_id },
+    { checkpoint: { title: "Stale", content: "Merged" }, expected_revision: store.revision, replaces_request_id: "wrong" },
+    { checkpoint: { title: "Stale", content: "Merged" }, expected_revision: store.revision },
+    { checkpoint: { title: "Stale", content: "Merged", request_id }, expected_revision: store.revision, replaces_request_id: request_id },
+  ]) {
+    await assert.rejects(() => run("Checkpoint", {}, { stage }), (error) => error instanceof MemoryClientError && error.message.includes(request_id) && /replaces_request_id/.test(error.message));
+  }
+  assert.deepEqual(await readState(directory), before, "a rejected replacement leaves pending state intact");
+  assert.equal(store.mutations, mutations);
+  await run("Checkpoint", {}, { stage: { checkpoint: { title: "Stale", content: "First + Mine" }, expected_revision: store.revision, replaces_request_id: request_id } });
+  const saved = await run("Checkpoint");
+  assert.deepEqual([saved.saved, saved.pending], [true, false]);
+}));
+
+test("inspect is read-only, offline and scoped to one session's pending contribution and receipt", async () => withPrivateDirectory(async (directory) => {
+  const { store, call } = sessionServer();
+  const mine = runner("codex", directory, call);
+  await mine("UserPromptSubmit", { turn_id: "t1" });
+  await mine("Checkpoint", {}, { stage: { checkpoint: { title: "Saved", content: "First" }, expected_revision: null } });
+  await mine("Checkpoint");
+  store.offline = true;
+  await mine("Checkpoint", {}, { stage: { checkpoint: { title: "Saved", content: "MY-PENDING-BODY" }, expected_revision: store.revision } });
+  await mine("Checkpoint");
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { session_id: "session-2", turn_id: "t1" }) });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint", { session_id: "session-2" }), stage: { checkpoint: { title: "Other", content: "OTHER-BODY" }, expected_revision: null } });
+
+  const files = async () => Promise.all((await readdir(directory)).filter((file) => file.endsWith(".json")).map((file) => readFile(join(directory, file), "utf8")));
+  const before = await files();
+  const inspected = await inspectMemoryState({ runtime: "codex", directory, session_id: "session-1" });
+  assert.deepEqual(await files(), before, "inspect writes nothing and acknowledges nothing");
+  const pending = inspected.pending as { request_id: string; checkpoint: { content: string }; failure: { category: string } };
+  assert.equal(pending.checkpoint.content, "MY-PENDING-BODY");
+  assert.equal(pending.failure.category, "unknown");
+  assert.equal((inspected.receipt as { revision: string }).revision, store.revision);
+  assert.equal(JSON.stringify(inspected).includes("OTHER-BODY"), false, "another session's contribution is never exposed");
+  assert.equal(JSON.stringify(inspected).includes("announced"), false);
+  assert.deepEqual(await inspectMemoryState({ runtime: "claude", directory, session_id: "session-1" }), { runtime: "claude", session_id: "session-1", pending: null, receipt: null }, "runtime is part of the scope");
+  assert.deepEqual(await inspectMemoryState({ runtime: "codex", directory: join(directory, "missing"), session_id: "session-1" }), { runtime: "codex", session_id: "session-1", pending: null, receipt: null });
+  await assert.rejects(() => stat(join(directory, "missing")), { code: "ENOENT" }, "inspect creates no state directory");
+  await assert.rejects(() => inspectMemoryState({ runtime: "codex", directory, session_id: "session-1", binding: { endpoint: "https://other.test/mcp", principal_id: "p", area: "a" } }), /another connection/);
+}));
+
+test("a finish rejected for a stale retained-note revision is replaced by correcting that revision", async () => withPrivateDirectory(async (directory) => {
+  let writes = 0;
+  const call: MemoryCall = async (name, args) => {
+    if (!isSave(name, args)) return {};
+    writes++;
+    const retain = args.retain as { expected_revision: string | null };
+    if (retain.expected_revision !== "b".repeat(64)) throw new MemoryClientError("Session memory conflict.", { category: "conflict", phase: "call" });
+    return { saved: true, request_id: args.request_id, note_id: "note-1", revision: "c".repeat(64), closed: true, retained_note_id: "wiki-1" };
+  };
+  const run = runner("codex", directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  const retain = { role: "wiki", subject: "Fact", title: "Fact", content: "Lasting", expected_revision: "a".repeat(64) };
+  await run("Checkpoint", {}, { stage: { finish: { retain }, expected_revision: "c".repeat(64) } });
+  const { request_id } = (await run("Checkpoint")).pending_request as { request_id: string };
+  await run("Checkpoint", {}, { stage: { finish: { retain: { ...retain, expected_revision: "b".repeat(64) } }, expected_revision: "c".repeat(64), replaces_request_id: request_id } });
+  assert.equal((await run("Checkpoint")).saved, true);
+  assert.equal(writes, 2);
+}));
+
+test("inspect refuses a symlinked state file instead of following it to another session", async () => withPrivateDirectory(async (directory) => {
+  const { call } = sessionServer();
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { session_id: "session-2", turn_id: "t1" }) });
+  await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint", { session_id: "session-2" }), stage: { checkpoint: { title: "Other", content: "OTHER-BODY" }, expected_revision: null } });
+  const name = (session: string) => join(directory, `${createHash("sha256").update(`codex:${session}`).digest("hex")}.json`);
+  await symlink(name("session-2"), name("session-1"));
+  await assert.rejects(() => inspectMemoryState({ runtime: "codex", directory, session_id: "session-1" }), /symlink/);
+  const linked = join(directory, "linked");
+  await symlink(directory, linked);
+  await assert.rejects(() => inspectMemoryState({ runtime: "codex", directory: linked, session_id: "session-2" }), /private/);
+}));
+
+test("conflict messages keep only a validated revision, never upstream text", () => {
+  const revision = "a".repeat(64);
+  const message = conflictMessage(`Session memory is at revision ${revision}; SECRET-BODY sk-sentinel`);
+  assert.match(message, new RegExp(`revision ${revision}`));
+  assert.equal(/SECRET|sentinel/.test(message), false);
+  assert.match(conflictMessage("No session checkpoint exists yet; use expected_revision null to create it"), /expected_revision null/);
+  assert.equal(conflictMessage("SECRET-BODY").includes("SECRET"), false);
 });

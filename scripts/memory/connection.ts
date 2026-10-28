@@ -1,6 +1,9 @@
 import { MemoryClientError } from "./client-error";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import type { MemoryFailure } from "./client-error";
 import { z } from "zod";
 import type { MemoryCall } from "./runtime";
 
@@ -29,6 +32,28 @@ export function validateMemoryStatus(raw: unknown): MemoryStatus {
   return status;
 }
 
+// Only allowlisted categories and an HTTP status leave here; raw messages may carry URLs or upstream detail.
+function classify(error: unknown, phase: "connect" | "call", started: number): MemoryFailure {
+  const elapsed_ms = Date.now() - started;
+  if (error instanceof UnauthorizedError) return { category: "authentication", phase, elapsed_ms };
+  if (error instanceof StreamableHTTPError && error.code && error.code > 0) {
+    return { category: [401, 403].includes(error.code) ? "authentication" : "http", phase, http_status: error.code, elapsed_ms };
+  }
+  if ((error instanceof McpError && error.code === ErrorCode.RequestTimeout) || (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name))) {
+    return { category: "timeout", phase, elapsed_ms };
+  }
+  if (error instanceof TypeError) return { category: "connection", phase, elapsed_ms };
+  return { category: "unknown", phase, elapsed_ms };
+}
+
+// Fixed wording plus at most a validated revision: upstream detail never reaches agent or user output.
+export function conflictMessage(detail: string): string {
+  const revision = /\brevision ([a-f0-9]{64})\b/.exec(detail)?.[1];
+  if (revision) return `Session memory conflict: the checkpoint is at revision ${revision}.`;
+  if (detail.includes("No session checkpoint exists yet")) return "Session memory conflict: no session checkpoint exists yet; use expected_revision null to create it.";
+  return "Session memory conflict: a revision changed (session or retained note).";
+}
+
 export function connectMemory(endpoint: string, key: string, expectedPrincipal?: string, expectedArea?: string): {
   call: MemoryCall; readonly calls: number; close: () => Promise<void>;
 } {
@@ -37,7 +62,8 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
   let status: MemoryStatus | undefined;
   let calls = 0;
   const invoke: MemoryCall = async (name, args) => {
-    if (!key) throw new MemoryClientError("A restricted Chibako API key is required.");
+    if (!key) throw new MemoryClientError("A restricted Chibako API key is required.", { category: "authentication", phase: "connect" });
+    const started = Date.now();
     if (!client) {
       const connecting = new Client({ name: "chibako-memory-plugin", version: "1" });
       try {
@@ -46,23 +72,26 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
           fetch: (input, init) => fetch(input, { ...init, redirect: "error", signal: AbortSignal.timeout(MEMORY_REQUEST_TIMEOUT_MS) }),
         }));
         client = connecting;
-      } catch {
+      } catch (error) {
         await connecting.close().catch(() => {});
-        throw new MemoryClientError("Chibako connection or authentication failed. Check the URL, network and key; no credentials were logged.");
+        throw new MemoryClientError("Chibako connection or authentication failed before any write was sent. Check the URL, network and key; no credentials were logged.", classify(error, "connect", started));
       }
     }
     calls++;
     let result;
     try { result = await client.callTool({ name, arguments: args }, undefined, { timeout: MEMORY_REQUEST_TIMEOUT_MS }); }
-    catch { throw new MemoryClientError("Memory request failed. Check the connection and server status; pending checkpoints are retained."); }
+    catch (error) {
+      const failure = classify(error, "call", started);
+      throw new MemoryClientError(`Memory request failed (${failure.category}${failure.http_status ? ` ${failure.http_status}` : ""} after ${failure.elapsed_ms} ms); the outcome is unverified and a write may have committed. Pending checkpoints are retained and retried with the same request.`, failure);
+    }
     if (result.isError && name === "memory_session") {
       const content = z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough()).safeParse(result.content);
       const message = content.success ? content.data.find(item => item.type === "text")?.text : undefined;
-      if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.");
-      // The server's detail names the expected revision; it carries no checkpoint content.
-      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`Session memory conflict: ${message.slice("error: revision_conflict:".length).trim().slice(0, 300)} Restage with replaces_request_id identifying the pending request.`);
+      if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.", { category: "ineligible", phase: "call" });
+      if (typeof message === "string" && message.startsWith("error: request_conflict:")) throw new MemoryClientError("This request_id was already used with different content. Restage without a request_id so a fresh one is generated.", { category: "request_conflict", phase: "call" });
+      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`${conflictMessage(message)} Read and merge the current checkpoint, then restage with replaces_request_id identifying the pending request.`, { category: "conflict", phase: "call" });
     }
-    if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.");
+    if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.", { category: "denied", phase: "call" });
     return z.record(z.string(), z.unknown()).parse(result.structuredContent);
   };
   return {
@@ -70,12 +99,12 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
     call: async (name, args) => {
       if (expectedPrincipal && !verified) {
         status = validateMemoryStatus(await invoke("memory_status", {}));
-        if (status.principal_id !== expectedPrincipal || (expectedArea && status.area !== expectedArea)) throw new MemoryClientError("Connection identity changed. Keep pending work with its original profile and run setup again.");
+        if (status.principal_id !== expectedPrincipal || (expectedArea && status.area !== expectedArea)) throw new MemoryClientError("Connection identity changed. Keep pending work with its original profile and run setup again.", { category: "authentication", phase: "connect" });
         verified = true;
       }
       if (name === "memory_session") {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
-        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.");
+        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.", { category: "unsupported", phase: "connect" });
       }
       if ("project" in args) {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
