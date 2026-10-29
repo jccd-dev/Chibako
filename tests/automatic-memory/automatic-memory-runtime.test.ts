@@ -54,7 +54,7 @@ test("loads the Now index and first prompt recall once, from private state", asy
   assert.equal(calls.filter(({ name }) => name === "get_knowledge_schema").length, 0, "schema is fetched only when a checkpoint is due");
   assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } });
   assert.equal(calls.filter(({ name }) => name === "recall").length, 1);
-  assert.match(String((start.hookSpecificOutput as { additionalContext: string }).additionalContext), /Automatic memory:/);
+  assert.match(String(start.context), /Automatic memory:/);
   assert.equal((await stat(directory)).mode & 0o077, 0);
 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-2", prompt: "Another prompt" }) });
@@ -65,10 +65,10 @@ test("loads the Now index and first prompt recall once, from private state", asy
 test("Now is injected capped, and the instruction block appears once per session", async () => withPrivateDirectory(async (directory) => {
   const call = caller([], async (name) => name === "memory_read" ? { note: { content: "# Agent Now\n" + "- [[Thread]] — x\n".repeat(400) }, revision: "a".repeat(64) } : {});
   const start = await runMemoryEvent({ runtime: "codex", directory: join(directory, "second"), enabled: true, call, input: event("SessionStart") });
-  const context = (start.hookSpecificOutput as { additionalContext: string }).additionalContext;
+  const context = String(start.context);
   assert.ok(context.length < 2400, "Agent Now plus instruction stays within a few hundred tokens");
   const next = await runMemoryEvent({ runtime: "codex", directory: join(directory, "second"), enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t2" }) });
-  assert.equal(next.hookSpecificOutput, undefined, "no per-prompt instruction or Now re-injection");
+  assert.equal(next.context, undefined, "no per-prompt instruction or Now re-injection");
 }));
 
 test("a trivial session makes no extra calls, receives no block, and PostToolUse is silent", async () => withPrivateDirectory(async (directory) => {
@@ -89,19 +89,19 @@ test("over the threshold, exactly one Stop request; a verified save resets the c
     ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64), closed: false } : {});
   for (let turn = 1; turn <= 4; turn++) await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: `t${turn}` }) });
   const requested = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") });
-  assert.equal(requested.decision, "block");
+  assert.match(String(requested.request), /Memory checkpoint due/);
   assert.doesNotMatch(String(requested.reason), /Schema \(evidence/, "a checkpoint request carries no vault schema");
   assert.equal(calls.some(({ name }) => name === "get_knowledge_schema"), false);
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, undefined);
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request, undefined);
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t5" }) });
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, undefined, "still one request until a save");
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request, undefined, "still one request until a save");
 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { checkpoint: checkpoint() } });
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
   const state = await readState(directory);
   assert.deepEqual([state.users, state.tools, state.dueRequested], [0, 0, false]);
   await tools(directory, call, 10);
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, "block", "ten tool calls make a new checkpoint due");
+  assert.match(String((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request), /Memory checkpoint due/, "ten tool calls make a new checkpoint due");
 }));
 
 test("state files from before the activity gate still load and flush their pending checkpoint", async () => withPrivateDirectory(async (directory) => {
@@ -162,7 +162,7 @@ test("the Agent Now briefing lists the current project's entries first", async (
   const content = "# Agent Now\n\n- [[Other]] (beta) — b\n- [[Root]] — r\n- [[Mine]] (atlas) — a\n";
   const call = caller([], async (name) => name === "memory_read" ? { note: { content }, revision: "a".repeat(64) } : {});
   const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject: () => "atlas", input: event("SessionStart", { cwd: "/work/atlas" }) });
-  const context = (start.hookSpecificOutput as { additionalContext: string }).additionalContext;
+  const context = String(start.context);
   assert.ok(context.indexOf("[[Mine]]") < context.indexOf("[[Other]]") && context.indexOf("[[Mine]]") < context.indexOf("[[Root]]"));
 }));
 
@@ -207,13 +207,13 @@ test("now_line requires a checkpoint and a plain single line", async () => withP
 
 test("Hermes injects the checkpoint-due note once instead of blocking at prompt time", async () => withPrivateDirectory(async (directory) => {
   const call = caller([]);
-  await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t0" }) });
+  await runMemoryEvent({ runtime: "hermes", promptRequests: true, directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t0" }) });
   await tools(directory, call, 10, "hermes");
-  const noted = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1" }) });
-  assert.match(String((noted.hookSpecificOutput as { additionalContext: string }).additionalContext), /Memory checkpoint due/);
-  const again = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t2" }) });
-  assert.equal(again.hookSpecificOutput, undefined);
-  assert.equal((await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("Stop") })).decision, undefined);
+  const noted = await runMemoryEvent({ runtime: "hermes", promptRequests: true, directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1" }) });
+  assert.match(String(noted.context), /Memory checkpoint due/);
+  const again = await runMemoryEvent({ runtime: "hermes", promptRequests: true, directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t2" }) });
+  assert.equal(again.context, undefined);
+  assert.equal((await runMemoryEvent({ runtime: "hermes", promptRequests: true, directory, enabled: true, call, input: event("Stop") })).request, undefined);
 }));
 
 test("stages privately and only verified receipt flushes a checkpoint", async () => withPrivateDirectory(async (directory) => {
@@ -226,7 +226,7 @@ test("stages privately and only verified receipt flushes a checkpoint", async ()
   assert.deepEqual(await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: saved } }), { staged: true, skipped: false });
   assert.deepEqual((await readState(directory)).pending, { turn: "turn-1", checkpoint: bound(saved, "claude") });
   const stopped = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Stop") });
-  assert.equal(stopped.decision, undefined, "a pending checkpoint is flushed before Stop asks for continuation");
+  assert.equal(stopped.request, undefined, "a pending checkpoint is flushed before Stop asks for continuation");
   assert.deepEqual(calls.filter(({ name, args }) => isSave(name, args)).map(({ args }) => args), [bound(saved, "claude")]);
   assert.equal((await readState(directory)).pending, undefined);
   assert.equal((await readState(directory)).acknowledged, "turn-1");
@@ -249,12 +249,12 @@ test("failed flush and malformed receipt retain the same request for retry", asy
   const saved = checkpoint();
   await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: saved } });
   const failed = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("Stop") });
-  assert.match(String(failed.systemMessage), /UNSAVED/);
+  assert.match(String(failed.warning), /UNSAVED/);
   const retained = async () => { const { turn, checkpoint } = (await readState(directory)).pending as Record<string, unknown>; return { turn, checkpoint }; };
   assert.deepEqual(await retained(), { turn: "turn-1", checkpoint: bound(saved, "hermes") });
 
   const malformed = await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-2" }) });
-  assert.match(String(malformed.systemMessage), /UNSAVED/);
+  assert.match(String(malformed.warning), /UNSAVED/);
   assert.deepEqual(await retained(), { turn: "turn-1", checkpoint: bound(saved, "hermes") });
   assert.equal(((await readState(directory)).pending as { failure: { category: string } }).failure.category, "invalid_receipt");
   await runMemoryEvent({ runtime: "hermes", directory, enabled: true, call, input: event("Stop") });
@@ -271,7 +271,7 @@ test("explicit skip acknowledges a turn and restarts the activity count", async 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-skip" }) });
   await tools(directory, call);
   assert.deepEqual(await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { skip: "No durable changes" } }), { staged: false, skipped: true });
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, undefined);
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request, undefined);
   assert.equal((await readState(directory)).tools, 0);
 }));
 
@@ -285,12 +285,12 @@ test("stop hook guard, session mismatch, pending overwrite, and disabled mode ar
 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-guard" }) });
   await tools(directory, call);
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, "block");
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop", { stop_hook_active: true }) })).decision, undefined);
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).decision, undefined);
+  assert.match(String((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request), /Memory checkpoint due/);
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop", { stop_hook_active: true }) })).request, undefined);
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request, undefined);
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint"), stage: { skip: "reset" } });
   await tools(directory, call);
-  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop", { stop_hook_active: true }) })).decision, undefined, "an active continuation never blocks again");
+  assert.equal((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop", { stop_hook_active: true }) })).request, undefined, "an active continuation never blocks again");
 
   const mismatch = checkpoint("other-session");
   await assert.rejects(() => runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-stage" }) }).then(() => runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("PostToolUse"), stage: { checkpoint: mismatch } })), /session mismatch/);
@@ -338,7 +338,7 @@ test("Checkpoint reports pending until a verified receipt, and compaction or int
   const pending = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Checkpoint") });
   assert.equal(pending.saved, false);
   assert.equal(pending.pending, true);
-  assert.match(String(pending.systemMessage), /UNSAVED/);
+  assert.match(String(pending.warning), /UNSAVED/);
   const saved = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Checkpoint") });
   assert.equal(saved.saved, true);
   assert.equal(saved.pending, false);
@@ -347,7 +347,7 @@ test("Checkpoint reports pending until a verified receipt, and compaction or int
   await tools(directory, call, 10, "claude");
   for (const hook_event_name of ["PreCompact", "Interrupt"]) {
     const warning = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event(hook_event_name) });
-    assert.match(String(warning.systemMessage), /No checkpoint is staged/);
+    assert.match(String(warning.warning), /No checkpoint is staged/);
   }
 }));
 
@@ -530,7 +530,7 @@ function sessionServer() {
 }
 const runner = (runtime: "codex" | "claude" | "hermes", directory: string, call: MemoryCall) =>
   (hook: string, overrides: Partial<HookInput> = {}, extra: object = {}) => runMemoryEvent({ runtime, directory, enabled: true, call, input: event(hook, overrides), ...extra });
-const additionalContext = (output: Record<string, unknown>) => (output.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext ?? "";
+const additionalContext = (output: Record<string, unknown>) => String(output.context ?? "");
 
 for (const runtime of ["codex", "claude", "hermes"] as const) {
   test(`${runtime}: a receipt saved by a background retry reaches the next prompt context, survives replay, and the next save works`, async () => withPrivateDirectory(async (directory) => {
@@ -540,7 +540,7 @@ for (const runtime of ["codex", "claude", "hermes"] as const) {
     store.offline = true;
     const saved = checkpoint();
     await run("Checkpoint", {}, { stage: { checkpoint: saved } });
-    assert.match(String((await run("Checkpoint")).systemMessage), /UNSAVED/, "the first attempt fails");
+    assert.match(String((await run("Checkpoint")).warning), /UNSAVED/, "the first attempt fails");
 
     store.offline = false;
     const stopped = await run("Stop");
@@ -579,7 +579,7 @@ test("a committed save whose response is lost replays the original request once 
   const saved = checkpoint();
   await run("Checkpoint", {}, { stage: { checkpoint: saved } });
   const first = await run("Checkpoint");
-  assert.match(String(first.systemMessage), /unverified/i, "a lost response is unverified, not proof nothing saved");
+  assert.match(String(first.warning), /unverified/i, "a lost response is unverified, not proof nothing saved");
   assert.equal(store.mutations, 1);
   await run("Stop");
   assert.equal(store.mutations, 1, "the identical request replays instead of writing twice");
@@ -613,7 +613,7 @@ test("a receipt describes a past save: another contributor's later edit still re
   assert.match(notice, /may have changed|not the current/i);
   const stale = { ...checkpoint(), content: "Edited after receipt", expected_revision: receiptRevision };
   await run("Checkpoint", {}, { stage: { checkpoint: stale } });
-  assert.match(String((await run("Checkpoint")).systemMessage), /UNSAVED/, "the historical receipt never bypasses the revision check");
+  assert.match(String((await run("Checkpoint")).warning), /UNSAVED/, "the historical receipt never bypasses the revision check");
 }));
 
 test("a receipt is never shown to another session", async () => withPrivateDirectory(async (directory) => {
@@ -652,8 +652,8 @@ test("a confirmed conflict is preserved for recovery and not resent, while trans
   assert.equal(pending.failure.category, "conflict");
   assert.match(pending.recovery, /inspect/);
   assert.match(pending.recovery, new RegExp(`"replaces_request_id": "${pending.request_id}"`));
-  assert.match(String(failed.systemMessage), /stale/i);
-  assert.doesNotMatch(String(failed.systemMessage), /may have committed/, "a confirmed rejection is not described as unverified");
+  assert.match(String(failed.warning), /stale/i);
+  assert.doesNotMatch(String(failed.warning), /may have committed/, "a confirmed rejection is not described as unverified");
 
   assert.match(additionalContext(prompt), new RegExp(pending.request_id));
   assert.equal(resent, 0, "a confirmed stale request is not resent at every hook");
@@ -670,7 +670,7 @@ test("a transient failure keeps the original request for retry and says it is un
   const failed = await run("Checkpoint");
   const pending = failed.pending_request as { failure: { category: string } };
   assert.equal(pending.failure.category, "unknown", "an unclassified error stays explicitly unknown");
-  assert.match(String(failed.systemMessage), /unverified/);
+  assert.match(String(failed.warning), /unverified/);
   store.offline = false;
   await run("Stop");
   assert.equal(store.mutations, 1, "the Stop retry resends the original request");

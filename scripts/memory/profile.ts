@@ -1,10 +1,9 @@
 import { MemoryClientError } from "./client-error";
-import { homedir } from "node:os";
 import path from "node:path";
 import { readdir } from "node:fs/promises";
 import { z } from "zod";
 import { privateDirectory, readOptional, atomicPrivateWrite } from "./private-files";
-import type { Runtime } from "./runtime";
+import type { HostAdapter } from "./host-adapter";
 
 export const defaultThresholds = { user_turns: 4, tool_calls: 10 };
 export type ActivityThresholds = typeof defaultThresholds;
@@ -17,7 +16,7 @@ export const profileSchema = z.object({
 }).strict();
 export type MemoryProfile = z.infer<typeof profileSchema>;
 
-export function profileDirectory(runtime: Runtime, name: string): string {
+export function profileDirectory(host: HostAdapter, name: string): string {
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name)) throw new MemoryClientError("Profile name must use 1–64 letters, numbers, underscores or hyphens.");
   const override = process.env.CHIBAKO_MEMORY_PROFILE_DIR;
   if (override) {
@@ -25,11 +24,7 @@ export function profileDirectory(runtime: Runtime, name: string): string {
     return override;
   }
   // Human terminal setup and native hooks must choose the same path without plugin-only environment variables.
-  const hostHome = runtime === "codex" ? process.env.CODEX_HOME || path.join(homedir(), ".codex")
-    : runtime === "claude" ? process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude")
-    : process.env.HERMES_HOME || path.join(homedir(), ".hermes");
-  const base = path.join(hostHome, "chibako-memory");
-  return path.join(base, runtime, name);
+  return path.join(host.home(), "chibako-memory", host.runtime, name);
 }
 export async function readProfile(directory: string): Promise<MemoryProfile | null> {
   const text = await readOptional(path.join(directory, "profile.json"));

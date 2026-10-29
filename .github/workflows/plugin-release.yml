@@ -1,7 +1,9 @@
 name: Plugin release
 
-# Rebuilds plugins/ after every merge to main and releases it only when the output changed.
-# The merged PR's "plugin: minor" label picks a minor bump; otherwise it is a patch.
+# Rebuilds each plugins/<target> after every merge to main and releases only targets whose output changed.
+# Targets (claude, codex, hermes) carry independent versions in plugin-versions.json.
+# The merged PR's "plugin: minor" label picks a minor bump for every changed target; otherwise it is a patch.
+# A failed target is withheld and reported; verified targets still release.
 # Pushes made with GITHUB_TOKEN start no workflows, so the release commit cannot loop.
 on:
   push:
@@ -9,10 +11,15 @@ on:
   workflow_dispatch:
     inputs:
       level:
-        description: Version bump if plugins/ changed
+        description: Version bump for changed targets
         type: choice
         options: [patch, minor]
         default: patch
+      target:
+        description: Plugin target to release
+        type: choice
+        options: [all, claude, codex, hermes]
+        default: all
 
 permissions:
   contents: read
@@ -26,7 +33,7 @@ jobs:
     name: Release plugins
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write
       pull-requests: read
@@ -52,35 +59,37 @@ jobs:
           fi
           echo "level=${level}" >> "$GITHUB_OUTPUT"
 
-      - name: Rebuild and bump
-        id: release
+      - name: Rebuild, verify and bump changed targets
         env:
           LEVEL: ${{ steps.level.outputs.level }}
+          TARGET: ${{ inputs.target || 'all' }}
         run: |
           set -euo pipefail
-          version="$(node scripts/release-memory-plugins.mjs "$LEVEL")"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if [[ -z "$version" ]]; then echo "Plugin output unchanged; nothing to release." >> "$GITHUB_STEP_SUMMARY"; fi
+          node scripts/release-memory-plugins.mjs "$LEVEL" "$TARGET" > "$RUNNER_TEMP/plugin-release.json"
+          jq -r 'to_entries[] | "- \(.key): \(.value.status) \(.value.version)\(if .value.reason then " (\(.value.reason))" else "" end)"' "$RUNNER_TEMP/plugin-release.json" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Test released plugins
-        if: steps.release.outputs.version != ''
-        run: node --import tsx --test "tests/automatic-memory/*.test.ts"
-        env:
-          NODE_ENV: test
-
-      - name: Commit and push release
-        if: steps.release.outputs.version != ''
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
+      - name: Commit and push released targets
         run: |
           set -euo pipefail
+          released="$(jq -r '[to_entries[] | select(.value.status == "released") | "\(.key) \(.value.version)"] | join(", ")' "$RUNNER_TEMP/plugin-release.json")"
+          if [[ -z "$released" ]]; then echo "No plugin target to release." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugin.json .claude-plugin/marketplace.json plugins
-          git commit -m "chore(plugins): release ${VERSION}"
+          # Withheld targets were restored by the release script, so only released output is staged.
+          git add plugin-versions.json .claude-plugin/marketplace.json plugins
+          git commit -m "chore(plugins): release ${released}"
           # No force: if main moved, the newer run rebuilds from current state and releases instead.
           if git push origin HEAD:main; then
-            echo "Released plugins ${VERSION}." >> "$GITHUB_STEP_SUMMARY"
+            echo "Released ${released}." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::notice::main moved during the release; the run for the newer commit releases the plugins."
+          fi
+
+      - name: Report withheld targets
+        run: |
+          set -euo pipefail
+          withheld="$(jq -r 'to_entries[] | select(.value.status == "withheld") | "\(.key): \(.value.reason)"' "$RUNNER_TEMP/plugin-release.json")"
+          if [[ -n "$withheld" ]]; then
+            while IFS= read -r line; do echo "::error title=Plugin target withheld::${line}"; done <<< "$withheld"
+            exit 1
           fi

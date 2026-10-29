@@ -159,6 +159,7 @@ export async function inspectMemoryState(options: { runtime: Runtime; directory:
   });
 }
 
+/** Engine lifecycle input; each host adapter maps its native events onto these names. */
 export interface HookInput {
   session_id: string;
   hook_event_name: string;
@@ -167,13 +168,19 @@ export interface HookInput {
   prompt?: string;
   stop_hook_active?: boolean;
 }
+/**
+ * Host-neutral engine result. Adapters decide how `context` (model-visible), `request` (ask the agent
+ * to checkpoint before ending the turn) and `warning` (user-visible) reach their host. Other fields are
+ * direct stage results.
+ */
+export type MemoryResult = { context?: string; request?: string; warning?: string; [field: string]: unknown };
 
 export async function runMemoryEvent(options: {
   runtime: Runtime; input: HookInput; directory: string; enabled: boolean;
-  call: MemoryCall; stage?: unknown; thresholds?: ActivityThresholds;
+  call: MemoryCall; stage?: unknown; thresholds?: ActivityThresholds; promptRequests?: boolean;
   binding?: { endpoint: string; principal_id: string; area: string }; stageCommand?: string; inspectCommand?: string;
   resolveProject?: (cwd: string | undefined) => string | undefined;
-}): Promise<Record<string, unknown>> {
+}): Promise<MemoryResult> {
   if (!options.enabled) return {};
   const { runtime, input, directory, call } = options;
   checkLocation(directory, input.session_id);
@@ -318,13 +325,11 @@ export async function runMemoryEvent(options: {
         context += `Automatic memory: update one session checkpoint across tasks. If an Agent Now entry is this same task or handoff, continue it: stage {"continue": {"title": "<entry title>"}} and merge into it. Recall on topic changes. Save meaningful work when due; skip trivial turns. Finish existing memory when no work remains; retain lasting facts first. Stop is not completion. No secrets/transcripts. Verify receipts. Stage: ${options.stageCommand || "see integrations/agent-memory/README.md"}.\n`;
         state.instructed = true;
       }
-      if (runtime === "hermes" && event === "UserPromptSubmit" && !state.pending && !state.dueRequested && due()) context += await dueNote() + "\n";
+      if (options.promptRequests && event === "UserPromptSubmit" && !state.pending && !state.dueRequested && due()) context += await dueNote() + "\n";
     }
-    let output: Record<string, unknown> = {};
-    if (event === "Stop" && !state.pending && !input.stop_hook_active && !state.dueRequested && due()) {
-      output = { decision: "block", reason: await dueNote() };
-    }
-    if (context) output = { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
+    let output: MemoryResult = {};
+    if (event === "Stop" && !state.pending && !input.stop_hook_active && !state.dueRequested && due()) output.request = await dueNote();
+    if (context) output.context = context;
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
     }
@@ -336,7 +341,7 @@ export async function runMemoryEvent(options: {
       output = { saved: !state.pending, pending: Boolean(state.pending), ...(savedReceipt ? { receipt: savedReceipt } : {}),
         ...(state.pending ? { pending_request: pendingSummary(state.pending, options.inspectCommand) } : {}) };
     }
-    if (warning) output.systemMessage = warning;
+    if (warning) output.warning = warning;
     await save();
     return output;
   } finally {

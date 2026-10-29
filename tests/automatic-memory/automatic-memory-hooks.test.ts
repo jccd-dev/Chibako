@@ -5,6 +5,48 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { runMemoryEvent, type MemoryCall, type Runtime } from "../../scripts/memory/runtime";
+import { codex } from "../../scripts/memory/codex/adapter";
+
+// Codex event contracts: https://learn.chatgpt.com/docs/hooks#event-reference
+// Wire schemas: openai/codex e75e4af22938c8715b2a1e0d3fc142836ab4d962, codex-rs/hooks/schema/generated.
+test("Codex encodes context, continuation and warnings only on events that accept them", () => {
+  for (const hook_event_name of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "Interrupt"]) {
+    const input = codex.hookInput({ session_id: "codex-session", hook_event_name, cwd: "/fixture", turn_id: "turn-1" });
+    const output = codex.hookOutput(input, { context: "briefing", request: "checkpoint", warning: "warning", saved: true });
+    assert.deepEqual(output, {
+      ...(hook_event_name === "Stop" ? { decision: "block", reason: "checkpoint" } : {}),
+      ...(["SessionStart", "UserPromptSubmit", "PostToolUse"].includes(hook_event_name)
+        ? { hookSpecificOutput: { hookEventName: hook_event_name, additionalContext: "briefing" } } : {}),
+      systemMessage: "warning",
+    }, hook_event_name);
+  }
+  assert.deepEqual(codex.hookFailure("failure"), { systemMessage: "failure" });
+});
+
+test("Codex accepts its native payload fields and rejects malformed engine input", () => {
+  const common = { session_id: "codex-session", cwd: "/fixture", model: "fixture-model", transcript_path: null };
+  const turn = { ...common, turn_id: "turn-1", permission_mode: "dontAsk" };
+  const events = [
+    { ...common, permission_mode: "dontAsk", hook_event_name: "SessionStart", source: "compact" },
+    { ...turn, hook_event_name: "UserPromptSubmit", prompt: "Inspect hooks" },
+    { ...turn, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "call-1", tool_input: { command: "true" }, tool_response: { exit_code: 0 } },
+    { ...turn, hook_event_name: "Stop", stop_hook_active: true, last_assistant_message: null },
+    { ...common, turn_id: "turn-1", hook_event_name: "PreCompact", trigger: "auto" },
+    { ...turn, hook_event_name: "Interrupt" },
+  ];
+  for (const event of events) {
+    const input = codex.hookInput(event);
+    assert.equal(input.session_id, common.session_id);
+    assert.equal(input.hook_event_name, event.hook_event_name);
+    assert.equal("transcript_path" in input, false, "unused transcript paths never reach the memory engine");
+  }
+  assert.equal(codex.hookInput(events[1]).turn_id, "turn-1");
+  assert.equal(codex.hookInput(events[1]).prompt, "Inspect hooks");
+  assert.equal(codex.hookInput(events[3]).stop_hook_active, true);
+  for (const invalid of [{ ...turn, hook_event_name: "Checkpoint" }, { ...events[1], prompt: 42 }, { ...events[3], stop_hook_active: "true" }, { ...events[1], session_id: "" }]) {
+    assert.throws(() => codex.hookInput(invalid));
+  }
+});
 
 async function withPrivateDirectory<T>(run: (directory: string) => Promise<T>): Promise<T> {
   const directory = await mkdtemp(join(tmpdir(), "chibako-memory-hooks-"));

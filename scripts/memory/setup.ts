@@ -1,19 +1,17 @@
 import { MemoryClientError } from "./client-error";
-import { mkdir, unlink, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import path from "node:path";
-import { tmpdir } from "node:os";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { hostConfigPath, renderHostConfig, digest } from "./host-config";
+import { digest } from "./host-config";
 import { readProfile, saveProfile, pendingCount, type MemoryProfile } from "./profile";
 import { privateDirectory, readOptional, atomicPrivateWrite, withPrivateLock } from "./private-files";
 import { validateEndpoint, validateMemoryStatus, type MemoryStatus } from "./connection";
-import type { MemoryCall, Runtime } from "./runtime";
+import type { MemoryCall } from "./runtime";
+import type { HostAdapter } from "./host-adapter";
 
 export interface SetupInput {
-  runtime: Runtime; name: string; directory: string; endpoint: string; key: string;
+  host: HostAdapter; name: string; directory: string; endpoint: string; key: string;
   hostFile?: string;
 }
 export interface SetupPreview {
@@ -27,46 +25,25 @@ export async function inspectConnection(call: MemoryCall, expected?: { principal
   await call("recall", { query: "project handoff", limit: 1, budget: 100 });
   return status;
 }
-export async function duplicateHookFiles(runtime: Runtime, hostFile: string): Promise<string[]> {
-  const candidates = runtime === "codex" ? [path.join(path.dirname(hostFile), "hooks.json"), path.resolve(".codex/hooks.json"), hostFile]
-    : runtime === "claude" ? [path.join(path.dirname(hostFile), ".claude/settings.json"), path.resolve(".claude/settings.json"), path.resolve(".claude/settings.local.json")]
-    : [hostFile];
-  const matches: string[] = [];
-  for (const file of new Set(candidates)) {
-    const content = await readOptional(file);
-    if (content && /scripts\/agent-memory|integrations\/agent-memory|memory\.mjs[^\n]*\b(?:codex|claude|hermes)\b/.test(content)) matches.push(file);
-  }
-  return matches;
-}
 export async function prepareSetup(input: SetupInput, call: MemoryCall): Promise<SetupPreview> {
   if (process.platform === "win32") throw new MemoryClientError("Windows private storage is not supported yet.");
   const endpoint = validateEndpoint(input.endpoint);
   const previous = await readProfile(input.directory);
-  if (previous && previous.runtime !== input.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
+  const { host } = input;
+  if (previous && previous.runtime !== host.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
   const status = await inspectConnection(call);
   if (previous && (previous.endpoint !== endpoint || previous.principal_id !== status.principal_id) && await pendingCount(input.directory)) {
     throw new MemoryClientError("Pending checkpoints belong to the previous connection. Keep that profile and create a different profile instead.");
   }
-  const hostFile = input.hostFile || hostConfigPath(input.runtime);
+  const hostFile = input.hostFile || host.configPath();
   if (!path.isAbsolute(hostFile)) throw new MemoryClientError("Host configuration path must be absolute.");
   if (previous && previous.host.file !== hostFile) throw new MemoryClientError("Host target changed; use a separate profile.");
-  const duplicates = await duplicateHookFiles(input.runtime, hostFile);
+  const duplicates = await host.duplicateHookFiles(hostFile);
   if (duplicates.length) throw new MemoryClientError(`Existing manual memory hooks need review before setup: ${duplicates.join(", ")}`);
   const original = await readOptional(hostFile);
-  const rendered = renderHostConfig(input.runtime, original, endpoint, input.key, previous || undefined);
-  if (input.runtime === "codex") await validateCodexConfig(rendered.text);
+  const rendered = host.renderConfig(original, endpoint, input.key, previous || undefined);
+  await host.validateConfig?.(rendered.text);
   return { input: { ...input, endpoint }, previous, original, hostFile, rendered, status };
-}
-async function validateCodexConfig(text: string): Promise<void> {
-  const temporary = await mkdtemp(path.join(tmpdir(), "chibako-config-check-"));
-  try {
-    await atomicPrivateWrite(path.join(temporary, "config.toml"), text);
-    try {
-      await promisify(execFile)("codex", ["mcp", "get", "chibako-memory", "--json"], {
-        env: { ...process.env, CODEX_HOME: temporary }, timeout: 5000, maxBuffer: 1_000_000,
-      });
-    } catch { throw new MemoryClientError("Codex configuration validation failed. Install a supported Codex CLI and resolve existing TOML conflicts before applying setup."); }
-  } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 
 export async function applySetup(preview: SetupPreview): Promise<MemoryProfile> {
@@ -80,7 +57,7 @@ export async function applySetup(preview: SetupPreview): Promise<MemoryProfile> 
     return withPrivateLock(`${hostFile}.chibako-memory.lock`, async () => {
       if (await readOptional(hostFile) !== original) throw new MemoryClientError("Host configuration changed during setup. Run setup again.");
       const profile: MemoryProfile = {
-        version: 1, runtime: input.runtime, name: input.name, endpoint: input.endpoint, api_key: input.key,
+        version: 1, runtime: input.host.runtime, name: input.name, endpoint: input.endpoint, api_key: input.key,
         principal_id: status.principal_id, area: status.area!, enabled: false,
         connected_at: new Date().toISOString(), host: { file: hostFile, digest: rendered.digest },
       };
@@ -96,30 +73,32 @@ export async function applySetup(preview: SetupPreview): Promise<MemoryProfile> 
     });
   });
 }
-export async function setEnabled(directory: string, enabled: boolean, call?: MemoryCall): Promise<void> {
+export async function setEnabled(host: HostAdapter, directory: string, enabled: boolean, call?: MemoryCall): Promise<void> {
   await privateDirectory(directory);
   await withPrivateLock(path.join(directory, "profile.lock"), async () => {
     const profile = await readProfile(directory);
     if (!profile?.api_key) throw new MemoryClientError("Run setup before enabling automatic memory.");
     if (enabled) {
       if (!call) throw new MemoryClientError("Resume requires a verified connection.");
-      renderHostConfig(profile.runtime, await readOptional(profile.host.file), profile.endpoint, profile.api_key, profile);
+      if (profile.runtime !== host.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
+      host.renderConfig(await readOptional(profile.host.file), profile.endpoint, profile.api_key, profile);
       await inspectConnection(call, profile);
       profile.connected_at = new Date().toISOString();
     }
     await saveProfile(directory, { ...profile, enabled });
   });
 }
-export async function disconnect(directory: string): Promise<void> {
+export async function disconnect(host: HostAdapter, directory: string): Promise<void> {
   await privateDirectory(directory);
   await withPrivateLock(path.join(directory, "profile.lock"), async () => {
     const profile = await readProfile(directory);
     if (!profile) return;
+    if (profile.runtime !== host.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
     await saveProfile(directory, { ...profile, enabled: false });
     if (!profile.api_key) return;
     await withPrivateLock(`${profile.host.file}.chibako-memory.lock`, async () => {
       const original = await readOptional(profile.host.file);
-      const rendered = renderHostConfig(profile.runtime, original, profile.endpoint, profile.api_key, profile, true);
+      const rendered = host.renderConfig(original, profile.endpoint, profile.api_key, profile, true);
       if (await readOptional(profile.host.file) !== original) throw new MemoryClientError("Host config changed; profile is paused. Review it before disconnecting.");
       await atomicPrivateWrite(profile.host.file, rendered.text);
       try { await saveProfile(directory, { ...profile, enabled: false, api_key: "", host: { ...profile.host, digest: "" } }); }
@@ -139,10 +118,10 @@ export async function writeConnectionCheck(call: MemoryCall): Promise<object> {
   return receipt;
 }
 export function redactedPreview(preview: SetupPreview): object {
-  return { runtime: preview.input.runtime, profile: preview.input.name, endpoint: preview.input.endpoint,
+  return { runtime: preview.input.host.runtime, profile: preview.input.name, endpoint: preview.input.endpoint,
     area: preview.status.area, scopes: preview.status.scopes, host_file: preview.hostFile,
     private_profile: path.join(preview.input.directory, "profile.json"), credentials: "hidden; private files (0600)",
     host_config_changed: digest(preview.original || "") !== digest(preview.rendered.text),
     automatic_memory: "off until enabled; native hook trust required", capture_verified: false,
-    hermes_limit: preview.input.runtime === "hermes" ? "Missing-checkpoint continuation only for coding; actual gateway and both client routes unverified." : undefined };
+    hermes_limit: preview.input.host.setupLimit };
 }

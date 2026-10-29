@@ -198,9 +198,11 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     assert.equal(unsupported.pending, true);
     assert.match(unsupported.systemMessage, /Upgrade the Chibako server/);
     advertiseLifecycle = true;
-    const retried = JSON.parse((await invoke({ session_id: "old-server-session", hook_event_name: "Checkpoint" })).stdout);
-    assert.equal(retried.saved, true);
-    assert.equal(retried.pending, false);
+    // The next native event retries the pending contribution.
+    await invoke({ session_id: "old-server-session", hook_event_name: "Stop" });
+    const retried = JSON.parse((await invoke({}, "inspect", ["--session", "old-server-session"])).stdout);
+    assert.equal(retried.pending, null);
+    assert.ok(retried.receipt);
     const trashState = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "old-server-session" });
     assert.ok("note" in trashState && trashState.note);
     deleteNote(trashState.note.id);
@@ -281,8 +283,9 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     assert.equal(typeof timedOut.pending_request.failure.elapsed_ms, "number");
     assert.match(timedOut.systemMessage, /unverified/);
     assert.equal(/Abort|aborted|127\.0\.0\.1/.test(JSON.stringify(timedOut)), false, "no raw exception detail or endpoint");
-    const replayed = JSON.parse((await invoke({ session_id: "timeout-session", hook_event_name: "Checkpoint" })).stdout);
-    assert.equal(replayed.saved, true, "the original request replays its committed receipt");
+    await invoke({ session_id: "timeout-session", hook_event_name: "Stop" });
+    const replayed = JSON.parse((await invoke({}, "inspect", ["--session", "timeout-session"])).stdout);
+    assert.deepEqual([replayed.pending, replayed.receipt?.request_id], [null, timedOut.pending_request.request_id], "the original request replays its committed receipt");
   } finally {
     await loopback.close();
   }
@@ -338,7 +341,18 @@ test("packaged Claude, Codex and Hermes runners survive faults, restarts and a s
         const hook_event_name = { prompt: "pre_llm_call", start: "pre_llm_call", stop: "pre_verify", compact: "post_compaction" }[kind];
         return invoke([path.join(packages, "hermes", "bin", "hermes-hook.mjs")], { hook_event_name, session_id, extra: { turn_id: turn, user_message: "packaged lifecycle" } });
       }
-      const hook_event_name = { prompt: "UserPromptSubmit", start: "SessionStart", stop: "Stop", compact: runtime === "codex" ? "Interrupt" : "PreCompact" }[kind];
+      if (runtime === "codex") {
+        const common = { session_id, cwd: root, transcript_path: null, model: "fixture-model" };
+        const active = { ...common, turn_id: turn, permission_mode: "dontAsk" };
+        const input = {
+          prompt: { ...active, hook_event_name: "UserPromptSubmit", prompt: "packaged lifecycle" },
+          start: { ...common, hook_event_name: "SessionStart", source: "compact", permission_mode: "dontAsk" },
+          stop: { ...active, hook_event_name: "Stop", stop_hook_active: false, last_assistant_message: null },
+          compact: { ...common, hook_event_name: "PreCompact", turn_id: turn, trigger: "auto" },
+        }[kind];
+        return invoke([runner(runtime), runtime], input);
+      }
+      const hook_event_name = { prompt: "UserPromptSubmit", start: "SessionStart", stop: "Stop", compact: "PreCompact" }[kind];
       return invoke([runner(runtime), runtime], { session_id, hook_event_name, turn_id: turn, prompt: "packaged lifecycle", ...(kind === "start" ? { source: "compact" } : {}) });
     };
     const context = (runtime: Runtime, stdout: string): string => runtime === "hermes" ? parse(stdout).context ?? "" : parse(stdout).hookSpecificOutput?.additionalContext ?? "";

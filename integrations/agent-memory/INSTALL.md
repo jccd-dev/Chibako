@@ -41,9 +41,10 @@ Hook-bearing packages are currently ineligible for the official public plugin
 directories. Install only one Chibako package per runtime profile; replace/disable an older
 package through the plugin manager before using a new one, rather than loading both.
 
-After a change to the runner, skills or manifest merges to `main`, the "Plugin
-release" workflow rebuilds `plugins/`, bumps the version and commits the release
-(see `docs/MAINTAINING.md`). `npm run
+Each runtime's package has its own version. After a change merges to `main`, the
+"Plugin release" workflow rebuilds each `plugins/<runtime>/`, bumps only the
+packages whose output changed, and commits the release (see `docs/MAINTAINING.md`).
+An update command finds nothing new when your runtime's package was not released. `npm run
 build:memory-plugins` still writes `dist/plugins/chibako-<runtime>-<version>.tar.gz`
 archives for offline installs: extract one to a stable directory and add that path
 as a local marketplace instead.

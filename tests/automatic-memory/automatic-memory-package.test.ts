@@ -7,14 +7,16 @@ import path from "node:path";
 import { load } from "js-yaml";
 
 const root = process.cwd();
+// The release script verifies one target at a time through CHIBAKO_PLUGIN_TARGET.
+const selected = process.env.CHIBAKO_PLUGIN_TARGET;
 
-test("memory packages run outside checkout without dependencies or configured credentials", async () => {
+for (const runtime of ["codex", "claude", "hermes"].filter((name) => !selected || name === selected)) test(`${runtime} package runs outside checkout without dependencies or configured credentials`, async () => {
   const temporary = await mkdtemp(path.join(tmpdir(), "chibako-package-"));
   try {
     const output = path.join(temporary, "artifacts");
-    execFileSync(process.execPath, [path.join(root, "scripts/build-memory-plugins.mjs"), output], { cwd: temporary });
+    execFileSync(process.execPath, [path.join(root, "scripts/build-memory-plugins.mjs"), output, runtime], { cwd: temporary });
     const artifacts = await readdir(output);
-    for (const runtime of ["codex", "claude", "hermes"]) {
+    {
       const extracted = path.join(temporary, `${runtime} installed`);
       await mkdir(extracted);
       const archive = artifacts.find((name) => name.startsWith(`chibako-${runtime}-`) && name.endsWith(".tar.gz"));
@@ -85,12 +87,24 @@ assert calls[0]['env']['PLUGIN_ROOT'] == str(m._PLUGIN_ROOT)
           assert.doesNotMatch(JSON.stringify(entries), /tsx|scripts\/agent-memory/);
         }
         if (runtime === "codex") {
-          assert.equal(manifest.extensions["com.openai"].hooks, "./hooks/hooks.json");
+          // Codex supports these six events; Interrupt is warning-only and capped at three seconds.
+          assert.deepEqual(Object.keys(hooks.hooks).sort(), ["Interrupt", "PostToolUse", "PreCompact", "SessionStart", "Stop", "UserPromptSubmit"]);
+          for (const [event, entries] of Object.entries(hooks.hooks)) {
+            assert.deepEqual(entries, [{ hooks: [{ type: "command", command: 'node "${PLUGIN_ROOT}/bin/memory.mjs" codex', timeout: ["Interrupt", "PostToolUse"].includes(event) ? 3 : 15 }] }]);
+          }
+          assert.match(skill, /\/hooks.*review\/trust/);
+          assert.match(await readFile(path.join(extracted, "README.md"), "utf8"), /approving memory setup do not grant hook trust/);
+          assert.deepEqual(Object.keys(manifest).sort(), ["name", "version"]);
+          assert.doesNotMatch(await readFile(path.join(extracted, "bin/memory.mjs"), "utf8"), /pre_llm_call|CLAUDE_CONFIG_DIR/, "the Codex bundle carries no other host adapter");
+          const native = JSON.parse(await readFile(path.join(extracted, ".codex-plugin/plugin.json"), "utf8"));
+          assert.equal(native.hooks, "./hooks/hooks.json");
+          assert.equal(native.skills, "./skills/");
           await readFile(path.join(extracted, ".agents/plugins/marketplace.json"));
         } else {
           const native = JSON.parse(await readFile(path.join(extracted, ".claude-plugin/plugin.json"), "utf8"));
           assert.equal(native.hooks, "./hooks/hooks.json");
           assert.deepEqual(native.mcpServers, {});
+          assert.doesNotMatch(await readFile(path.join(extracted, "bin/memory.mjs"), "utf8"), /pre_llm_call|CODEX_HOME/, "the Claude bundle carries no other host adapter");
         }
       }
     }
@@ -100,17 +114,19 @@ assert calls[0]['env']['PLUGIN_ROOT'] == str(m._PLUGIN_ROOT)
 });
 
 // plugins/ is rebuilt and released by .github/workflows/plugin-release.yml after merge, so PRs may leave it stale.
-test("committed marketplace plugins share one version and point at plugins/", async () => {
-  const { version } = JSON.parse(await readFile(path.join(root, "plugin.json"), "utf8"));
+test("each committed marketplace plugin carries its own released version and points at plugins/", async () => {
+  const versions = JSON.parse(await readFile(path.join(root, "plugin-versions.json"), "utf8"));
+  assert.deepEqual(Object.keys(versions).sort(), ["claude", "codex", "hermes"]);
+  assert.equal(JSON.parse(await readFile(path.join(root, "plugin.json"), "utf8")).version, undefined, "no shared version");
   for (const runtime of ["claude", "codex", "hermes"]) {
     const published = JSON.parse(await readFile(path.join(root, "plugins", runtime, "plugin.json"), "utf8"));
-    assert.equal(published.version, version, `plugins/${runtime} is not released at ${version}`);
+    assert.equal(published.version, versions[runtime], `plugins/${runtime} is not released at ${versions[runtime]}`);
   }
   const claudePlugin = JSON.parse(await readFile(path.join(root, "plugins/claude/.claude-plugin/plugin.json"), "utf8"));
-  assert.equal(claudePlugin.version, version);
+  assert.equal(claudePlugin.version, versions.claude);
   const claude = JSON.parse(await readFile(path.join(root, ".claude-plugin/marketplace.json"), "utf8"));
   assert.equal(claude.plugins[0].source, "./plugins/claude");
-  assert.equal(claude.plugins[0].version, version);
+  assert.equal(claude.plugins[0].version, versions.claude);
   const codex = JSON.parse(await readFile(path.join(root, ".agents/plugins/marketplace.json"), "utf8"));
   assert.equal(codex.plugins[0].source.path, "./plugins/codex");
   const bundled = JSON.parse(await readFile(path.join(root, "plugins/codex/.agents/plugins/marketplace.json"), "utf8"));
