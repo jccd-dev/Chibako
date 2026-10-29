@@ -74,3 +74,5 @@ merges unless that exact set of changes is already authorized.
 Report what was kept, merged, trashed, or irreversibly removed, plus skipped
 items and failures. A proposal or staged write is not proof of applied cleanup.
 
+Codex requires separate hook consent. After installation, open /hooks in an interactive Codex session and review/trust Chibako's hooks. Repeat review when an update marks them modified. Approving memory setup configures the connection; it does not trust hooks. Do not bypass hook trust during normal setup.
+

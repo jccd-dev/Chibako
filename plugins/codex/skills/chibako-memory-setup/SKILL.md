@@ -133,3 +133,5 @@ the replacement finish receives a verified receipt; a skip cannot erase it.
 Report unsaved status. Hermes missing-checkpoint prompting outside coding and
 actual-host hook delivery remain compatibility checks, not guaranteed behavior.
 
+Codex requires separate hook consent. After installation, open /hooks in an interactive Codex session and review/trust Chibako's hooks. Repeat review when an update marks them modified. Approving memory setup configures the connection; it does not trust hooks. Do not bypass hook trust during normal setup.
+

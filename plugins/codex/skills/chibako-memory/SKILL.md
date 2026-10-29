@@ -204,3 +204,5 @@ the note stays as a session record. Automatic memory never deletes notes;
 At handoff, briefly name what was saved and where when writes occurred. If no
 durable change was needed, finish the task without manufacturing a memory entry.
 
+Codex requires separate hook consent. After installation, open /hooks in an interactive Codex session and review/trust Chibako's hooks. Repeat review when an update marks them modified. Approving memory setup configures the connection; it does not trust hooks. Do not bypass hook trust during normal setup.
+

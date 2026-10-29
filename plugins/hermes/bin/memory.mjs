@@ -7308,10 +7308,10 @@ var MemoryClientError = class extends Error {
   }
 };
 
-// scripts/agent-memory.ts
+// scripts/memory/cli.ts
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import path8 from "node:path";
+import path7 from "node:path";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -8024,8 +8024,8 @@ function nullish(input2) {
 }
 function cleanRegex(source) {
   const start = source.startsWith("^") ? 1 : 0;
-  const end2 = source.endsWith("$") ? source.length - 1 : source.length;
-  return source.slice(start, end2);
+  const end = source.endsWith("$") ? source.length - 1 : source.length;
+  return source.slice(start, end);
 }
 function floatSafeRemainder(val, step) {
   const ratio = val / step;
@@ -27246,7 +27246,6 @@ async function prepareSessionStage(call, runtime, session_id, raw, legacy, scope
 }
 
 // scripts/memory/profile.ts
-import { homedir } from "node:os";
 import path2 from "node:path";
 import { readdir } from "node:fs/promises";
 var defaultThresholds = { user_turns: 4, tool_calls: 10 };
@@ -27263,16 +27262,14 @@ var profileSchema = external_exports.object({
   thresholds: external_exports.object({ user_turns: external_exports.number().int().min(1), tool_calls: external_exports.number().int().min(1) }).strict().optional(),
   host: external_exports.object({ file: external_exports.string(), digest: external_exports.string() })
 }).strict();
-function profileDirectory(runtime, name) {
+function profileDirectory(host, name) {
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name)) throw new MemoryClientError("Profile name must use 1\u201364 letters, numbers, underscores or hyphens.");
   const override = process.env.CHIBAKO_MEMORY_PROFILE_DIR;
   if (override) {
     if (!path2.isAbsolute(override)) throw new MemoryClientError("Profile directory must be absolute.");
     return override;
   }
-  const hostHome = runtime === "codex" ? process.env.CODEX_HOME || path2.join(homedir(), ".codex") : runtime === "claude" ? process.env.CLAUDE_CONFIG_DIR || path2.join(homedir(), ".claude") : process.env.HERMES_HOME || path2.join(homedir(), ".hermes");
-  const base = path2.join(hostHome, "chibako-memory");
-  return path2.join(base, runtime, name);
+  return path2.join(host.home(), "chibako-memory", host.runtime, name);
 }
 async function readProfile(directory) {
   const text = await readOptional(path2.join(directory, "profile.json"));
@@ -27642,13 +27639,11 @@ ${JSON.stringify(await call("recall", { query: `${state.project ? `${state.proje
 `;
         state.instructed = true;
       }
-      if (runtime === "hermes" && event === "UserPromptSubmit" && !state.pending && !state.dueRequested && due()) context += await dueNote() + "\n";
+      if (options.promptRequests && event === "UserPromptSubmit" && !state.pending && !state.dueRequested && due()) context += await dueNote() + "\n";
     }
     let output2 = {};
-    if (event === "Stop" && !state.pending && !input2.stop_hook_active && !state.dueRequested && due()) {
-      output2 = { decision: "block", reason: await dueNote() };
-    }
-    if (context) output2 = { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
+    if (event === "Stop" && !state.pending && !input2.stop_hook_active && !state.dueRequested && due()) output2.request = await dueNote();
+    if (context) output2.context = context;
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
     }
@@ -27666,7 +27661,7 @@ ${JSON.stringify(await call("recall", { query: `${state.project ? `${state.proje
         ...state.pending ? { pending_request: pendingSummary(state.pending, options.inspectCommand) } : {}
       };
     }
-    if (warning) output2.systemMessage = warning;
+    if (warning) output2.warning = warning;
     await save();
     return output2;
   } finally {
@@ -32130,35 +32125,35 @@ ${value}`, dataLines++;
     }
     return chunk.slice(searchIndex);
   }
-  function parseLine(chunk, start, end2) {
-    if (start === end2) {
+  function parseLine(chunk, start, end) {
+    if (start === end) {
       dispatchEvent();
       return;
     }
     const firstCharCode = chunk.charCodeAt(start);
     if (isDataPrefix(chunk, start, firstCharCode)) {
-      const valueStart = chunk.charCodeAt(start + 5) === SPACE ? start + 6 : start + 5, value2 = chunk.slice(valueStart, end2);
+      const valueStart = chunk.charCodeAt(start + 5) === SPACE ? start + 6 : start + 5, value2 = chunk.slice(valueStart, end);
       data = dataLines === 0 ? value2 : `${data}
 ${value2}`, dataLines++;
       return;
     }
     if (isEventPrefix(chunk, start, firstCharCode)) {
-      eventType = chunk.slice(chunk.charCodeAt(start + 6) === SPACE ? start + 7 : start + 6, end2) || void 0;
+      eventType = chunk.slice(chunk.charCodeAt(start + 6) === SPACE ? start + 7 : start + 6, end) || void 0;
       return;
     }
     if (firstCharCode === 105 && chunk.charCodeAt(start + 1) === 100 && chunk.charCodeAt(start + 2) === 58) {
-      const value2 = chunk.slice(chunk.charCodeAt(start + 3) === SPACE ? start + 4 : start + 3, end2);
+      const value2 = chunk.slice(chunk.charCodeAt(start + 3) === SPACE ? start + 4 : start + 3, end);
       value2.includes("\0") || (id = value2);
       return;
     }
     if (firstCharCode === 58) {
       if (onComment) {
-        const line2 = chunk.slice(start, end2);
+        const line2 = chunk.slice(start, end);
         onComment(line2.slice(chunk.charCodeAt(start + 1) === SPACE ? 2 : 1));
       }
       return;
     }
-    const line = chunk.slice(start, end2), fieldSeparatorIndex = line.indexOf(":");
+    const line = chunk.slice(start, end), fieldSeparatorIndex = line.indexOf(":");
     if (fieldSeparatorIndex === -1) {
       processField(line, "", line);
       return;
@@ -32769,17 +32764,396 @@ import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 
 // scripts/memory/setup.ts
-import { mkdir as mkdir3, unlink as unlink2, mkdtemp, rm } from "node:fs/promises";
-import path5 from "node:path";
-import { tmpdir } from "node:os";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { mkdir as mkdir3, unlink as unlink2 } from "node:fs/promises";
+import path4 from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
 
 // scripts/memory/host-config.ts
 import { createHash as createHash2 } from "node:crypto";
-import path4 from "node:path";
-import { homedir as homedir2 } from "node:os";
+var serverName = "chibako-memory";
+var digest = (value) => createHash2("sha256").update(value).digest("hex");
+function object3(value) {
+  return external_exports.record(external_exports.string(), external_exports.unknown()).parse(value);
+}
+function assertOwned(current, previous) {
+  if (current !== null && (!previous || digest(current) !== previous.host.digest)) throw new MemoryClientError("The chibako-memory connection already exists or was changed outside setup. Review it before replacing/removing it.");
+  if (current === null && previous?.host.digest) throw new MemoryClientError("Managed connection was removed outside setup; review it before reconfiguring.");
+}
+function setServer(data, field, connection, previous, remove = false) {
+  const servers = data[field] === void 0 ? {} : { ...object3(data[field]) };
+  assertOwned(servers[serverName] === void 0 ? null : JSON.stringify(servers[serverName]), previous);
+  if (remove) delete servers[serverName];
+  else servers[serverName] = connection;
+  data[field] = servers;
+  return digest(JSON.stringify(connection));
+}
+var manualHook = /scripts\/agent-memory|integrations\/agent-memory|memory\.mjs[^\n]*\b(?:codex|claude|hermes)\b/;
+
+// scripts/memory/setup.ts
+async function inspectConnection(call, expected) {
+  const status = validateMemoryStatus(await call("memory_status", {}));
+  if (expected && (status.principal_id !== expected.principal_id || status.area !== expected.area)) throw new MemoryClientError("Connection identity or memory area changed; run setup before retrying pending work.");
+  await call("get_knowledge_schema", {});
+  await call("recall", { query: "project handoff", limit: 1, budget: 100 });
+  return status;
+}
+async function prepareSetup(input2, call) {
+  if (process.platform === "win32") throw new MemoryClientError("Windows private storage is not supported yet.");
+  const endpoint = validateEndpoint(input2.endpoint);
+  const previous = await readProfile(input2.directory);
+  const { host } = input2;
+  if (previous && previous.runtime !== host.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
+  const status = await inspectConnection(call);
+  if (previous && (previous.endpoint !== endpoint || previous.principal_id !== status.principal_id) && await pendingCount(input2.directory)) {
+    throw new MemoryClientError("Pending checkpoints belong to the previous connection. Keep that profile and create a different profile instead.");
+  }
+  const hostFile = input2.hostFile || host.configPath();
+  if (!path4.isAbsolute(hostFile)) throw new MemoryClientError("Host configuration path must be absolute.");
+  if (previous && previous.host.file !== hostFile) throw new MemoryClientError("Host target changed; use a separate profile.");
+  const duplicates = await host.duplicateHookFiles(hostFile);
+  if (duplicates.length) throw new MemoryClientError(`Existing manual memory hooks need review before setup: ${duplicates.join(", ")}`);
+  const original = await readOptional(hostFile);
+  const rendered = host.renderConfig(original, endpoint, input2.key, previous || void 0);
+  await host.validateConfig?.(rendered.text);
+  return { input: { ...input2, endpoint }, previous, original, hostFile, rendered, status };
+}
+async function applySetup(preview) {
+  const { input: input2, status, hostFile, original, rendered } = preview;
+  await privateDirectory(input2.directory);
+  return withPrivateLock(path4.join(input2.directory, "profile.lock"), async () => {
+    const current = await readProfile(input2.directory);
+    if (JSON.stringify(current) !== JSON.stringify(preview.previous)) throw new MemoryClientError("Profile changed during setup. Run setup again.");
+    if (current && (current.endpoint !== input2.endpoint || current.principal_id !== status.principal_id) && await pendingCount(input2.directory)) throw new MemoryClientError("Pending checkpoints prevent changing connection.");
+    await mkdir3(path4.dirname(hostFile), { recursive: true, mode: 448 });
+    return withPrivateLock(`${hostFile}.chibako-memory.lock`, async () => {
+      if (await readOptional(hostFile) !== original) throw new MemoryClientError("Host configuration changed during setup. Run setup again.");
+      const profile = {
+        version: 1,
+        runtime: input2.host.runtime,
+        name: input2.name,
+        endpoint: input2.endpoint,
+        api_key: input2.key,
+        principal_id: status.principal_id,
+        area: status.area,
+        enabled: false,
+        connected_at: (/* @__PURE__ */ new Date()).toISOString(),
+        host: { file: hostFile, digest: rendered.digest }
+      };
+      await atomicPrivateWrite(hostFile, rendered.text);
+      try {
+        await saveProfile(input2.directory, profile);
+      } catch (error62) {
+        if (await readOptional(hostFile) !== rendered.text) throw new MemoryClientError("Setup failed and host config changed concurrently; automatic rollback was refused. Review the selected host configuration.");
+        if (original === null) await unlink2(hostFile);
+        else await atomicPrivateWrite(hostFile, original);
+        throw error62;
+      }
+      return profile;
+    });
+  });
+}
+async function setEnabled(host, directory, enabled, call) {
+  await privateDirectory(directory);
+  await withPrivateLock(path4.join(directory, "profile.lock"), async () => {
+    const profile = await readProfile(directory);
+    if (!profile?.api_key) throw new MemoryClientError("Run setup before enabling automatic memory.");
+    if (enabled) {
+      if (!call) throw new MemoryClientError("Resume requires a verified connection.");
+      if (profile.runtime !== host.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
+      host.renderConfig(await readOptional(profile.host.file), profile.endpoint, profile.api_key, profile);
+      await inspectConnection(call, profile);
+      profile.connected_at = (/* @__PURE__ */ new Date()).toISOString();
+    }
+    await saveProfile(directory, { ...profile, enabled });
+  });
+}
+async function disconnect(host, directory) {
+  await privateDirectory(directory);
+  await withPrivateLock(path4.join(directory, "profile.lock"), async () => {
+    const profile = await readProfile(directory);
+    if (!profile) return;
+    if (profile.runtime !== host.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
+    await saveProfile(directory, { ...profile, enabled: false });
+    if (!profile.api_key) return;
+    await withPrivateLock(`${profile.host.file}.chibako-memory.lock`, async () => {
+      const original = await readOptional(profile.host.file);
+      const rendered = host.renderConfig(original, profile.endpoint, profile.api_key, profile, true);
+      if (await readOptional(profile.host.file) !== original) throw new MemoryClientError("Host config changed; profile is paused. Review it before disconnecting.");
+      await atomicPrivateWrite(profile.host.file, rendered.text);
+      try {
+        await saveProfile(directory, { ...profile, enabled: false, api_key: "", host: { ...profile.host, digest: "" } });
+      } catch (error62) {
+        if (await readOptional(profile.host.file) === rendered.text && original !== null) await atomicPrivateWrite(profile.host.file, original);
+        throw error62;
+      }
+    });
+  });
+}
+async function writeConnectionCheck(call) {
+  const id = randomUUID4();
+  const receipt = external_exports.object({ saved: external_exports.literal(true), request_id: external_exports.string(), note_id: external_exports.string().min(1), revision: external_exports.string().regex(/^[a-f0-9]{64}$/) }).parse(
+    await call("memory_write", { request_id: id, role: "session", subject: "setup-check", session_id: `setup-${id}`, title: `TEST Memory connection ${id.slice(0, 8)}`, content: "Explicitly approved plugin setup check. No project work or deployment is implied.", expected_revision: null })
+  );
+  if (receipt.request_id !== id) throw new MemoryClientError("Setup checkpoint receipt does not match; saving is unverified.");
+  return receipt;
+}
+function redactedPreview(preview) {
+  return {
+    runtime: preview.input.host.runtime,
+    profile: preview.input.name,
+    endpoint: preview.input.endpoint,
+    area: preview.status.area,
+    scopes: preview.status.scopes,
+    host_file: preview.hostFile,
+    private_profile: path4.join(preview.input.directory, "profile.json"),
+    credentials: "hidden; private files (0600)",
+    host_config_changed: digest(preview.original || "") !== digest(preview.rendered.text),
+    automatic_memory: "off until enabled; native hook trust required",
+    capture_verified: false,
+    hermes_limit: preview.input.host.setupLimit
+  };
+}
+
+// scripts/memory/controls.ts
+import path5 from "node:path";
+async function runControl(host, action, directory, name, session) {
+  const { runtime } = host;
+  if (process.platform === "win32") throw new MemoryClientError("Windows private storage is not supported yet.");
+  const configured = await readProfile(directory);
+  if (configured && configured.runtime !== runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
+  if (action === "status") return localStatus(directory);
+  if (action === "inspect") {
+    if (!configured) throw new MemoryClientError("No configured profile. Run setup first.");
+    if (!session) throw new MemoryClientError("Inspect needs --session with the hook session_id.");
+    return inspectMemoryState({
+      runtime,
+      directory: path5.join(directory, "state"),
+      session_id: session,
+      binding: { endpoint: configured.endpoint, principal_id: configured.principal_id, area: configured.area }
+    });
+  }
+  if (action === "pause") {
+    await setEnabled(host, directory, false);
+    return { enabled: false, pending_retained: true };
+  }
+  if (action === "disconnect") {
+    await disconnect(host, directory);
+    return { enabled: false, disconnected: true, pending_retained: true, key_revocation: "owner action" };
+  }
+  if (action === "setup") return setupWizard(host, directory, name);
+  const profile = await readProfile(directory);
+  if (!profile?.api_key) throw new MemoryClientError("No configured profile. Run setup first.");
+  const connection = connectMemory(profile.endpoint, profile.api_key, profile.principal_id, profile.area);
+  try {
+    if (action === "resume") {
+      await setEnabled(host, directory, true, connection.call);
+      return { enabled: true, capture_verified: false, next: "Approve native hooks and verify a new session and substantive turn." };
+    }
+    if (action === "doctor") {
+      host.renderConfig(await readOptional(profile.host.file), profile.endpoint, profile.api_key, profile);
+      const status = await inspectConnection(connection.call, profile);
+      return {
+        connected: true,
+        scopes: status.scopes,
+        area: status.area,
+        duplicate_hook_files: await host.duplicateHookFiles(profile.host.file),
+        ...await localStatus(directory),
+        node: process.version,
+        platform: process.platform,
+        host_events: "Actual host delivery and native hook consent require verification; connection alone is insufficient."
+      };
+    }
+    throw new MemoryClientError("Unknown control. Use setup, status, inspect, doctor, pause, resume or disconnect.");
+  } finally {
+    await connection.close();
+  }
+}
+async function setupWizard(host, directory, name) {
+  const { runtime } = host;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new MemoryClientError("Setup requires your interactive terminal. Enter the API key there, never in agent chat, arguments or a pipe.");
+  let hidden = false;
+  const output2 = new Writable({ write(chunk, _encoding, done) {
+    if (!hidden) process.stdout.write(chunk);
+    done();
+  } });
+  const readline = createInterface({ input: process.stdin, output: output2, terminal: true });
+  const controller = new AbortController();
+  readline.on("SIGINT", () => controller.abort());
+  const ask = (prompt) => readline.question(prompt, { signal: controller.signal });
+  let connection;
+  try {
+    process.stdout.write(`Chibako Memory setup: ${runtime}/${name}
+Automatic mode stays off until enabled. Close concurrent host configuration editors.
+`);
+    const endpoint = (await ask("Chibako MCP URL: ")).trim();
+    process.stdout.write("Restricted Chibako API key (hidden): ");
+    hidden = true;
+    let key;
+    try {
+      key = (await ask("")).trim();
+    } finally {
+      hidden = false;
+      process.stdout.write("\n");
+    }
+    connection = connectMemory(endpoint, key);
+    const preview = await prepareSetup({ host, name, directory, endpoint, key }, connection.call);
+    process.stdout.write(JSON.stringify(redactedPreview(preview), null, 2) + "\n");
+    process.stdout.write("Host config may contain a private copy of this key. Existing unrelated settings are preserved; Hermes YAML comments/formatting may be normalized.\n");
+    if ((await ask("Apply these private configuration changes? [y/N] ")).trim().toLowerCase() !== "y") return { applied: false, enabled: false };
+    await applySetup(preview);
+    process.stdout.write("Connection configured. Restart/reload the selected host if needed and review its native hook consent.\n");
+    process.stdout.write("Optional write check creates one persistent TEST Memory connection checkpoint in the approved area. No automatic deletion.\n");
+    if ((await ask("Create that test checkpoint? [y/N] ")).trim().toLowerCase() === "y") {
+      const receipt = await writeConnectionCheck(connection.call);
+      process.stdout.write(JSON.stringify(receipt) + "\n");
+    }
+    if ((await ask("Enable automatic session memory (completed temporary checkpoints go to Trash)? [y/N] ")).trim().toLowerCase() === "y") await setEnabled(host, directory, true, connection.call);
+    return localStatus(directory);
+  } finally {
+    readline.close();
+    await connection?.close();
+  }
+}
+
+// scripts/memory/project.ts
+import { execFileSync } from "node:child_process";
+import path6 from "node:path";
+function projectSlug(name) {
+  const slug = name.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64);
+  return projectSchema.safeParse(slug).success ? slug : void 0;
+}
+function git(cwd, args) {
+  try {
+    return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2e3 }).trim() || void 0;
+  } catch {
+    return void 0;
+  }
+}
+function resolveProject(cwd, override = process.env.CHIBAKO_MEMORY_PROJECT) {
+  if (override) return projectSlug(override);
+  if (!cwd || !path6.isAbsolute(cwd)) return void 0;
+  const origin = git(cwd, ["remote", "get-url", "origin"]);
+  const fromOrigin = origin && projectSlug(origin.replace(/\/+$/, "").split(/[/:]/).pop() ?? "");
+  if (fromOrigin) return fromOrigin;
+  const root = git(cwd, ["rev-parse", "--show-toplevel"]);
+  return root ? projectSlug(path6.basename(root)) : void 0;
+}
+
+// scripts/memory/cli.ts
+var stageInputSchema = external_exports.object({
+  session_id: external_exports.string().min(1).max(200),
+  hook_event_name: external_exports.string(),
+  cwd: external_exports.string().max(4096).optional(),
+  turn_id: external_exports.string().optional(),
+  prompt: external_exports.string().optional(),
+  stop_hook_active: external_exports.boolean().optional()
+}).passthrough();
+var usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|inspect|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
+  hook     read a host hook event on stdin
+  stage    read {"checkpoint"|"finish"|"skip"|"continue": ...} on stdin; expected_revision may sit inside it or beside it
+  inspect  show this session's pending checkpoint and latest receipt (needs --session; read-only, offline)
+  status   show the profile and pending state without the API key
+  doctor   check the connection, scopes and hook files
+`;
+var runner = fileURLToPath(new URL(import.meta.url.endsWith(".mjs") ? "./memory.mjs" : "../agent-memory.ts", import.meta.url));
+var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+async function readInput() {
+  let bytes = 0;
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    const buffer = Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > 3e5) throw new Error("Hook payload exceeds limit.");
+    chunks.push(buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+async function runMemoryCli(host, argv = process.argv.slice(2)) {
+  let action = "";
+  let countingOnly = false;
+  try {
+    if (Number(process.versions.node.split(".")[0]) < 20) throw new MemoryClientError("Chibako Memory requires Node.js 20 or later.");
+    const args = parseArgs({ args: argv, allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" }, session: { type: "string" }, help: { type: "boolean", short: "h" } } });
+    if (args.values.help || !args.positionals[0]) {
+      process.stdout.write(usage);
+      return;
+    }
+    if (args.positionals[0] !== host.runtime) throw new MemoryClientError(`This runner serves ${host.runtime}.`);
+    const { runtime } = host;
+    action = args.positionals[1] || "hook";
+    const name = args.values.profile || process.env.CHIBAKO_MEMORY_PROFILE || "default";
+    const directory = args.values["profile-dir"] || profileDirectory(host, name);
+    if (!path7.isAbsolute(directory)) throw new Error("Profile directory must be absolute.");
+    if (!["hook", "stage"].includes(action)) {
+      const result = await runControl(host, action, directory, name, args.values.session);
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      return;
+    }
+    const legacy = process.env.CHIBAKO_MEMORY_ENABLED !== void 0 && !process.env.CHIBAKO_MEMORY_PROFILE_DIR && !args.values["profile-dir"];
+    const profile = await readProfile(directory);
+    if (process.env.CHIBAKO_MEMORY_ENABLED === "0" || !(profile ? profile.enabled && profile.api_key : legacy && process.env.CHIBAKO_MEMORY_ENABLED === "1")) {
+      process.stdout.write("{}\n");
+      return;
+    }
+    if (profile && profile.runtime !== runtime) throw new Error("Runtime does not match the configured memory profile.");
+    const payload = await readInput();
+    let input2;
+    let staged;
+    if (action === "stage") {
+      staged = external_exports.object({ checkpoint: external_exports.unknown().optional(), finish: external_exports.unknown().optional(), now_line: external_exports.unknown().optional(), skip: external_exports.unknown().optional(), continue: external_exports.unknown().optional(), replaces_request_id: external_exports.unknown().optional(), expected_revision: external_exports.unknown().optional() }).parse(payload);
+      input2 = stageInputSchema.parse(args.values.session ? { ...external_exports.record(external_exports.string(), external_exports.unknown()).parse(payload), session_id: args.values.session, hook_event_name: "Checkpoint" } : payload);
+    } else input2 = host.hookInput(payload);
+    countingOnly = action === "hook" && input2.hook_event_name === "PostToolUse";
+    const connection = connectMemory(profile?.endpoint || process.env.CHIBAKO_MEMORY_MCP_URL || "", profile?.api_key || process.env.CHIBAKO_MEMORY_API_KEY || "", profile?.principal_id, profile?.area);
+    const stateDirectory = profile ? path7.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
+    const start = Date.now();
+    try {
+      const command = (verb) => `node ${quote(runner)} ${runtime} ${verb} --profile-dir ${quote(directory)} --session ${quote(input2.session_id)}`;
+      const options = {
+        runtime,
+        input: input2,
+        directory: stateDirectory,
+        enabled: true,
+        call: connection.call,
+        resolveProject,
+        promptRequests: host.promptRequests,
+        ...profile?.thresholds ? { thresholds: profile.thresholds } : {},
+        ...profile ? {
+          binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
+          stageCommand: command("stage"),
+          inspectCommand: command("inspect")
+        } : {}
+      };
+      if (profile) await privateDirectory(directory);
+      const result = await runMemoryEvent({ ...options, ...staged ? { stage: staged } : {} });
+      if (!staged) {
+        const output2 = host.hookOutput(input2, result);
+        if (output2) process.stdout.write(JSON.stringify(output2) + "\n");
+        return;
+      }
+      const flushed = staged.checkpoint || staged.finish ? await runMemoryEvent({ ...options, input: { ...input2, hook_event_name: "Checkpoint" } }) : {};
+      const { warning, ...direct } = { ...result, ...flushed };
+      process.stdout.write(JSON.stringify({ ...direct, ...warning ? { systemMessage: warning } : {} }) + "\n");
+    } finally {
+      await connection.close();
+      process.stderr.write(`memory metrics: calls=${connection.calls} elapsed_ms=${Date.now() - start}; model usage not measured
+`);
+    }
+  } catch (error62) {
+    if (countingOnly) {
+      process.stdout.write("{}\n");
+      return;
+    }
+    const invalid = error62 instanceof external_exports.ZodError ? `Invalid memory payload: ${error62.issues.map((issue2) => `${issue2.path.join(".") || "(root)"}: ${issue2.message}`).join("; ")}` : "";
+    const message = invalid || (error62 instanceof MemoryClientError ? error62.message : "Chibako Memory operation failed. Check the selected profile, private permissions, server status and connection. Capture is unverified; no credentials or checkpoint content were logged.");
+    process.stdout.write(JSON.stringify(action === "hook" ? host.hookFailure(message) : { systemMessage: message }) + "\n");
+    process.exitCode = 1;
+  }
+}
+
+// scripts/memory/hermes/adapter.ts
+import { homedir } from "node:os";
+import path8 from "node:path";
 
 // node_modules/js-yaml/dist/js-yaml.mjs
 function getDefaultExportFromCjs(x) {
@@ -34043,9 +34417,9 @@ function requireLoader() {
       state.tagMap[handle] = prefix;
     }
   };
-  function captureSegment(state, start, end2, checkJson) {
-    if (start < end2) {
-      const _result = state.input.slice(start, end2);
+  function captureSegment(state, start, end, checkJson) {
+    if (start < end) {
+      const _result = state.input.slice(start, end);
       if (checkJson) {
         for (let _position = 0, _length2 = _result.length; _position < _length2; _position += 1) {
           const _character = _result.charCodeAt(_position);
@@ -35477,16 +35851,16 @@ function requireDumper() {
     const breakRe = / [^ ]/g;
     let match;
     let start = 0;
-    let end2;
+    let end;
     let curr = 0;
     let next = 0;
     let result = "";
     while (match = breakRe.exec(line)) {
       next = match.index;
       if (next - start > width) {
-        end2 = curr > start ? curr : next;
-        result += "\n" + line.slice(start, end2);
-        start = end2 + 1;
+        end = curr > start ? curr : next;
+        result += "\n" + line.slice(start, end);
+        start = end + 1;
       }
       curr = next;
     }
@@ -35847,433 +36221,53 @@ var {
   safeDump
 } = yaml;
 
-// scripts/memory/host-config.ts
-var serverName = "chibako-memory";
-var begin = "# BEGIN CHIBAKO MEMORY MANAGED CONNECTION";
-var end = "# END CHIBAKO MEMORY MANAGED CONNECTION";
-var digest = (value) => createHash2("sha256").update(value).digest("hex");
-function hostConfigPath(runtime) {
-  if (runtime === "codex") return path4.join(process.env.CODEX_HOME || path4.join(homedir2(), ".codex"), "config.toml");
-  if (runtime === "claude") return path4.join(process.env.CLAUDE_CONFIG_DIR || homedir2(), ".claude.json");
-  const home = process.env.HERMES_HOME;
-  if (!home) throw new MemoryClientError("Run setup inside the selected Hermes profile with HERMES_HOME set; no gateway/profile is guessed.");
-  return path4.join(home, "config.yaml");
-}
-function object3(value) {
-  return external_exports.record(external_exports.string(), external_exports.unknown()).parse(value);
-}
-function assertOwned(current, previous) {
-  if (current !== null && (!previous || digest(current) !== previous.host.digest)) throw new MemoryClientError("The chibako-memory connection already exists or was changed outside setup. Review it before replacing/removing it.");
-  if (current === null && previous?.host.digest) throw new MemoryClientError("Managed connection was removed outside setup; review it before reconfiguring.");
-}
-function renderHostConfig(runtime, original, endpoint, key, previous, remove = false) {
-  if (runtime === "codex") {
-    const source = original || "";
-    const start = source.indexOf(begin);
-    const stop = source.indexOf(end);
-    let current2 = null;
-    if (start >= 0 || stop >= 0) {
-      if (start < 0 || stop < start || source.indexOf(begin, start + begin.length) >= 0 || source.indexOf(end, stop + end.length) >= 0) throw new MemoryClientError("Malformed managed connection markers.");
-      current2 = source.slice(start, stop + end.length);
-    }
-    const unrelated = current2 ? source.replace(current2, "") : source;
-    if (/^\s*\[\s*mcp_servers\.(?:chibako-memory|"chibako-memory"|'chibako-memory')(?:\s*\]|\.)/m.test(unrelated)) throw new MemoryClientError("An unmanaged chibako-memory TOML connection exists.");
-    assertOwned(current2, previous);
-    const connection2 = remove ? "" : `${begin}
-[mcp_servers.chibako-memory]
-url = ${JSON.stringify(endpoint)}
-http_headers = { Authorization = ${JSON.stringify(`Bearer ${key}`)} }
-${end}`;
-    return { text: current2 ? source.replace(current2, connection2) : `${source}${source && !source.endsWith("\n") ? "\n" : ""}
-${connection2}
-`, digest: digest(connection2) };
-  }
-  const data = object3(original ? runtime === "hermes" ? load(original) : JSON.parse(original) : {});
-  const field = runtime === "hermes" ? "mcp_servers" : "mcpServers";
-  const servers = data[field] === void 0 ? {} : { ...object3(data[field]) };
-  const current = servers[serverName] === void 0 ? null : JSON.stringify(servers[serverName]);
-  assertOwned(current, previous);
-  const connection = { ...runtime === "claude" ? { type: "http" } : {}, url: endpoint, headers: { Authorization: `Bearer ${key}` } };
-  if (remove) delete servers[serverName];
-  else servers[serverName] = connection;
-  data[field] = servers;
-  return { text: runtime === "hermes" ? dump(data, { lineWidth: -1, noRefs: true }) : JSON.stringify(data, null, 2) + "\n", digest: digest(JSON.stringify(connection)) };
-}
-
-// scripts/memory/setup.ts
-async function inspectConnection(call, expected) {
-  const status = validateMemoryStatus(await call("memory_status", {}));
-  if (expected && (status.principal_id !== expected.principal_id || status.area !== expected.area)) throw new MemoryClientError("Connection identity or memory area changed; run setup before retrying pending work.");
-  await call("get_knowledge_schema", {});
-  await call("recall", { query: "project handoff", limit: 1, budget: 100 });
-  return status;
-}
-async function duplicateHookFiles(runtime, hostFile) {
-  const candidates = runtime === "codex" ? [path5.join(path5.dirname(hostFile), "hooks.json"), path5.resolve(".codex/hooks.json"), hostFile] : runtime === "claude" ? [path5.join(path5.dirname(hostFile), ".claude/settings.json"), path5.resolve(".claude/settings.json"), path5.resolve(".claude/settings.local.json")] : [hostFile];
-  const matches = [];
-  for (const file2 of new Set(candidates)) {
-    const content = await readOptional(file2);
-    if (content && /scripts\/agent-memory|integrations\/agent-memory|memory\.mjs[^\n]*\b(?:codex|claude|hermes)\b/.test(content)) matches.push(file2);
-  }
-  return matches;
-}
-async function prepareSetup(input2, call) {
-  if (process.platform === "win32") throw new MemoryClientError("Windows private storage is not supported yet.");
-  const endpoint = validateEndpoint(input2.endpoint);
-  const previous = await readProfile(input2.directory);
-  if (previous && previous.runtime !== input2.runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
-  const status = await inspectConnection(call);
-  if (previous && (previous.endpoint !== endpoint || previous.principal_id !== status.principal_id) && await pendingCount(input2.directory)) {
-    throw new MemoryClientError("Pending checkpoints belong to the previous connection. Keep that profile and create a different profile instead.");
-  }
-  const hostFile = input2.hostFile || hostConfigPath(input2.runtime);
-  if (!path5.isAbsolute(hostFile)) throw new MemoryClientError("Host configuration path must be absolute.");
-  if (previous && previous.host.file !== hostFile) throw new MemoryClientError("Host target changed; use a separate profile.");
-  const duplicates = await duplicateHookFiles(input2.runtime, hostFile);
-  if (duplicates.length) throw new MemoryClientError(`Existing manual memory hooks need review before setup: ${duplicates.join(", ")}`);
-  const original = await readOptional(hostFile);
-  const rendered = renderHostConfig(input2.runtime, original, endpoint, input2.key, previous || void 0);
-  if (input2.runtime === "codex") await validateCodexConfig(rendered.text);
-  return { input: { ...input2, endpoint }, previous, original, hostFile, rendered, status };
-}
-async function validateCodexConfig(text) {
-  const temporary = await mkdtemp(path5.join(tmpdir(), "chibako-config-check-"));
-  try {
-    await atomicPrivateWrite(path5.join(temporary, "config.toml"), text);
-    try {
-      await promisify(execFile)("codex", ["mcp", "get", "chibako-memory", "--json"], {
-        env: { ...process.env, CODEX_HOME: temporary },
-        timeout: 5e3,
-        maxBuffer: 1e6
-      });
-    } catch {
-      throw new MemoryClientError("Codex configuration validation failed. Install a supported Codex CLI and resolve existing TOML conflicts before applying setup.");
-    }
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
-  }
-}
-async function applySetup(preview) {
-  const { input: input2, status, hostFile, original, rendered } = preview;
-  await privateDirectory(input2.directory);
-  return withPrivateLock(path5.join(input2.directory, "profile.lock"), async () => {
-    const current = await readProfile(input2.directory);
-    if (JSON.stringify(current) !== JSON.stringify(preview.previous)) throw new MemoryClientError("Profile changed during setup. Run setup again.");
-    if (current && (current.endpoint !== input2.endpoint || current.principal_id !== status.principal_id) && await pendingCount(input2.directory)) throw new MemoryClientError("Pending checkpoints prevent changing connection.");
-    await mkdir3(path5.dirname(hostFile), { recursive: true, mode: 448 });
-    return withPrivateLock(`${hostFile}.chibako-memory.lock`, async () => {
-      if (await readOptional(hostFile) !== original) throw new MemoryClientError("Host configuration changed during setup. Run setup again.");
-      const profile = {
-        version: 1,
-        runtime: input2.runtime,
-        name: input2.name,
-        endpoint: input2.endpoint,
-        api_key: input2.key,
-        principal_id: status.principal_id,
-        area: status.area,
-        enabled: false,
-        connected_at: (/* @__PURE__ */ new Date()).toISOString(),
-        host: { file: hostFile, digest: rendered.digest }
-      };
-      await atomicPrivateWrite(hostFile, rendered.text);
-      try {
-        await saveProfile(input2.directory, profile);
-      } catch (error62) {
-        if (await readOptional(hostFile) !== rendered.text) throw new MemoryClientError("Setup failed and host config changed concurrently; automatic rollback was refused. Review the selected host configuration.");
-        if (original === null) await unlink2(hostFile);
-        else await atomicPrivateWrite(hostFile, original);
-        throw error62;
-      }
-      return profile;
-    });
-  });
-}
-async function setEnabled(directory, enabled, call) {
-  await privateDirectory(directory);
-  await withPrivateLock(path5.join(directory, "profile.lock"), async () => {
-    const profile = await readProfile(directory);
-    if (!profile?.api_key) throw new MemoryClientError("Run setup before enabling automatic memory.");
-    if (enabled) {
-      if (!call) throw new MemoryClientError("Resume requires a verified connection.");
-      renderHostConfig(profile.runtime, await readOptional(profile.host.file), profile.endpoint, profile.api_key, profile);
-      await inspectConnection(call, profile);
-      profile.connected_at = (/* @__PURE__ */ new Date()).toISOString();
-    }
-    await saveProfile(directory, { ...profile, enabled });
-  });
-}
-async function disconnect(directory) {
-  await privateDirectory(directory);
-  await withPrivateLock(path5.join(directory, "profile.lock"), async () => {
-    const profile = await readProfile(directory);
-    if (!profile) return;
-    await saveProfile(directory, { ...profile, enabled: false });
-    if (!profile.api_key) return;
-    await withPrivateLock(`${profile.host.file}.chibako-memory.lock`, async () => {
-      const original = await readOptional(profile.host.file);
-      const rendered = renderHostConfig(profile.runtime, original, profile.endpoint, profile.api_key, profile, true);
-      if (await readOptional(profile.host.file) !== original) throw new MemoryClientError("Host config changed; profile is paused. Review it before disconnecting.");
-      await atomicPrivateWrite(profile.host.file, rendered.text);
-      try {
-        await saveProfile(directory, { ...profile, enabled: false, api_key: "", host: { ...profile.host, digest: "" } });
-      } catch (error62) {
-        if (await readOptional(profile.host.file) === rendered.text && original !== null) await atomicPrivateWrite(profile.host.file, original);
-        throw error62;
-      }
-    });
-  });
-}
-async function writeConnectionCheck(call) {
-  const id = randomUUID4();
-  const receipt = external_exports.object({ saved: external_exports.literal(true), request_id: external_exports.string(), note_id: external_exports.string().min(1), revision: external_exports.string().regex(/^[a-f0-9]{64}$/) }).parse(
-    await call("memory_write", { request_id: id, role: "session", subject: "setup-check", session_id: `setup-${id}`, title: `TEST Memory connection ${id.slice(0, 8)}`, content: "Explicitly approved plugin setup check. No project work or deployment is implied.", expected_revision: null })
-  );
-  if (receipt.request_id !== id) throw new MemoryClientError("Setup checkpoint receipt does not match; saving is unverified.");
-  return receipt;
-}
-function redactedPreview(preview) {
-  return {
-    runtime: preview.input.runtime,
-    profile: preview.input.name,
-    endpoint: preview.input.endpoint,
-    area: preview.status.area,
-    scopes: preview.status.scopes,
-    host_file: preview.hostFile,
-    private_profile: path5.join(preview.input.directory, "profile.json"),
-    credentials: "hidden; private files (0600)",
-    host_config_changed: digest(preview.original || "") !== digest(preview.rendered.text),
-    automatic_memory: "off until enabled; native hook trust required",
-    capture_verified: false,
-    hermes_limit: preview.input.runtime === "hermes" ? "Missing-checkpoint continuation only for coding; actual gateway and both client routes unverified." : void 0
-  };
-}
-
-// scripts/memory/controls.ts
-import path6 from "node:path";
-async function runControl(runtime, action, directory, name, session) {
-  if (process.platform === "win32") throw new MemoryClientError("Windows private storage is not supported yet.");
-  const configured = await readProfile(directory);
-  if (configured && configured.runtime !== runtime) throw new MemoryClientError("Selected profile belongs to another runtime.");
-  if (action === "status") return localStatus(directory);
-  if (action === "inspect") {
-    if (!configured) throw new MemoryClientError("No configured profile. Run setup first.");
-    if (!session) throw new MemoryClientError("Inspect needs --session with the hook session_id.");
-    return inspectMemoryState({
-      runtime,
-      directory: path6.join(directory, "state"),
-      session_id: session,
-      binding: { endpoint: configured.endpoint, principal_id: configured.principal_id, area: configured.area }
-    });
-  }
-  if (action === "pause") {
-    await setEnabled(directory, false);
-    return { enabled: false, pending_retained: true };
-  }
-  if (action === "disconnect") {
-    await disconnect(directory);
-    return { enabled: false, disconnected: true, pending_retained: true, key_revocation: "owner action" };
-  }
-  if (action === "setup") return setupWizard(runtime, directory, name);
-  const profile = await readProfile(directory);
-  if (!profile?.api_key) throw new MemoryClientError("No configured profile. Run setup first.");
-  const connection = connectMemory(profile.endpoint, profile.api_key, profile.principal_id, profile.area);
-  try {
-    if (action === "resume") {
-      await setEnabled(directory, true, connection.call);
-      return { enabled: true, capture_verified: false, next: "Approve native hooks and verify a new session and substantive turn." };
-    }
-    if (action === "doctor") {
-      renderHostConfig(profile.runtime, await readOptional(profile.host.file), profile.endpoint, profile.api_key, profile);
-      const status = await inspectConnection(connection.call, profile);
-      return {
-        connected: true,
-        scopes: status.scopes,
-        area: status.area,
-        duplicate_hook_files: await duplicateHookFiles(runtime, profile.host.file),
-        ...await localStatus(directory),
-        node: process.version,
-        platform: process.platform,
-        host_events: "Actual host delivery and native hook consent require verification; connection alone is insufficient."
-      };
-    }
-    throw new MemoryClientError("Unknown control. Use setup, status, inspect, doctor, pause, resume or disconnect.");
-  } finally {
-    await connection.close();
-  }
-}
-async function setupWizard(runtime, directory, name) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new MemoryClientError("Setup requires your interactive terminal. Enter the API key there, never in agent chat, arguments or a pipe.");
-  let hidden = false;
-  const output2 = new Writable({ write(chunk, _encoding, done) {
-    if (!hidden) process.stdout.write(chunk);
-    done();
-  } });
-  const readline = createInterface({ input: process.stdin, output: output2, terminal: true });
-  const controller = new AbortController();
-  readline.on("SIGINT", () => controller.abort());
-  const ask = (prompt) => readline.question(prompt, { signal: controller.signal });
-  let connection;
-  try {
-    process.stdout.write(`Chibako Memory setup: ${runtime}/${name}
-Automatic mode stays off until enabled. Close concurrent host configuration editors.
-`);
-    const endpoint = (await ask("Chibako MCP URL: ")).trim();
-    process.stdout.write("Restricted Chibako API key (hidden): ");
-    hidden = true;
-    let key;
-    try {
-      key = (await ask("")).trim();
-    } finally {
-      hidden = false;
-      process.stdout.write("\n");
-    }
-    connection = connectMemory(endpoint, key);
-    const preview = await prepareSetup({ runtime, name, directory, endpoint, key }, connection.call);
-    process.stdout.write(JSON.stringify(redactedPreview(preview), null, 2) + "\n");
-    process.stdout.write("Host config may contain a private copy of this key. Existing unrelated settings are preserved; Hermes YAML comments/formatting may be normalized.\n");
-    if ((await ask("Apply these private configuration changes? [y/N] ")).trim().toLowerCase() !== "y") return { applied: false, enabled: false };
-    await applySetup(preview);
-    process.stdout.write("Connection configured. Restart/reload the selected host if needed and review its native hook consent.\n");
-    process.stdout.write("Optional write check creates one persistent TEST Memory connection checkpoint in the approved area. No automatic deletion.\n");
-    if ((await ask("Create that test checkpoint? [y/N] ")).trim().toLowerCase() === "y") {
-      const receipt = await writeConnectionCheck(connection.call);
-      process.stdout.write(JSON.stringify(receipt) + "\n");
-    }
-    if ((await ask("Enable automatic session memory (completed temporary checkpoints go to Trash)? [y/N] ")).trim().toLowerCase() === "y") await setEnabled(directory, true, connection.call);
-    return localStatus(directory);
-  } finally {
-    readline.close();
-    await connection?.close();
-  }
-}
-
-// scripts/memory/project.ts
-import { execFileSync } from "node:child_process";
-import path7 from "node:path";
-function projectSlug(name) {
-  const slug = name.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64);
-  return projectSchema.safeParse(slug).success ? slug : void 0;
-}
-function git(cwd, args) {
-  try {
-    return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2e3 }).trim() || void 0;
-  } catch {
-    return void 0;
-  }
-}
-function resolveProject(cwd, override = process.env.CHIBAKO_MEMORY_PROJECT) {
-  if (override) return projectSlug(override);
-  if (!cwd || !path7.isAbsolute(cwd)) return void 0;
-  const origin = git(cwd, ["remote", "get-url", "origin"]);
-  const fromOrigin = origin && projectSlug(origin.replace(/\/+$/, "").split(/[/:]/).pop() ?? "");
-  if (fromOrigin) return fromOrigin;
-  const root = git(cwd, ["rev-parse", "--show-toplevel"]);
-  return root ? projectSlug(path7.basename(root)) : void 0;
-}
-
-// scripts/agent-memory.ts
-var inputSchema = external_exports.object({
+// scripts/memory/hermes/adapter.ts
+var hookSchema = external_exports.object({
   session_id: external_exports.string().min(1).max(200),
-  hook_event_name: external_exports.string(),
-  cwd: external_exports.string().max(4096).optional(),
-  turn_id: external_exports.string().optional(),
-  prompt: external_exports.string().optional(),
-  stop_hook_active: external_exports.boolean().optional()
+  hook_event_name: external_exports.enum(["pre_llm_call", "post_tool_call", "pre_verify", "on_session_end", "post_compaction", "agent_loop_stopped"]),
+  extra: external_exports.object({ user_message: external_exports.string().optional(), turn_id: external_exports.string().optional() }).passthrough().optional()
 }).passthrough();
-var countingOnly = false;
-var usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|inspect|setup|status|doctor|pause|resume|disconnect] [--profile <name>] [--profile-dir <absolute path>] [--session <id>]
-  hook     read a host hook event on stdin
-  stage    read {"checkpoint"|"finish"|"skip"|"continue": ...} on stdin; expected_revision may sit inside it or beside it
-  inspect  show this session's pending checkpoint and latest receipt (needs --session; read-only, offline)
-  status   show the profile and pending state without the API key
-  doctor   check the connection, scopes and hook files
-`;
-var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-async function readInput() {
-  let bytes = 0;
-  const chunks = [];
-  for await (const chunk of process.stdin) {
-    const buffer = Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > 3e5) throw new Error("Hook payload exceeds limit.");
-    chunks.push(buffer);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-async function main() {
-  if (Number(process.versions.node.split(".")[0]) < 20) throw new MemoryClientError("Chibako Memory requires Node.js 20 or later.");
-  const args = parseArgs({ allowPositionals: true, options: { profile: { type: "string" }, "profile-dir": { type: "string" }, session: { type: "string" }, help: { type: "boolean", short: "h" } } });
-  if (args.values.help || !args.positionals[0]) {
-    process.stdout.write(usage);
-    return;
-  }
-  const runtime = external_exports.enum(["codex", "claude", "hermes"]).parse(args.positionals[0]);
-  const action = args.positionals[1] || "hook";
-  const name = args.values.profile || process.env.CHIBAKO_MEMORY_PROFILE || "default";
-  const directory = args.values["profile-dir"] || profileDirectory(runtime, name);
-  if (!path8.isAbsolute(directory)) throw new Error("Profile directory must be absolute.");
-  if (!["hook", "stage"].includes(action)) {
-    const result = await runControl(runtime, action, directory, name, args.values.session);
-    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-    return;
-  }
-  const legacy = process.env.CHIBAKO_MEMORY_ENABLED !== void 0 && !process.env.CHIBAKO_MEMORY_PROFILE_DIR && !args.values["profile-dir"];
-  const profile = await readProfile(directory);
-  if (process.env.CHIBAKO_MEMORY_ENABLED === "0" || !(profile ? profile.enabled && profile.api_key : legacy && process.env.CHIBAKO_MEMORY_ENABLED === "1")) {
-    process.stdout.write("{}\n");
-    return;
-  }
-  if (profile && profile.runtime !== runtime) throw new Error("Runtime does not match the configured memory profile.");
-  let payload = await readInput();
-  if (action === "stage" && args.values.session) {
-    const object4 = external_exports.record(external_exports.string(), external_exports.unknown()).parse(payload);
-    payload = { ...object4, session_id: args.values.session, hook_event_name: "Checkpoint" };
-  }
-  const input2 = inputSchema.parse(payload);
-  countingOnly = action === "hook" && input2.hook_event_name === "PostToolUse";
-  const connection = connectMemory(profile?.endpoint || process.env.CHIBAKO_MEMORY_MCP_URL || "", profile?.api_key || process.env.CHIBAKO_MEMORY_API_KEY || "", profile?.principal_id, profile?.area);
-  const stateDirectory = profile ? path8.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
-  const start = Date.now();
-  try {
-    const command = (verb) => `node ${quote(fileURLToPath(import.meta.url))} ${runtime} ${verb} --profile-dir ${quote(directory)} --session ${quote(input2.session_id)}`;
-    const execute = async () => {
-      const call = connection.call;
-      const staged = action === "stage" ? external_exports.object({ checkpoint: external_exports.unknown().optional(), finish: external_exports.unknown().optional(), now_line: external_exports.unknown().optional(), skip: external_exports.unknown().optional(), continue: external_exports.unknown().optional(), replaces_request_id: external_exports.unknown().optional(), expected_revision: external_exports.unknown().optional() }).parse(payload) : void 0;
-      const options = {
-        runtime,
-        input: input2,
-        directory: stateDirectory,
-        enabled: true,
-        call,
-        resolveProject,
-        ...profile?.thresholds ? { thresholds: profile.thresholds } : {},
-        ...profile ? {
-          binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
-          stageCommand: command("stage"),
-          inspectCommand: command("inspect")
-        } : {}
-      };
-      const result = await runMemoryEvent({ ...options, ...staged ? { stage: staged } : {} });
-      const flushed = staged?.checkpoint || staged?.finish ? await runMemoryEvent({ ...options, input: { ...input2, hook_event_name: "Checkpoint" } }) : {};
-      process.stdout.write(JSON.stringify({ ...result, ...flushed }) + "\n");
+var lifecycle = { pre_llm_call: "UserPromptSubmit", post_tool_call: "PostToolUse", pre_verify: "Stop" };
+var hermes = {
+  runtime: "hermes",
+  home: () => process.env.HERMES_HOME || path8.join(homedir(), ".hermes"),
+  configPath() {
+    const home = process.env.HERMES_HOME;
+    if (!home) throw new MemoryClientError("Run setup inside the selected Hermes profile with HERMES_HOME set; no gateway/profile is guessed.");
+    return path8.join(home, "config.yaml");
+  },
+  renderConfig(original, endpoint, key, previous, remove = false) {
+    const data = object3(original ? load(original) : {});
+    const digest2 = setServer(data, "mcp_servers", { url: endpoint, headers: { Authorization: `Bearer ${key}` } }, previous, remove);
+    return { text: dump(data, { lineWidth: -1, noRefs: true }), digest: digest2 };
+  },
+  async duplicateHookFiles(hostFile) {
+    const content = await readOptional(hostFile);
+    return content && manualHook.test(content) ? [hostFile] : [];
+  },
+  hookInput(payload) {
+    const input2 = hookSchema.parse(payload);
+    return {
+      session_id: input2.session_id,
+      hook_event_name: input2.hook_event_name in lifecycle ? lifecycle[input2.hook_event_name] : "PreCompact",
+      ...input2.extra?.turn_id ? { turn_id: input2.extra.turn_id } : {},
+      ...input2.extra?.user_message ? { prompt: input2.extra.user_message } : {}
     };
-    if (profile) await privateDirectory(directory);
-    await execute();
-  } finally {
-    await connection.close();
-    process.stderr.write(`memory metrics: calls=${connection.calls} elapsed_ms=${Date.now() - start}; model usage not measured
-`);
-  }
-}
-main().catch((error62) => {
-  if (countingOnly) {
-    process.stdout.write("{}\n");
-    return;
-  }
-  const invalid = error62 instanceof external_exports.ZodError ? `Invalid memory payload: ${error62.issues.map((issue2) => `${issue2.path.join(".") || "(root)"}: ${issue2.message}`).join("; ")}` : "";
-  process.stdout.write(JSON.stringify({ systemMessage: invalid || (error62 instanceof MemoryClientError ? error62.message : "Chibako Memory operation failed. Check the selected profile, private permissions, server status and connection. Capture is unverified; no credentials or checkpoint content were logged.") }) + "\n");
-  process.exitCode = 1;
-});
+  },
+  // pre_verify continues the loop with the request; pre_llm_call injects context; other events only log.
+  hookOutput(input2, { context, request, warning }) {
+    if (input2.hook_event_name === "Stop" && request) return { action: "continue", message: request };
+    if (input2.hook_event_name === "UserPromptSubmit") return { context: [context, warning].filter(Boolean).join("\n") };
+    if (warning) process.stderr.write(warning + "\n");
+    return void 0;
+  },
+  hookFailure: (message) => ({ context: message }),
+  promptRequests: true,
+  setupLimit: "Missing-checkpoint continuation only for coding; actual gateway and both client routes unverified."
+};
+
+// scripts/memory/hermes/main.ts
+void runMemoryCli(hermes);
 /*! Bundled license information:
 
 content-type/index.js:
