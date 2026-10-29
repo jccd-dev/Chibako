@@ -1,4 +1,3 @@
-import { renderHostConfig } from "../../scripts/memory/host-config";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -11,6 +10,11 @@ import { runControl } from "../../scripts/memory/controls";
 import { applySetup, disconnect, prepareSetup, redactedPreview, setEnabled } from "../../scripts/memory/setup";
 import { profileDirectory, readProfile } from "../../scripts/memory/profile";
 import type { MemoryCall, Runtime } from "../../scripts/memory/runtime";
+import { codex } from "../../scripts/memory/codex/adapter";
+import { claude } from "../../scripts/memory/claude/adapter";
+import { hermes } from "../../scripts/memory/hermes/adapter";
+
+const hosts = { codex, claude, hermes };
 
 const root = mkdtempSync(join(tmpdir(), "chibako-memory-setup-test-"));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -63,7 +67,7 @@ function stub(principalId = "profile-1", calls: string[] = []): MemoryCall {
 }
 
 function input(runtime: Runtime, name = "default") {
-  return { runtime, name, ...fixture(runtime, name) };
+  return { host: hosts[runtime], name, ...fixture(runtime, name) };
 }
 
 test("setup requires the memory key scopes and server contract", () => {
@@ -133,9 +137,9 @@ test("pause does not call the server; resume checks principal before enabling", 
   const target = input("claude", "pause");
   await applySetup(await prepareSetup(target, stub("profile-1")));
   const calls: string[] = [];
-  await setEnabled(target.directory, false, stub("profile-1", calls));
+  await setEnabled(target.host, target.directory, false, stub("profile-1", calls));
   assert.deepEqual(calls, []);
-  await assert.rejects(() => setEnabled(target.directory, true, stub("rotated-key", calls)), /identity or memory area changed/);
+  await assert.rejects(() => setEnabled(target.host, target.directory, true, stub("rotated-key", calls)), /identity or memory area changed/);
   assert.deepEqual(calls, ["memory_status"]);
   assert.equal((await readProfile(target.directory))?.enabled, false);
 });
@@ -147,7 +151,7 @@ test("pending checkpoints prevent retargeting and remain when disconnect removes
   mkdirSync(join(target.directory, "state"), { recursive: true, mode: 0o700 });
   writeFileSync(pendingFile, JSON.stringify({ pending: { retained: true } }), { mode: 0o600 });
   await assert.rejects(() => prepareSetup({ ...target, endpoint: "https://other.example/mcp" }, stub("profile-2")), /Pending checkpoints belong/);
-  await disconnect(target.directory);
+  await disconnect(target.host, target.directory);
   const config = JSON.parse(readFileSync(target.hostFile, "utf8"));
   assert.deepEqual(config.custom, { keep: true });
   assert.deepEqual(config.mcpServers, { other: { url: "https://other.test/mcp" } });
@@ -186,9 +190,9 @@ test("resume rejects an externally edited host connection before server calls", 
   edited.mcpServers["chibako-memory"].url = "https://edited.example/mcp";
   writeFileSync(target.hostFile, JSON.stringify(edited, null, 2) + "\n");
   const calls: string[] = [];
-  await assert.rejects(() => setEnabled(target.directory, true, stub("profile-1", calls)), /already exists or was changed outside setup/);
+  await assert.rejects(() => setEnabled(target.host, target.directory, true, stub("profile-1", calls)), /already exists or was changed outside setup/);
   assert.deepEqual(calls, []);
-  await assert.rejects(() => runControl("claude", "doctor", target.directory, "host-edit"), /already exists or was changed outside setup/);
+  await assert.rejects(() => runControl(claude, "doctor", target.directory, "host-edit"), /already exists or was changed outside setup/);
 });
 
 test("profile path uses the native host home with or without plugin-only environment", () => {
@@ -204,9 +208,9 @@ test("profile path uses the native host home with or without plugin-only environ
     process.env.CLAUDE_CONFIG_DIR = join(root, "claude-home");
     process.env.HERMES_HOME = join(root, "hermes-home");
     process.env.PLUGIN_DATA = join(root, "plugin-only-data");
-    const withPluginData = (["codex", "claude", "hermes"] as const).map((runtime) => profileDirectory(runtime, "default"));
+    const withPluginData = (["codex", "claude", "hermes"] as const).map((runtime) => profileDirectory(hosts[runtime], "default"));
     delete process.env.PLUGIN_DATA;
-    const withoutPluginData = (["codex", "claude", "hermes"] as const).map((runtime) => profileDirectory(runtime, "default"));
+    const withoutPluginData = (["codex", "claude", "hermes"] as const).map((runtime) => profileDirectory(hosts[runtime], "default"));
     assert.deepEqual(withoutPluginData, withPluginData);
     assert.ok(withoutPluginData.every((directory) => !directory.startsWith(join(root, "plugin-only-data"))));
   } finally {
@@ -299,7 +303,7 @@ sys.stdout.buffer.write(output)
 
 test("Hermes YAML aliases do not add the managed connection to unrelated defaults", () => {
   const original = "defaults: &servers\n  other:\n    url: https://other.test/mcp\nmcp_servers: *servers\n";
-  const rendered = renderHostConfig("hermes", original, "https://vault.example/mcp", "synthetic-key");
+  const rendered = hermes.renderConfig(original, "https://vault.example/mcp", "synthetic-key");
   const parsed = load(rendered.text) as { defaults: Record<string, unknown>; mcp_servers: Record<string, unknown> };
   assert.deepEqual(Object.keys(parsed.defaults), ["other"]);
   assert.ok(parsed.mcp_servers["chibako-memory"]);

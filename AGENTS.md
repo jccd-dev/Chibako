@@ -8,7 +8,7 @@ Chibako is a self-hosted Markdown knowledge vault with wikilinks, backlinks, gra
 - For architectural changes, read [ADR-0003](docs/adr/0003-capability-owned-data-access-and-thin-server-adapters.md). For MCP/auth transport changes, also read [ADR-0004](docs/adr/0004-dual-mcp-transports.md). For embeddings/Recall changes, read [ADR-0001](docs/adr/0001-embedding-freshness-strategy.md) and [ADR-0002](docs/adr/0002-whole-note-remote-embeddings-mvp.md).
 - For domain terminology, follow [domain guidance](docs/agents/domain.md) and `CONTEXT.md` when present. For requested tickets/specs, follow [the local issue tracker](docs/agents/issue-tracker.md) and [triage labels](docs/agents/triage-labels.md).
 - For installer, release, updater, adoption, or recovery changes, read [the update guide](docs/UPDATES.md) and check its commands against the owning scripts and Compose files.
-- Contribution workflow and plugin releases: [CONTRIBUTING.md](CONTRIBUTING.md) and [MAINTAINING.md](docs/MAINTAINING.md). Never edit `plugins/` or the plugin version in a PR.
+- Contribution workflow and plugin releases: [CONTRIBUTING.md](CONTRIBUTING.md) and [MAINTAINING.md](docs/MAINTAINING.md). Never edit `plugins/` or `plugin-versions.json` in a PR.
 - Apply these rules to new code and the responsibility being changed. Existing violations are not permission to spread them. Keep broader cleanup separate unless required for the requested behavior.
 
 ## Stack and file ownership

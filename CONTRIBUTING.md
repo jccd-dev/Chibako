@@ -29,13 +29,19 @@ data, personal paths and host configuration out of commits.
 
 ## Agent memory plugins
 
-The committed `plugins/` directory and the plugin version are generated **after**
-merge by the "Plugin release" workflow. In your PR:
+Chibako ships three plugin targets: Claude Code, Codex and Hermes. The committed
+`plugins/<target>/` directories and each target's version in `plugin-versions.json`
+are generated **after** merge by the "Plugin release" workflow. In your PR:
 
-- Change the sources only: `scripts/agent-memory.ts`, `skills/`,
-  `integrations/agent-memory/`.
-- Don't edit `plugins/` or the version in `plugin.json`, and don't run
+- Change the sources only. Shared memory behavior lives in `scripts/memory/`; each
+  host's adapter (native hook input/output, config file, setup rules) lives in
+  `scripts/memory/<target>/`, and its package metadata in the matching entry of
+  `scripts/build-memory-plugins.mjs`. Skills are in `skills/`; guides and the Hermes
+  Python plugin in `integrations/agent-memory/`.
+- A fix for one host belongs in that host's adapter, so the other packages stay
+  unchanged. Shared changes are released for every target whose output changes.
+- Don't edit `plugins/` or `plugin-versions.json`, and don't run
   `npm run publish:memory-plugins` for your PR. The "Plugin output" check fails if
-  `plugins/` is in the diff; undo it with `git checkout origin/main -- plugins`.
-- A note saying **"Plugin changes detected"** on a green check is normal. There is
-  nothing for you to do; the maintainer chooses the version at merge.
+  they are in the diff; undo it with `git checkout origin/main -- plugins plugin-versions.json`.
+- A note saying **"Plugin changes detected"** on a green check is normal. It names
+  the affected targets; the maintainer chooses the version level at merge.

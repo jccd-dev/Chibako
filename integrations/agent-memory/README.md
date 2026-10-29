@@ -14,6 +14,19 @@ This page documents the protocol and advanced manual integration. Packaged insta
 do not need the environment variables or hook examples below. Do not enable both
 manual and packaged hooks for the same runtime profile.
 
+## Packages and versions
+
+Each host has its own package and version: `plugins/claude`, `plugins/codex` and
+`plugins/hermes`, versioned in `plugin-versions.json`. A package bundles only its
+own host adapter (`scripts/memory/<host>/`) and the shared runner, so a fix for one
+host does not change or re-release the others. Updating through your existing
+installation source keeps the plugin name, private profile, credentials, session
+state, pending checkpoints and receipts; their locations and formats are unchanged.
+Publishing a package never installs it or changes a running vault.
+
+Package tests use synthetic host events. They do not show that a particular host
+version loads the hooks or delivers context; verify that in the host itself.
+
 ## Shared contract
 
 The server must receive private deployment configuration:

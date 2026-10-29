@@ -67,15 +67,19 @@ jobs:
         run: |
           set -euo pipefail
           # The pull_request checkout is a merge commit: HEAD^1 is the base branch.
-          edited="$(git diff --name-only HEAD^1 HEAD -- plugins)"
+          generated=(plugins)
+          # plugin-versions.json is release-managed once it exists on the base branch.
+          if git cat-file -e HEAD^1:plugin-versions.json 2>/dev/null; then generated+=(plugin-versions.json); fi
+          edited="$(git diff --name-only HEAD^1 HEAD -- "${generated[@]}")"
           if [[ -n "$edited" ]]; then
-            echo "::error title=Remove plugins/ from this PR::plugins/ is generated after merge. Undo it with: git checkout origin/main -- plugins"
+            echo "::error title=Remove plugins/ from this PR::plugins/ and plugin-versions.json are generated after merge. Undo it with: git checkout origin/main -- plugins plugin-versions.json"
             echo "$edited"
             exit 1
           fi
           npm run publish:memory-plugins
-          if [[ -n "$(git status --porcelain -- plugins)" ]]; then
-            echo "::notice title=Plugin changes detected::The maintainer picks the plugin version at merge. Nothing for you to do."
+          affected="$(git status --porcelain -- plugins | awk '{print $2}' | cut -d/ -f2 | sort -u | paste -sd, - | sed 's/,/, /g')"
+          if [[ -n "$affected" ]]; then
+            echo "::notice title=Plugin changes detected::Affected plugin targets: ${affected}. Each is versioned and released after merge. Nothing for you to do."
           fi
 
   pull-request-image:
