@@ -89,7 +89,7 @@ while keeping its cost low:
   checkpoint format (about 300 tokens, down from about 1,650). Agents fetch the Knowledge Schema only
   before retaining knowledge or writing other notes.
 - **Activity gate:** hooks count user turns and tool calls locally. Trivial
-  sessions cost nothing extra. After 4 user turns or 10 tool calls since the
+  sessions cost nothing extra. After 10 tool calls for Codex (chat turns alone never qualify), or 4 user turns or 10 tool calls for other hosts since the
   last save (configurable per profile), the agent is asked once to save.
 - **Session-centric saves:** the agent updates one checkpoint per session plus a
   short status line. The server upserts its line into "Agent Now"
