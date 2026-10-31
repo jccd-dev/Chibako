@@ -3,6 +3,7 @@ import { getDb, now } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { parseFinance as parse, financeMutation } from "./mutations";
 import { exactCents, decimalCents as openingCents } from "./money";
+import { canSpendFromAccount, accountSummaryBucket } from "./account-policy";
 import { localCalendarDate } from "./presentation";
 import {
   createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema,
@@ -47,8 +48,8 @@ export function readAccountBalance(id: string): FinanceAccount {
   return accountFromRow(row);
 }
 
-export function requireSufficientFunds(balanceCents: number | bigint, outgoingCents: number | bigint) {
-  if (BigInt(balanceCents) < BigInt(outgoingCents)) throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
+export function requireSufficientFunds(account: Pick<FinanceAccount, "kind"> & { balance_cents: number | bigint }, outgoingCents: number | bigint) {
+  if (!canSpendFromAccount(account, outgoingCents)) throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
 }
 
 export function getAccount(actor: FinanceActor, id: string): FinanceAccount {
@@ -89,24 +90,24 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
     const totals = { money: 0n, assets: 0n };
     const summary: FinanceSummary = { currency: "PHP", money: { balance_cents: 0, account_count: 0 }, assets: { balance_cents: 0, account_count: 0 } };
     for (const row of rows) {
-      const kind = row.kind === "money" ? "money" : "assets";
+      const kind = accountSummaryBucket(row.kind);
       totals[kind] += row.opening_balance_cents + row.maintaining_balance_cents;
       summary[kind].account_count++;
     }
     const effects = db.prepare("SELECT a.kind, t.type, t.amount_cents FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id WHERE t.reverted = 0 AND a.include_in_summary = 1")
-      .safeIntegers().iterate() as Iterable<{ kind: string; type: string; amount_cents: bigint }>;
-    for (const effect of effects) totals[effect.kind === "money" ? "money" : "assets"] += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
+      .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; type: string; amount_cents: bigint }>;
+    for (const effect of effects) totals[accountSummaryBucket(effect.kind)] += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
     const adjustments = db.prepare("SELECT a.kind, m.amount_cents FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.type != 'transfer' AND m.reverted = 0 AND a.include_in_summary = 1")
-      .safeIntegers().iterate() as Iterable<{ kind: string; amount_cents: bigint }>;
-    for (const effect of adjustments) totals[effect.kind === "money" ? "money" : "assets"] += effect.amount_cents;
+      .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; amount_cents: bigint }>;
+    for (const effect of adjustments) totals[accountSummaryBucket(effect.kind)] += effect.amount_cents;
     const transfers = db.prepare(`SELECT m.amount_cents, source.include_in_summary AS source_included, destination.include_in_summary AS destination_included
       FROM finance_movements m JOIN finance_accounts source ON source.id = m.account_id
       JOIN finance_accounts destination ON destination.id = m.destination_account_id WHERE m.type = 'transfer' AND m.reverted = 0`)
       .safeIntegers().iterate() as Iterable<{ amount_cents: bigint; source_included: bigint; destination_included: bigint }>;
     for (const transfer of transfers) totals.money += transfer.amount_cents * (transfer.destination_included - transfer.source_included);
     const refunds = db.prepare("SELECT a.kind, r.amount_cents FROM finance_refunds r JOIN finance_accounts a ON a.id = r.account_id WHERE r.reverted = 0 AND a.include_in_summary = 1")
-      .safeIntegers().iterate() as Iterable<{ kind: string; amount_cents: bigint }>;
-    for (const refund of refunds) totals[refund.kind === "money" ? "money" : "assets"] += refund.amount_cents;
+      .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; amount_cents: bigint }>;
+    for (const refund of refunds) totals[accountSummaryBucket(refund.kind)] += refund.amount_cents;
     const principal = db.prepare("SELECT m.type, m.amount_cents FROM finance_obligation_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.reverted = 0 AND a.include_in_summary = 1").safeIntegers()
       .iterate() as Iterable<{ type: string; amount_cents: bigint }>;
     for (const effect of principal) totals.money += effect.type === "borrowing" ? effect.amount_cents : -effect.amount_cents;
@@ -143,7 +144,7 @@ export function createAccount(actor: FinanceActor, input: unknown): { account: F
   const { request_id, ...payload } = parse(createAccountSchema, input);
   const cents = openingCents(payload.opening_balance);
   const maintaining = openingCents(payload.maintaining_balance);
-  if (payload.kind === "asset" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
+  if (payload.kind !== "money" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
   const { account_group, include_in_summary, maintaining_balance, ...core } = payload;
   // Preserve retry fingerprints for accounts created before settings were added.
   const requestPayload = { ...core, ...(account_group ? { account_group } : {}), ...(!include_in_summary ? { include_in_summary } : {}), ...(maintaining !== 0 ? { maintaining_balance } : {}) };
@@ -165,7 +166,7 @@ export function updateAccount(actor: FinanceActor, id: string, input: unknown): 
     if (patch.version !== before.version) throw new FinanceError("Account changed; refresh before editing", 409, "version_conflict");
     if (before.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Account version limit reached", 409, "version_conflict");
     const maintaining = patch.maintaining_balance === undefined ? before.maintaining_balance_cents : openingCents(patch.maintaining_balance);
-    if (before.kind === "asset" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
+    if (before.kind !== "money" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
     getDb().prepare("UPDATE finance_accounts SET name = ?, archived = ?, account_group = ?, include_in_summary = ?, maintaining_balance_cents = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
       .run(patch.name ?? before.name, Number(patch.archived ?? before.archived), patch.account_group ?? before.account_group, Number(patch.include_in_summary ?? before.include_in_summary), maintaining, now(), id, before.version);
     return { before, after: readAccountBalance(id) };

@@ -124,7 +124,7 @@ export function createGoal(actor: FinanceActor, input: unknown): { goal: Finance
     const linked = payload.linked_account_id ? activeMoneyAccount(payload.linked_account_id) : null;
     const initialCents = linked ? Math.max(0, linked.balance_cents) : 0;
     if (linked && initialCents > 0) {
-      requireSufficientFunds(BigInt(linked.balance_cents) - BigInt(reservedAccountCents(linked.id)), initialCents);
+      requireSufficientFunds({ ...linked, balance_cents: BigInt(linked.balance_cents) - BigInt(reservedAccountCents(linked.id)) }, initialCents);
     }
     const id = randomUUID();
     const timestamp = now();
@@ -180,7 +180,7 @@ function recordGoalMovement(goal: FinanceGoal, type: "deposit" | "withdrawal" | 
     if (sourceId) {
       const source = readAccountBalance(sourceId);
       const ownHolding = sourceId === goal.linked_account_id ? goal.saved_cents : 0;
-      requireSufficientFunds(BigInt(source.balance_cents) - BigInt(reservedAccountCents(sourceId)) + BigInt(ownHolding), amount);
+      requireSufficientFunds({ ...source, balance_cents: BigInt(source.balance_cents) - BigInt(reservedAccountCents(sourceId)) + BigInt(ownHolding) }, amount);
       exactCents(BigInt(source.balance_cents) - BigInt(amount));
     }
     if (destinationId) exactCents(BigInt(activeMoneyAccount(destinationId).balance_cents) + BigInt(amount));

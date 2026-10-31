@@ -136,7 +136,7 @@ export function postPlan(actor: FinanceActor, id: string, input: unknown): Satis
     if (payload.obligation_version !== undefined || payload.fee || payload.cash_activity_id || payload.cash_activity_version !== undefined)
       throw new FinanceError("Payment review fields require an obligation reminder", 400, "invalid_input");
     const account = validatePlanAccount(payload.account_id);
-    if (before.type === "expense") requireSufficientFunds(account.balance_cents, amount);
+    if (before.type === "expense") requireSufficientFunds(account, amount);
     validateTransactionClassifications({ ...before, tag_ids: before.tag_ids ?? [] });
     const transactionId = insertTransaction({ type: before.type, account_id: payload.account_id, amount_cents: amount,
       transaction_date: payload.transaction_date, category_id: before.category_id, subcategory_id: before.subcategory_id,

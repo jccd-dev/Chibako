@@ -1,3 +1,4 @@
+import { canSpendFromAccount } from "./account-policy";
 import { decimalCents } from "./money";
 import { formatPHP } from "./presentation";
 import type { FinanceAccount } from "./types";
@@ -24,7 +25,7 @@ export function financeBalanceShortfall(input: {
     } catch { /* Submit validation explains unparseable fees. */ }
   }
   const account = input.accounts.find(row => row.id === input.account_id);
-  if (!account || account.kind !== "money" || account.balance_cents >= required) return null;
+  if (!account || account.kind !== "money" || canSpendFromAccount(account, required)) return null;
   return {
     account,
     available_cents: account.balance_cents,

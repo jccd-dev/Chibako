@@ -46,7 +46,7 @@ export function postTransfer(actor: FinanceActor, input: unknown): PostedMovemen
   return financeMutation(actor, request_id, "transfer.post", note_ids.length ? { ...payload, note_ids } : payload, () => {
     const source = readAccountBalance(payload.source_account_id), destination = readAccountBalance(payload.destination_account_id);
     if ([source, destination].some(account => account.kind !== "money" || account.archived)) throw new FinanceError("Choose two active money accounts", 400, "invalid_account");
-    requireSufficientFunds(source.balance_cents, BigInt(amount) + BigInt(feeAmount));
+    requireSufficientFunds(source, BigInt(amount) + BigInt(feeAmount));
     validateTransactionClassifications({ type: "expense", category_id: payload.fee?.category_id ?? null, subcategory_id: payload.fee?.subcategory_id ?? null, tag_ids: payload.tag_ids });
     const balances = [
       { account_id: source.id, balance_cents: exactCents(BigInt(source.balance_cents) - BigInt(amount) - BigInt(feeAmount)) },
