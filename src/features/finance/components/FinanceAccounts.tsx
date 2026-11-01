@@ -128,7 +128,7 @@ export function FinanceAccounts({
             aria-label={
               groupError
                 ? group.name
-                : `${group.name} ${group.kind === "asset" ? "assets" : "debit accounts"}`
+                : `${group.name} ${{ money: "debit accounts", asset: "assets", credit: "credit accounts" }[group.kind]}`
             }
           >
             <div className="flex flex-wrap items-end justify-between gap-2">
@@ -140,7 +140,7 @@ export function FinanceAccounts({
                   {group.accounts.length}{" "}
                   {group.accounts.length === 1 ? "account" : "accounts"}
                   {!groupError &&
-                    ` / ${group.kind === "asset" ? "Assets" : "Debit"}`}
+                    ` / ${{ money: "Debit", asset: "Assets", credit: "Credit" }[group.kind]}`}
                 </p>
               </div>
               {!groupError && (
@@ -176,19 +176,22 @@ export function FinanceAccounts({
                     <CardDescription>
                       {account.archived
                         ? "Archived"
-                        : account.kind === "asset"
-                          ? "Asset"
-                          : "Debit"}
+                        : { money: "Debit", asset: "Asset", credit: "Credit" }[account.kind]}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-xs text-muted-foreground">{account.kind === "money" ? "Net balance" : "Current value"}</p>
+                    <p className="text-xs text-muted-foreground">{account.kind === "asset" ? "Current value" : "Net balance"}</p>
                     <p className="mt-1 break-words text-2xl font-semibold tabular-nums">
                       {formatPHP(account.balance_cents)}
                     </p>
                     {account.kind === "money" && (
                       <p className="mt-1 text-xs text-muted-foreground tabular-nums">
                         Spendable this month {formatPHP(account.spendable_cents)}
+                      </p>
+                    )}
+                    {account.kind === "credit" && (
+                      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                        Used {formatPHP(account.used_credit_cents ?? 0)} · Available {formatPHP(account.available_credit_cents ?? 0)}
                       </p>
                     )}
                   </CardContent>
@@ -198,7 +201,7 @@ export function FinanceAccounts({
                         ? "In summary"
                         : "Excluded from summary"}
                     </p>
-                    {account.balance_cents < 0 && (
+                    {account.balance_cents < 0 && account.kind !== "credit" && (
                       <p className="flex items-center gap-1 text-xs text-destructive">
                         <IconAlertTriangle
                           className="size-3.5"

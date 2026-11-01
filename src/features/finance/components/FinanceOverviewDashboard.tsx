@@ -251,11 +251,11 @@ export function FinanceOverviewDashboard({
               className="text-3xl font-semibold tabular-nums"
               data-testid="finance-money-total"
             >
-              {money(finance.summary?.money.balance_cents ?? 0)}
+              {money((finance.summary?.money.balance_cents ?? 0) + (finance.summary?.credit.balance_cents ?? 0))}
             </CardTitle>
             <CardDescription>
               Net balance ·{" "}
-              {countLabel(finance.summary?.money.account_count ?? 0, "account")}
+              {countLabel((finance.summary?.money.account_count ?? 0) + (finance.summary?.credit.account_count ?? 0), "account")}
             </CardDescription>
             <CardAction>
               <ToggleGroup

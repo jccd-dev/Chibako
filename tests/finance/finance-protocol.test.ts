@@ -175,3 +175,55 @@ test("MCP local trust stays local and keyed catalogs cannot widen finance scopes
     } finally { await client.close(); await server.close(); }
   }
 });
+
+test("REST and MCP create, read and edit credit accounts with the same fields and errors", async () => {
+  const principal = createApiKey("Credit accounts", ["finance:read", "finance:manage"]);
+  const card = { ...opening, name: "Visa", kind: "credit", opening_balance: "-2500", credit_limit: "10000", statement_day: 25, due_mode: "fixed_day", due_value: 15 };
+  const restCreated = await (await create(rest(principal.key, { ...card, request_id: "rest-credit" }), context)).json();
+  const mcpCreated = await rpc(principal.key, "tools/call", { name: "create_finance_account", arguments: { ...card, request_id: "mcp-credit" } });
+  assert.equal(mcpCreated.result.isError, undefined);
+  const strip = (account: Record<string, unknown>) => Object.fromEntries(Object.entries(account).filter(([key]) => !["id", "created_at", "updated_at"].includes(key)));
+  assert.deepEqual(strip(mcpCreated.result.structuredContent.account), strip(restCreated.account));
+  assert.deepEqual(
+    [restCreated.account.credit_limit_cents, restCreated.account.used_credit_cents, restCreated.account.available_credit_cents, restCreated.account.statement_day, restCreated.account.due_mode, restCreated.account.due_value],
+    [1000000, 250000, 750000, 25, "fixed_day", 15],
+  );
+  const mcpRead = await rpc(principal.key, "tools/call", { name: "get_finance_account", arguments: { id: restCreated.account.id } });
+  assert.deepEqual(mcpRead.result.structuredContent.account, restCreated.account);
+
+  const restSummary = await (await summary(rest(principal.key), context)).json();
+  assert.deepEqual(restSummary.credit, { balance_cents: -500000, account_count: 2 });
+  assert.deepEqual((await rpc(principal.key, "tools/call", { name: "get_finance_summary", arguments: {} })).result.structuredContent, restSummary);
+
+  for (const [bad, message] of [
+    [{ ...card, credit_limit: undefined }, "invalid_input: Enter a positive credit limit"],
+    [{ ...opening, credit_limit: "100" }, "invalid_input: Credit settings are only available for credit accounts"],
+    [{ ...card, statement_day: undefined, due_mode: "after_statement", due_value: 20 }, "invalid_input: Set a statement day to count days after the statement"],
+  ] as const) {
+    const restRejected = await create(rest(principal.key, { ...bad, request_id: "rest-bad" }), context);
+    assert.equal(restRejected.status, 400);
+    const restError = await restRejected.json();
+    assert.equal(`${restError.code}: ${restError.error}`, message);
+    const mcpRejected = await rpc(principal.key, "tools/call", { name: "create_finance_account", arguments: { ...bad, request_id: "mcp-bad" } });
+    assert.equal(mcpRejected.result.isError, true);
+    assert.equal(mcpRejected.result.content[0].text, `error: ${message}`);
+  }
+  for (const malformed of [{ credit_limit: "-1" }, { statement_day: 32 }, { due_mode: "weekly" }]) {
+    assert.equal((await create(rest(principal.key, { ...card, ...malformed, request_id: "rest-malformed" }), context)).status, 400);
+    assert.ok((await rpc(principal.key, "tools/call", { name: "create_finance_account", arguments: { ...card, ...malformed, request_id: "mcp-malformed" } })).result.isError);
+  }
+  assert.equal((await (await list(rest(principal.key), context)).json()).total, 2);
+
+  const restEdit = await update(new Request(`https://chibako.test/api/finance/accounts/${restCreated.account.id}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${principal.key}`, "content-type": "application/json" },
+    body: JSON.stringify({ request_id: "rest-credit-edit", version: 1, credit_limit: "5000", statement_day: null, due_mode: null, due_value: null }),
+  }), { params: Promise.resolve({ id: restCreated.account.id }) });
+  const mcpEdit = await rpc(principal.key, "tools/call", { name: "update_finance_account", arguments: {
+    id: mcpCreated.result.structuredContent.account.id, request_id: "mcp-credit-edit", version: 1, credit_limit: "5000", statement_day: null, due_mode: null, due_value: null,
+  } });
+  assert.deepEqual(strip(mcpEdit.result.structuredContent.account), strip((await restEdit.json()).account));
+  assert.equal(mcpEdit.result.structuredContent.account.available_credit_cents, 250000);
+  const stale = await rpc(principal.key, "tools/call", { name: "update_finance_account", arguments: { id: restCreated.account.id, request_id: "mcp-credit-stale", version: 1, credit_limit: "9000" } });
+  assert.equal(stale.result.content[0].text, "error: version_conflict: Account changed; refresh before editing");
+});

@@ -32,6 +32,7 @@ import { decimalPHP, financeDrawerFooter, financeSheet, formatPHP } from "../pre
 import { FinanceDateInput } from "./FinanceDateInputs";
 import { FinanceAccountHistory } from "./FinanceAccountHistory";
 import { MoneyInput } from "./MoneyInput";
+import { FinanceCreditFields } from "./FinanceCreditFields";
 
 export function FinanceAccountPanel({
   selected,
@@ -52,6 +53,7 @@ export function FinanceAccountPanel({
   const { account, adjustment, busy } = editor;
   const current = adjustment.account ?? account;
   const asset = editor.kind === "asset";
+  const credit = editor.kind === "credit";
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (await editor.save()) onClose();
@@ -93,7 +95,7 @@ export function FinanceAccountPanel({
               <div>
                 <dt className="text-muted-foreground">Type</dt>
                 <dd className="mt-1">
-                  {asset ? "Asset" : "Debit"}
+                  {asset ? "Asset" : credit ? "Credit" : "Debit"}
                   {account.archived ? " / Archived" : ""}
                 </dd>
               </div>
@@ -103,13 +105,30 @@ export function FinanceAccountPanel({
                   {editor.group || "Ungrouped"}
                 </dd>
               </div>
-              <div>
-                <dt className="text-muted-foreground">{asset ? "Opening value" : "Spendable this month"}</dt>
-                <dd className="mt-1 break-words tabular-nums">
-                  {formatPHP(asset ? account.opening_balance_cents : current?.spendable_cents ?? 0)}
-                </dd>
-              </div>
-              {!asset && (
+              {credit ? (
+                <>
+                  <div>
+                    <dt className="text-muted-foreground">Credit limit</dt>
+                    <dd className="mt-1 tabular-nums">{formatPHP(current?.credit_limit_cents ?? 0)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Used credit</dt>
+                    <dd className="mt-1 tabular-nums">{formatPHP(current?.used_credit_cents ?? 0)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Available credit</dt>
+                    <dd className="mt-1 tabular-nums">{formatPHP(current?.available_credit_cents ?? 0)}</dd>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <dt className="text-muted-foreground">{asset ? "Opening value" : "Spendable this month"}</dt>
+                  <dd className="mt-1 break-words tabular-nums">
+                    {formatPHP(asset ? account.opening_balance_cents : current?.spendable_cents ?? 0)}
+                  </dd>
+                </div>
+              )}
+              {editor.kind === "money" && (
                 <>
                   <div>
                     <dt className="text-muted-foreground">Maintaining balance</dt>
@@ -180,16 +199,18 @@ export function FinanceAccountPanel({
                   onChange={(event) => {
                     if (
                       event.target.value === "money" ||
-                      event.target.value === "asset"
+                      event.target.value === "asset" ||
+                      event.target.value === "credit"
                     )
                       editor.setKind(event.target.value);
                   }}
                 >
                   <NativeSelectOption value="money">Debit</NativeSelectOption>
                   <NativeSelectOption value="asset">Asset</NativeSelectOption>
+                  <NativeSelectOption value="credit">Credit</NativeSelectOption>
                 </NativeSelect>
                 <FieldDescription>
-                  Assets track value separately from debit balances.
+                  Assets track value separately from debit balances. Credit tracks a card&apos;s limit and what you owe.
                 </FieldDescription>
               </Field>
               <Field>
@@ -235,7 +256,8 @@ export function FinanceAccountPanel({
                   </FieldDescription>
                 </div>
               </Field>
-              {!asset && (
+              {credit && <FinanceCreditFields editor={editor} creating={!account} busy={busy} />}
+              {editor.kind === "money" && (
                 <Field>
                   <FieldLabel htmlFor="finance-maintaining">Maintaining balance (PHP)</FieldLabel>
                   <MoneyInput
@@ -254,7 +276,7 @@ export function FinanceAccountPanel({
                 </Field>
               )}
               {!account ? (
-                <Field>
+                credit ? null : <Field>
                   <FieldLabel htmlFor="finance-opening">
                     Opening balance (PHP)
                   </FieldLabel>
@@ -285,11 +307,12 @@ export function FinanceAccountPanel({
                       disabled
                     />
                     <FieldDescription>
-                      Fixed opening. Change the current balance below to record
-                      a dated difference.
+                      {credit
+                        ? "Fixed opening. A negative amount is what was already owed."
+                        : "Fixed opening. Change the current balance below to record a dated difference."}
                     </FieldDescription>
                   </Field>
-                  {!account.archived && (
+                  {!account.archived && !credit && (
                     <>
                       {adjustment.loadError ? (
                         <Alert>

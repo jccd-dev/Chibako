@@ -234,3 +234,32 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
   expect(reopened.plan.transaction_id).toBeNull();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("credit accounts show card fields when added and list used and available credit", async ({ page }) => {
+  await authenticate(page);
+  await openFinanceTab(page, "accounts");
+  const name = `TEST CREDIT card ${randomUUID().slice(0, 8)}`;
+  await page.getByRole("button", { name: "Add account", exact: true }).click();
+  await page.getByLabel("Account name", { exact: true }).fill(name);
+  await expect(page.getByLabel("Credit limit (PHP)", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Account type", { exact: true }).selectOption("credit");
+  await expect(page.getByLabel("Opening balance (PHP)", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Maintaining balance (PHP)", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Credit limit (PHP)", { exact: true }).fill("10000");
+  await page.getByRole("checkbox", { name: "I already owe on this card", exact: true }).check();
+  await page.getByLabel("Existing owed balance (PHP)", { exact: true }).fill("2500");
+  await page.getByLabel("Statement day", { exact: true }).selectOption("25");
+  await page.getByRole("button", { name: "Days after statement", exact: true }).click();
+  await page.getByLabel("Days after statement", { exact: true }).selectOption("21");
+  await expect(page.getByRole("status").filter({ hasText: "Used credit" })).toContainText("Used credit PHP 2,500.00 · Available PHP 7,500.00");
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const card = page.locator("[data-slot=card]").filter({ has: page.getByRole("button", { name: "View " + name, exact: true }) });
+  await expect(card).toContainText("Credit");
+  await expect(card).toContainText("-PHP 2,500.00");
+  await expect(card).toContainText("Used PHP 2,500.00 · Available PHP 7,500.00");
+  await expect(card).not.toContainText("Negative balance");
+  const { accounts } = await (await page.request.get("/api/finance/accounts?kind=credit&limit=100")).json();
+  const saved = accounts.find((row: { name: string }) => row.name === name);
+  expect([saved.statement_day, saved.due_mode, saved.due_value, saved.credit_limit_cents]).toEqual([25, "after_statement", 21, 1000000]);
+});

@@ -534,11 +534,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: listAccountsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listAccounts(actor, args) })));
     server.registerTool("get_finance_account", {
-      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version.",
+      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version. Credit accounts also return credit_limit_cents, used_credit_cents, available_credit_cents and statement/due settings; a negative balance is the amount owed.",
       inputSchema: getAccountSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ account: getAccount(actor, args.id) })));
     server.registerTool("get_finance_summary", {
-      title: "Finance summary", description: "Separate money and asset totals in PHP integer cents, including archived holdings. Openings do not count as income or spending.",
+      title: "Finance summary", description: "Separate money, asset and credit totals in PHP integer cents, including archived holdings. Credit balances are negative when owed; net balance is money plus credit, and credit is never an asset. Openings do not count as income or spending.",
       inputSchema: z.object({}).strict(), annotations: READ_ONLY,
     }, () => financeResult("finance:read", actor => ({ ...getFinanceSummary(actor) })));
     server.registerTool("get_finance_overview", {
@@ -688,11 +688,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: updateClassificationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateClassification(actor, id, args)));
     server.registerTool("create_finance_account", {
-      title: "Create finance account", description: "Create a PHP money (Debit in the UI) or asset account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Optional account_group and include_in_summary (default true). Requires request_id; identical retries return the original account.",
+      title: "Create finance account", description: "Create a PHP money (Debit in the UI), asset, or credit (card) account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Credit accounts require a positive credit_limit and take an existing owed amount as a negative opening_balance; optional statement_day (1-31) and due rule: due_mode fixed_day with due_value 1-31, or after_statement with due_value 1-60 days (needs statement_day). Credit fields are rejected on other kinds. Optional account_group and include_in_summary (default true). Requires request_id; identical retries return the original account.",
       inputSchema: createAccountSchema, annotations,
     }, args => financeResult("finance:manage", actor => createAccount(actor, args)));
     server.registerTool("update_finance_account", {
-      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, or edit maintaining_balance on a money account. Changing maintaining_balance changes net balance by the same difference. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
+      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, edit maintaining_balance on a money account, or edit credit_limit, statement_day and due_mode/due_value on a credit account (null clears statement day or due rule). Changing maintaining_balance changes net balance by the same difference. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
       inputSchema: updateAccountSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateAccount(actor, id, args)));
   }
