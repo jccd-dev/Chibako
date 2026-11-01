@@ -42,3 +42,12 @@ test("returns null for missing, unparseable, or non-outgoing inputs", () => {
   assert.equal(financeBalanceShortfall({ accounts: [account(1)], account_id: "missing", amount: "50" }), null);
   assert.equal(financeBalanceShortfall({ accounts: [account(1, { kind: "asset" })], account_id: "cash", amount: "50" }), null);
 });
+
+test("credit accounts warn against available credit, not cash balance", () => {
+  const card = account(-2500, { id: "card", name: "Visa", kind: "credit", credit_limit_cents: 10000 });
+  assert.equal(financeBalanceShortfall({ accounts: [card], account_id: "card", amount: "75" }), null);
+  const result = financeBalanceShortfall({ accounts: [card], account_id: "card", amount: "75.01", subject: "expense" });
+  assert.ok(result);
+  assert.equal(result.available_cents, 7500);
+  assert.equal(result.message, "Over credit limit: Visa has PHP 75.00 available credit, and this expense needs PHP 75.01. Reduce the amount or choose another account.");
+});

@@ -68,7 +68,9 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
   const cashbackAmount = payload.cashback ? cashbackCents(amount, payload.cashback) : 0;
   return financeMutation(actor, request_id, "transaction.post", note_ids.length ? { ...payload, note_ids } : payload, () => {
     const account = readAccountBalance(payload.account_id);
-    if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
+    if (account.archived || !(account.kind === "money" || (account.kind === "credit" && payload.type === "expense"))) {
+      throw new FinanceError(payload.type === "expense" ? "Choose an active money or credit account" : "Choose an active money account", 400, "invalid_account");
+    }
     if (payload.type === "expense") requireSufficientFunds(account, amount);
     validateTransactionClassifications(payload);
     const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)) + BigInt(cashbackAmount));

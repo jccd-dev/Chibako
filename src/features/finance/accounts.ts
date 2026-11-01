@@ -53,8 +53,10 @@ export function readAccountBalance(id: string): FinanceAccount {
   return accountFromRow(row);
 }
 
-export function requireSufficientFunds(account: Pick<FinanceAccount, "kind"> & { balance_cents: number | bigint }, outgoingCents: number | bigint) {
-  if (!canSpendFromAccount(account, outgoingCents)) throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
+export function requireSufficientFunds(account: Pick<FinanceAccount, "kind" | "credit_limit_cents"> & { balance_cents: number | bigint }, outgoingCents: number | bigint) {
+  if (canSpendFromAccount(account, outgoingCents)) return;
+  if (account.kind === "credit") throw new FinanceError("This exceeds the available credit on this card", 409, "credit_limit_exceeded");
+  throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
 }
 
 export function getAccount(actor: FinanceActor, id: string): FinanceAccount {
@@ -105,11 +107,15 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
     const adjustments = db.prepare("SELECT a.kind, m.amount_cents FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.type != 'transfer' AND m.reverted = 0 AND a.include_in_summary = 1")
       .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; amount_cents: bigint }>;
     for (const effect of adjustments) totals[accountSummaryBucket(effect.kind)] += effect.amount_cents;
-    const transfers = db.prepare(`SELECT m.amount_cents, source.include_in_summary AS source_included, destination.include_in_summary AS destination_included
+    const transfers = db.prepare(`SELECT m.amount_cents, source.kind AS source_kind, source.include_in_summary AS source_included,
+      destination.kind AS destination_kind, destination.include_in_summary AS destination_included
       FROM finance_movements m JOIN finance_accounts source ON source.id = m.account_id
       JOIN finance_accounts destination ON destination.id = m.destination_account_id WHERE m.type = 'transfer' AND m.reverted = 0`)
-      .safeIntegers().iterate() as Iterable<{ amount_cents: bigint; source_included: bigint; destination_included: bigint }>;
-    for (const transfer of transfers) totals.money += transfer.amount_cents * (transfer.destination_included - transfer.source_included);
+      .safeIntegers().iterate() as Iterable<{ amount_cents: bigint; source_kind: FinanceAccount["kind"]; source_included: bigint; destination_kind: FinanceAccount["kind"]; destination_included: bigint }>;
+    for (const transfer of transfers) {
+      totals[accountSummaryBucket(transfer.source_kind)] -= transfer.amount_cents * transfer.source_included;
+      totals[accountSummaryBucket(transfer.destination_kind)] += transfer.amount_cents * transfer.destination_included;
+    }
     const refunds = db.prepare("SELECT a.kind, r.amount_cents FROM finance_refunds r JOIN finance_accounts a ON a.id = r.account_id WHERE r.reverted = 0 AND a.include_in_summary = 1")
       .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; amount_cents: bigint }>;
     for (const refund of refunds) totals[accountSummaryBucket(refund.kind)] += refund.amount_cents;

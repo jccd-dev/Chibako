@@ -605,7 +605,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: recordRefundSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...recordRefund(actor, id, args) })));
     server.registerTool("post_finance_transfer", {
-      title: "Transfer money", description: "Atomically move a positive PHP amount between two active money accounts. Optional categorized fee is a linked expense deducted from the source. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
+      title: "Transfer money", description: "Atomically move a positive PHP amount from an active money account to another active money account or to a credit account (paying the card; the purchase was already counted as spending). Credit accounts cannot be a source; the source needs sufficient funds. Optional categorized fee is a linked expense deducted from the source. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
       inputSchema: postTransferSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransfer(actor, args) })));
     server.registerTool("reconcile_finance_account", {
@@ -617,7 +617,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postAdjustmentSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...valueAsset(actor, args) })));
     server.registerTool("post_finance_transaction", {
-      title: "Record income or expense", description: "Post actual PHP activity to an active money account. Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string} atomically records Cashback income to the same account/date. Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking.",
+      title: "Record income or expense", description: "Post actual PHP activity to an active money account; expenses may also be charged to an active credit (card) account up to its available credit (credit_limit_exceeded otherwise). Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string} atomically records Cashback income to the same account/date. Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking.",
       inputSchema: postTransactionSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
   }

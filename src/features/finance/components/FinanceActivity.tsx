@@ -760,11 +760,13 @@ export function FinanceTransactionEntry({
                 {...errorProps(accountKey)}
               >
                 <NativeSelectOption value="">
-                  Choose a money account
+                  {type === "expense" ? "Choose a money or credit account" : "Choose a money account"}
                 </NativeSelectOption>
                 {activity.accounts
                   .filter(
-                    (account) => !account.archived && account.kind === "money",
+                    (account) =>
+                      !account.archived &&
+                      (account.kind === "money" || (type === "expense" && account.kind === "credit")),
                   )
                   .map((account) => (
                     <NativeSelectOption key={account.id} value={account.id}>

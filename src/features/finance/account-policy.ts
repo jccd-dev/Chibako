@@ -1,9 +1,17 @@
 import type { FinanceAccount } from "./types";
 
-type SpendingAccount = Pick<FinanceAccount, "kind"> & { balance_cents: number | bigint };
+type SpendingAccount = Pick<FinanceAccount, "kind" | "credit_limit_cents"> & { balance_cents: number | bigint };
+
+/** Money spends its balance; credit spends its available credit (limit plus signed balance). */
+export function spendableCents(account: SpendingAccount): bigint | null {
+  if (account.kind === "money") return BigInt(account.balance_cents);
+  if (account.kind === "credit" && account.credit_limit_cents !== null) return BigInt(account.credit_limit_cents) + BigInt(account.balance_cents);
+  return null;
+}
 
 export function canSpendFromAccount(account: SpendingAccount, outgoingCents: number | bigint): boolean {
-  return account.kind === "money" && BigInt(account.balance_cents) >= BigInt(outgoingCents);
+  const available = spendableCents(account);
+  return available !== null && available >= BigInt(outgoingCents);
 }
 
 export function accountSummaryBucket(kind: FinanceAccount["kind"]): "money" | "assets" | "credit" {

@@ -17,9 +17,10 @@ function editable(record: FinanceTransaction, version: number) {
   if (record.version !== version || record.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity changed; refresh before editing", 409, "version_conflict");
   if (record.reverted) throw new FinanceError("Reverted activity cannot be changed", 409, "already_reverted");
 }
-function activeAccount(id: string, kind: "money" | "asset") {
+function activeAccount(id: string, kind: "money" | "asset" | "money or credit") {
   const account = readAccountBalance(id);
-  if (account.archived || account.kind !== kind) throw new FinanceError(`Choose an active ${kind} account`, 400, "invalid_account");
+  const allowed = kind === "money or credit" ? account.kind === "money" || account.kind === "credit" : account.kind === kind;
+  if (account.archived || !allowed) throw new FinanceError(`Choose an active ${kind} account`, 400, "invalid_account");
 }
 function linkedFee(record: FinanceTransaction): FinanceTransaction | null {
   return record.fee_transaction_id ? readTransaction(record.fee_transaction_id, true) : null;
@@ -62,7 +63,7 @@ export function recordRefund(actor: FinanceActor, expenseId: string, input: unkn
     editable(expense, payload.version);
     if (expense.obligation_payment) throw new FinanceError("Principal payments cannot be refunded as expense activity", 409, "invalid_refund");
     validateRefundLimit(expense, amount);
-    activeAccount(payload.account_id, "money");
+    activeAccount(payload.account_id, "money or credit");
     const id = randomUUID(), timestamp = now();
     getDb().prepare("INSERT INTO finance_refunds (id,expense_id,account_id,amount_cents,transaction_date,text,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
       .run(id, expense.id, payload.account_id, amount, payload.transaction_date, payload.text, timestamp, timestamp);
@@ -119,7 +120,10 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
   const { request_id, ...patch } = parseFinance(correctActivitySchema, input);
   return financeMutation(actor, request_id, "activity.correct", { id, ...patch }, () => {
     const before = readTransaction(id, true), fee = linkedFee(before), cashback = linkedCashback(before);
-    if (before.cashback_expense_id) throw new FinanceError("Correct the original expense to change its cashback together", 409, "linked_activity");
+    // Cashback may only move to the date the bank credited it; amount and account follow the expense.
+    if (before.cashback_expense_id && Object.keys(patch).some(key => !["version", "transaction_date", "text"].includes(key))) {
+      throw new FinanceError("Correct the original expense to change its cashback together", 409, "linked_activity");
+    }
     editable(before, patch.version);
     const obligation = before.obligation_id ? readObligation(before.obligation_id) : null;
     if (obligation) checkObligationVersion(obligation, patch.obligation_version);
@@ -133,8 +137,8 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     const movement = before.type === "transfer" || before.type === "reconciliation" || before.type === "valuation" || !!obligation;
     if ((before.type !== "transfer" && patch.destination_account_id !== undefined) || (before.type !== "transfer" && !before.obligation_payment && patch.fee !== undefined)) throw new FinanceError("Fields do not apply to this activity", 400, "invalid_input");
     if ((movement || before.type === "refund") && (patch.category_id !== undefined || patch.subcategory_id !== undefined)) throw new FinanceError("This activity inherits or excludes categories", 400, "invalid_category");
-    if (before.linked_record_id && (account !== before.account_id || date !== before.transaction_date)) throw new FinanceError("Correct the linked activity to move its fee together", 409, "linked_activity");
-    if (account !== before.account_id) activeAccount(account, before.type === "valuation" ? "asset" : "money");
+    if (before.linked_record_id && !before.cashback_expense_id && (account !== before.account_id || date !== before.transaction_date)) throw new FinanceError("Correct the linked activity to move its fee together", 409, "linked_activity");
+    if (account !== before.account_id) activeAccount(account, before.type === "valuation" ? "asset" : before.type === "expense" || before.type === "refund" ? "money or credit" : "money");
     if (before.type !== "reconciliation" && before.type !== "valuation" && amount <= 0) throw new FinanceError("Amount must be positive", 400, "invalid_input");
     if (obligation) {
       const delta = BigInt(amount) - BigInt(before.amount_cents);
@@ -155,14 +159,15 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     const db = getDb();
     if (cashback && cashbackAmount !== null) {
       editable(cashback, cashback.version);
+      // Cashback keeps its own credited date unless the expense date itself changes.
       db.prepare("UPDATE finance_transactions SET account_id = ?, transaction_date = ?, amount_cents = ? WHERE id = ?")
-        .run(account, date, cashbackAmount, cashback.id);
+        .run(account, patch.transaction_date === undefined ? cashback.transaction_date : date, cashbackAmount, cashback.id);
       bump(cashback);
     }
     if (before.type === "transfer") {
       const destination = patch.destination_account_id ?? before.destination_account_id!;
       if (account === destination) throw new FinanceError("Choose different accounts", 400, "invalid_account");
-      if (destination !== before.destination_account_id) activeAccount(destination, "money");
+      if (destination !== before.destination_account_id) activeAccount(destination, "money or credit");
       db.prepare("UPDATE finance_movements SET account_id = ?, destination_account_id = ? WHERE id = ?").run(account, destination, id);
     } else if (before.type === "reconciliation" || before.type === "valuation") {
       db.prepare("UPDATE finance_movements SET actual_balance_cents = ? WHERE id = ?").run(exactCents(BigInt(before.compared_balance_cents!) + BigInt(amount)), id);

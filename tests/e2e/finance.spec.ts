@@ -262,4 +262,28 @@ test("credit accounts show card fields when added and list used and available cr
   const { accounts } = await (await page.request.get("/api/finance/accounts?kind=credit&limit=100")).json();
   const saved = accounts.find((row: { name: string }) => row.name === name);
   expect([saved.statement_day, saved.due_mode, saved.due_value, saved.credit_limit_cents]).toEqual([25, "after_statement", 21, 1000000]);
+
+  // Charge the card up to its available credit, then pay it from a money account.
+  const cashName = `TEST CREDIT payer ${randomUUID().slice(0, 8)}`;
+  expect((await page.request.post("/api/finance/accounts", { data: { request_id: randomUUID(), name: cashName, kind: "money", currency: "PHP", opening_balance: "1000" } })).ok()).toBe(true);
+  await page.reload();
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("7500.01");
+  await page.getByLabel("Account", { exact: true }).selectOption({ label: name });
+  await expect(page.getByRole("alert").filter({ hasText: "Over credit limit" })).toContainText(`${name} has PHP 7,500.00 available credit`);
+  await expect(page.getByRole("button", { name: "Save transaction", exact: true })).toBeDisabled();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("100");
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("Used PHP 2,600.00 · Available PHP 7,400.00");
+
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByRole("button", { name: "Transfer", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("600");
+  await expect(page.getByLabel("Source account", { exact: true }).locator("option", { hasText: name })).toHaveCount(0);
+  await page.getByLabel("Source account", { exact: true }).selectOption({ label: cashName });
+  await page.getByLabel("Destination account", { exact: true }).selectOption({ label: name });
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("Used PHP 2,000.00 · Available PHP 8,000.00");
 });

@@ -45,7 +45,10 @@ export function postTransfer(actor: FinanceActor, input: unknown): PostedMovemen
   if (amount <= 0 || (payload.fee && feeAmount <= 0)) throw new FinanceError("Transfer and fee amounts must be positive", 400, "invalid_input");
   return financeMutation(actor, request_id, "transfer.post", note_ids.length ? { ...payload, note_ids } : payload, () => {
     const source = readAccountBalance(payload.source_account_id), destination = readAccountBalance(payload.destination_account_id);
-    if ([source, destination].some(account => account.kind !== "money" || account.archived)) throw new FinanceError("Choose two active money accounts", 400, "invalid_account");
+    // Paying a card is a transfer into it; credit accounts cannot be a transfer source.
+    if (source.archived || destination.archived || source.kind !== "money" || (destination.kind !== "money" && destination.kind !== "credit")) {
+      throw new FinanceError("Choose an active money source and an active money or credit destination", 400, "invalid_account");
+    }
     requireSufficientFunds(source, BigInt(amount) + BigInt(feeAmount));
     validateTransactionClassifications({ type: "expense", category_id: payload.fee?.category_id ?? null, subcategory_id: payload.fee?.subcategory_id ?? null, tag_ids: payload.tag_ids });
     const balances = [
