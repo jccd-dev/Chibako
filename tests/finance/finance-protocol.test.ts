@@ -188,6 +188,9 @@ test("REST and MCP create, read and edit credit accounts with the same fields an
     [restCreated.account.credit_limit_cents, restCreated.account.used_credit_cents, restCreated.account.available_credit_cents, restCreated.account.statement_day, restCreated.account.due_mode, restCreated.account.due_value],
     [1000000, 250000, 750000, 25, "fixed_day", 15],
   );
+  // The existing owed opening balance predates the last statement, so it is all still due on the 15th after it.
+  assert.deepEqual([restCreated.account.statement_balance_cents, restCreated.account.remaining_due_cents], [250000, 250000]);
+  assert.match(restCreated.account.next_due_date, /^\d{4}-\d{2}-15$/);
   const mcpRead = await rpc(principal.key, "tools/call", { name: "get_finance_account", arguments: { id: restCreated.account.id } });
   assert.deepEqual(mcpRead.result.structuredContent.account, restCreated.account);
 

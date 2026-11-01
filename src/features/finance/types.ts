@@ -80,6 +80,13 @@ export interface FinanceAccount {
   due_value: number | null;
   used_credit_cents: number | null;
   available_credit_cents: number | null;
+  /** Last closed statement (credit accounts with a statement day); null otherwise. */
+  statement_date: string | null;
+  /** Amount owed as of statement_date, and what remains after later payments and credits (never below 0). */
+  statement_balance_cents: number | null;
+  remaining_due_cents: number | null;
+  /** Due date of the last statement; null without both a statement day and a due rule. */
+  next_due_date: string | null;
   archived: boolean;
   version: number;
   created_at: number;

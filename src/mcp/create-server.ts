@@ -534,7 +534,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: listAccountsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listAccounts(actor, args) })));
     server.registerTool("get_finance_account", {
-      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version. Credit accounts also return credit_limit_cents, used_credit_cents, available_credit_cents and statement/due settings; a negative balance is the amount owed.",
+      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version. Credit accounts also return credit_limit_cents, used_credit_cents, available_credit_cents, statement/due settings, and statement_date, statement_balance_cents, remaining_due_cents and next_due_date from the last closed statement; a negative balance is the amount owed.",
       inputSchema: getAccountSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ account: getAccount(actor, args.id) })));
     server.registerTool("get_finance_summary", {
@@ -546,7 +546,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: z.object({}).strict(), annotations: READ_ONLY,
     }, () => financeResult("finance:read", actor => ({ ...getFinanceOverview(actor) })));
     server.registerTool("get_finance_attention", {
-      title: "Finance attention queue", description: "Bounded upcoming and overdue plans, obligation due dates, current-month budget overruns and account allocation shortfalls. Text and personal obligation names are omitted; use the linked review capability for detail.",
+      title: "Finance attention queue", description: "Bounded upcoming and overdue plans, obligation due dates, credit card statement amounts still due (title is the card name), current-month budget overruns and account allocation shortfalls. Text and personal obligation names are omitted; use the linked review capability for detail.",
       inputSchema: financeAttentionSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...getFinanceAttention(actor, args) })));
   }

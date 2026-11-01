@@ -27,14 +27,15 @@ export type FinanceAttentionKind =
   | "pending_plan"
   | "obligation_due"
   | "budget_overrun"
-  | "allocation_shortfall";
+  | "allocation_shortfall"
+  | "credit_due";
 
 export interface FinanceAttentionItem {
   id: string;
   kind: FinanceAttentionKind;
   reference_id: string;
   title: string;
-  target: "planning" | "obligations" | "budgets" | "goals";
+  target: "planning" | "obligations" | "budgets" | "goals" | "accounts";
   urgency: "overdue" | "due" | "upcoming" | "warning";
   due_date: string | null;
   amount_cents: number;

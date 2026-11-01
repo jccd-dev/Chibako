@@ -23,7 +23,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { groupAccounts } from "../account-grouping";
-import { formatPHP } from "../presentation";
+import { formatHistoryDate, formatPHP, localCalendarDate } from "../presentation";
 import type { FinanceAccount } from "../types";
 import type { FinanceAccountsController } from "../use-finance-accounts";
 
@@ -192,6 +192,13 @@ export function FinanceAccounts({
                     {account.kind === "credit" && (
                       <p className="mt-1 text-xs text-muted-foreground tabular-nums">
                         Used {formatPHP(account.used_credit_cents ?? 0)} · Available {formatPHP(account.available_credit_cents ?? 0)}
+                      </p>
+                    )}
+                    {account.next_due_date && (
+                      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                        {account.remaining_due_cents
+                          ? `${formatPHP(account.remaining_due_cents)} ${account.next_due_date < localCalendarDate() ? "overdue since" : "due"} ${formatHistoryDate(account.next_due_date)}`
+                          : `Next due ${formatHistoryDate(account.next_due_date)}`}
                       </p>
                     )}
                   </CardContent>

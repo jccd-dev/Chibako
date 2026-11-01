@@ -287,3 +287,41 @@ test("credit accounts show card fields when added and list used and available cr
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(card).toContainText("Used PHP 2,000.00 · Available PHP 8,000.00");
 });
+
+test("a card statement due reminder appears after a charge and clears once paid by transfer", async ({ page }) => {
+  await authenticate(page);
+  await openFinanceTab(page, "accounts");
+  const name = `TEST CREDIT due ${randomUUID().slice(0, 8)}`;
+  const cashName = `TEST CREDIT due payer ${randomUUID().slice(0, 8)}`;
+  // Closing the statement today puts today's charge on it.
+  const statementDay = new Date().getDate();
+  const created = await page.request.post("/api/finance/accounts", { data: { request_id: randomUUID(), name, kind: "credit", currency: "PHP", opening_balance: "0", credit_limit: "5000", statement_day: statementDay, due_mode: "after_statement", due_value: 10 } });
+  expect(created.ok()).toBe(true);
+  const cardId = (await created.json()).account.id;
+  expect((await page.request.post("/api/finance/accounts", { data: { request_id: randomUUID(), name: cashName, kind: "money", currency: "PHP", opening_balance: "1000" } })).ok()).toBe(true);
+  const reminder = async () => ((await (await page.request.get("/api/finance/attention?limit=100")).json()).items as { reference_id: string; kind: string; title: string; amount_cents: number; urgency: string }[])
+    .find(item => item.reference_id === cardId);
+  await page.reload();
+  const card = page.locator("[data-slot=card]").filter({ has: page.getByRole("button", { name: "View " + name, exact: true }) });
+  await expect(card).toContainText("Next due");
+  expect(await reminder()).toBeUndefined();
+
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("300");
+  await page.getByLabel("Account", { exact: true }).selectOption({ label: name });
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("PHP 300.00 due");
+  expect(await reminder()).toMatchObject({ kind: "credit_due", title: name, amount_cents: 30000, urgency: "upcoming" });
+
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByRole("button", { name: "Transfer", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("300");
+  await page.getByLabel("Source account", { exact: true }).selectOption({ label: cashName });
+  await page.getByLabel("Destination account", { exact: true }).selectOption({ label: name });
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("Next due");
+  await expect(card).not.toContainText("PHP 300.00 due");
+  expect(await reminder()).toBeUndefined();
+});
