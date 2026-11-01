@@ -9,10 +9,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/components/ui/native-select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FinancePlanCategories } from "./FinancePlanCategories";
 import { Button } from "@/components/ui/button";
@@ -66,6 +62,7 @@ const principalPaymentLabel = (
       : "Receivable collection"
     : activityLabel(row.type);
 
+import { FinanceAccountChoice } from "./FinanceAccountChoice";
 export function FinanceMonthlyTotals({
   activity,
 }: {
@@ -748,32 +745,20 @@ export function FinanceTransactionEntry({
             </Field>
             {type === "expense" && <FinanceCashbackFields entry={entry} accounts={activity.accounts} disabled={activity.busy} />}
             <Field data-invalid={!!errors[accountKey]}>
-              <FieldLabel htmlFor={`transaction-${accountKey}`}>
+              <FieldLabel id={`transaction-${accountKey}-label`}>
                 {type === "transfer" ? "Source account" : "Account"}
               </FieldLabel>
-              <NativeSelect
-                id={`transaction-${accountKey}`}
-                className="w-full"
+              <FinanceAccountChoice
+                label={type === "transfer" ? "Source account" : "Account"}
                 value={accountId}
+                onChange={setAccountId}
                 disabled={activity.busy}
-                onChange={(event) => setAccountId(event.target.value)}
-                {...errorProps(accountKey)}
-              >
-                <NativeSelectOption value="">
-                  {type === "expense" ? "Choose a money or credit account" : "Choose a money account"}
-                </NativeSelectOption>
-                {activity.accounts
-                  .filter(
-                    (account) =>
-                      !account.archived &&
-                      (account.kind === "money" || (type === "expense" && account.kind === "credit")),
-                  )
-                  .map((account) => (
-                    <NativeSelectOption key={account.id} value={account.id}>
-                      {account.name}
-                    </NativeSelectOption>
-                  ))}
-              </NativeSelect>
+                accounts={activity.accounts.filter(
+                  (account) =>
+                    !account.archived &&
+                    (account.kind === "money" || (type === "expense" && account.kind === "credit")),
+                )}
+              />
               <FieldError id={`error-${accountKey}`}>
                 {errors[accountKey]}
               </FieldError>

@@ -14,6 +14,7 @@ const account = (
   name: id,
   kind,
   account_group: group,
+  logo: "",
   include_in_summary: included,
   currency: "PHP",
   opening_balance_cents: balance,

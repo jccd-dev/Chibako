@@ -19,7 +19,7 @@ let _dbIdentity: string | null = null;
  * as any migration an older image cannot run against, so downgrades are refused
  * before any write. Images that predate the stamp cannot enforce it.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const FINANCE_ACCOUNT_COLUMNS = `
     id TEXT PRIMARY KEY,
@@ -528,6 +528,9 @@ function openDb(): Database.Database {
         ALTER TABLE finance_accounts_v4 RENAME TO finance_accounts;
         CREATE INDEX IF NOT EXISTS idx_finance_accounts_list ON finance_accounts (archived, created_at, id);`);
     }
+    // Schema 5: optional bank/wallet logo id (see features/finance/account-logos.ts). Re-read columns: the v4 rebuild above replaces the table.
+    const logoColumns = db.prepare("PRAGMA table_info(finance_accounts)").all() as Array<{ name: string }>;
+    if (!logoColumns.some(column => column.name === "logo")) db.exec("ALTER TABLE finance_accounts ADD COLUMN logo TEXT NOT NULL DEFAULT ''");
     const goalColumns = db.prepare("PRAGMA table_info(finance_goals)").all() as Array<{ name: string }>;
     if (!goalColumns.some(column => column.name === "linked_account_id")) {
       db.exec(`ALTER TABLE finance_goals ADD COLUMN linked_account_id TEXT REFERENCES finance_accounts(id);

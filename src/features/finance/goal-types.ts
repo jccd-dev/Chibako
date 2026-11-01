@@ -70,6 +70,7 @@ export const moveGoalMoneySchema = z.object({
 export interface FinanceReservationAccount {
   account_id: string;
   account_name: string;
+  logo: string;
   balance_cents: number;
   reserved_cents: number;
   available_cents: number;

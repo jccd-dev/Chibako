@@ -24,6 +24,7 @@ import type { FinanceActivityController } from "@/features/finance/use-finance-a
 import { useFinanceCorrection } from "@/features/finance/use-finance-correction";
 import { formatPHP } from "@/features/finance/presentation";
 
+import { FinanceAccountChoice } from "./FinanceAccountChoice";
 export function FinanceCorrection({
   record,
   activity,
@@ -156,28 +157,20 @@ export function FinanceCorrection({
                 </FieldError>
               </Field>
               <Field data-invalid={!!edit.errors.account_id}>
-                <FieldLabel htmlFor="correction-account">
+                <FieldLabel id="correction-account-label">
                   {refund
                     ? "Receiving account"
                     : record.type === "transfer"
                       ? "Source account"
                       : "Account"}
                 </FieldLabel>
-                <NativeSelect
-                  id="correction-account"
-                  className="w-full"
+                <FinanceAccountChoice
+                  label="Account"
                   value={edit.accountId}
+                  onChange={edit.setAccountId}
                   disabled={blocked || (linked && !refund)}
-                  onChange={(event) => edit.setAccountId(event.target.value)}
-                  {...errorProps("account_id")}
-                >
-                  {accounts.map((account) => (
-                    <NativeSelectOption key={account.id} value={account.id}>
-                      {account.name}
-                      {account.archived ? " (archived)" : ""}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  accounts={accounts}
+                />
                 <FieldError id="correction-error-account_id">
                   {edit.errors.account_id}
                 </FieldError>

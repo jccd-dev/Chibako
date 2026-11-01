@@ -50,6 +50,10 @@ import {
   localCalendarDate,
 } from "@/features/finance/presentation";
 
+import { FinanceAccountChoice } from "./FinanceAccountChoice";
+const goalChoice = (row: { account_id: string; account_name: string; logo: string; balance_cents: number; archived?: boolean }) =>
+  ({ id: row.account_id, name: row.account_name + (row.archived ? " (archived)" : ""), logo: row.logo, balance_cents: row.balance_cents });
+
 export function FinanceGoals({
   focusAccountId,
   onFocusHandled,
@@ -348,26 +352,19 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           </Field>
           {!readOnly && (
             <Field>
-              <FieldLabel htmlFor="goal-linked-account">
+              <FieldLabel id="goal-linked-account-label">
                 Linked account (optional)
               </FieldLabel>
-              <NativeSelect
-                id="goal-linked-account"
-                className="w-full"
-                disabled={disabled}
+              <FinanceAccountChoice
+                label="Linked account (optional)"
+                noneLabel="None (held in the goal)"
                 value={goals.linkedAccount}
-                onChange={(event) => goals.selectLinkedAccount(event.target.value)}
-              >
-                <NativeSelectOption value="">None (held in the goal)</NativeSelectOption>
-                {goals.accounts
+                onChange={goals.selectLinkedAccount}
+                disabled={disabled}
+                accounts={goals.accounts
                   .filter((row) => !row.archived || row.account_id === goal?.linked_account_id)
-                  .map((row) => (
-                    <NativeSelectOption key={row.account_id} value={row.account_id}>
-                      {row.account_name}
-                      {row.archived ? " (archived)" : ""}
-                    </NativeSelectOption>
-                  ))}
-              </NativeSelect>
+                  .map(goalChoice)}
+              />
               <FieldDescription>
                 {goal && goal.saved_cents > 0
                   ? `Changing this link moves the current ${formatPHP(goal.saved_cents)} saved balance to the new backing account. It does not add money.`
@@ -485,24 +482,16 @@ function MovementPanel({ goals, disabled }: { goals: FinanceGoalsController; dis
         </NativeSelect>
       </Field>
       <Field>
-        <FieldLabel htmlFor="goal-movement-account">
+        <FieldLabel id="goal-movement-account-label">
           {deposit ? "Source account" : "Destination account"}
         </FieldLabel>
-        <NativeSelect
-          id="goal-movement-account"
-          className="w-full"
-          disabled={disabled}
+        <FinanceAccountChoice
+          label={deposit ? "Source account" : "Destination account"}
           value={goals.accountId}
-          onChange={(event) => goals.selectAccount(event.target.value)}
-        >
-          <NativeSelectOption value="">Choose an account</NativeSelectOption>
-          {options.map((row) => (
-            <NativeSelectOption key={row.account_id} value={row.account_id}>
-              {row.account_name}
-              {!deposit && row.account_id === linked ? " (linked account)" : ""}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+          onChange={goals.selectAccount}
+          disabled={disabled}
+          accounts={options.map(goalChoice)}
+        />
         {selected && deposit && (
           <FieldDescription>
             {selected.account_name} holds {formatPHP(selected.balance_cents)}.

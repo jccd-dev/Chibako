@@ -64,6 +64,7 @@ import type { FinanceReportsController } from "@/features/finance/use-finance-re
 import type { FinancePlanningController } from "@/features/finance/use-finance-planning";
 import type { FinanceAccount } from "@/features/finance/types";
 import { cn } from "cn";
+import { AccountLogo } from "./AccountLogo";
 
 interface FinanceOverviewDashboardProps {
   finance: ReturnType<typeof useFinanceAccounts>;
@@ -673,15 +674,12 @@ export function FinanceOverviewDashboard({
                       type="button"
                       aria-label={`View ${account.name}`}
                       onClick={() => onOpenAccount(account)}
-                      className="flex items-start justify-between gap-2 text-left after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
+                      className="flex items-center gap-2 text-left after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
                     >
+                      <AccountLogo logo={account.logo} name={account.name} className="size-7" />
                       <span className="min-w-0 flex-1 break-words text-xs font-medium">
                         {account.name}
                       </span>
-                      <IconWallet
-                        className="size-4 shrink-0 text-muted-foreground"
-                        aria-hidden="true"
-                      />
                     </button>
                     <span className="mt-5 text-xs text-muted-foreground">Net balance</span>
                     <span className="mt-1 block break-words text-2xl font-semibold tracking-tight tabular-nums">

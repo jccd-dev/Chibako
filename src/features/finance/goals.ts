@@ -23,7 +23,7 @@ function goalFromRow(row: GoalRow): FinanceGoal {
 
 function readReservationAccount(id: string): FinanceReservationAccount {
   const account = readAccountBalance(id);
-  return { account_id: id, account_name: account.name, balance_cents: account.balance_cents,
+  return { account_id: id, account_name: account.name, logo: account.logo, balance_cents: account.balance_cents,
     ...reservationAmounts(account.balance_cents, reservedAccountCents(id)) };
 }
 

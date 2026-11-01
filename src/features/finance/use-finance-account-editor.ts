@@ -23,6 +23,7 @@ export function useFinanceAccountEditor(
   const [opening, setOpening] = useState("0");
   const [maintaining, setMaintaining] = useState(decimalPHPInput(initial?.maintaining_balance_cents ?? 0));
   const [group, setGroup] = useState(initial?.account_group ?? "");
+  const [logo, setLogo] = useState(initial?.logo ?? "");
   const [included, setIncluded] = useState(initial?.include_in_summary ?? true);
   const [creditLimit, setCreditLimit] = useState(initial?.credit_limit_cents ? decimalPHPInput(initial.credit_limit_cents) : "");
   const [hasOwed, setHasOwed] = useState(false);
@@ -41,6 +42,7 @@ export function useFinanceAccountEditor(
     if (!editing) {
       setName(adjustment.account.name);
       setGroup(adjustment.account.account_group);
+      setLogo(adjustment.account.logo);
       setIncluded(adjustment.account.include_in_summary);
       setMaintaining(decimalPHPInput(adjustment.account.maintaining_balance_cents));
       setCreditLimit(adjustment.account.credit_limit_cents ? decimalPHPInput(adjustment.account.credit_limit_cents) : "");
@@ -118,6 +120,7 @@ export function useFinanceAccountEditor(
         !account ||
         parsedName.data !== account.name ||
         parsedGroup.data !== account.account_group ||
+        logo !== account.logo ||
         included !== account.include_in_summary ||
         maintainingCents !== account.maintaining_balance_cents ||
         creditChanged
@@ -128,6 +131,7 @@ export function useFinanceAccountEditor(
             ? {
                 name: parsedName.data,
                 account_group: parsedGroup.data,
+                logo,
                 include_in_summary: included,
                 maintaining_balance: parsedMaintaining.data,
                 ...(creditChanged ? creditFields : {}),
@@ -137,6 +141,7 @@ export function useFinanceAccountEditor(
                 name: parsedName.data,
                 kind,
                 account_group: parsedGroup.data,
+                logo,
                 include_in_summary: included,
                 currency: "PHP",
                 // An existing owed balance on a card is a negative opening balance.
@@ -193,6 +198,8 @@ export function useFinanceAccountEditor(
     setMaintaining,
     group,
     setGroup,
+    logo,
+    setLogo,
     included,
     setIncluded,
     creditLimit,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { accountLogoIds } from "./account-logos";
 
 export const financeScopeSchema = z.enum(["finance:read", "finance:write", "finance:manage"]);
 export type FinanceScope = z.infer<typeof financeScopeSchema>;
@@ -14,6 +15,7 @@ const name = z.string().trim().min(1).max(120);
 export const accountKindSchema = z.enum(["money", "asset", "credit"]);
 export const dueModeSchema = z.enum(["fixed_day", "after_statement"]);
 export const accountGroupSchema = z.string().trim().max(80);
+export const accountLogoSchema = z.enum(["", ...accountLogoIds]);
 
 const maintainingBalance = z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a non-negative PHP decimal string with at most two decimal places");
 const creditLimit = maintainingBalance;
@@ -26,6 +28,7 @@ export const createAccountSchema = z.object({
   name,
   kind: accountKindSchema,
   account_group: accountGroupSchema.default(""),
+  logo: accountLogoSchema.default(""),
   include_in_summary: z.boolean().default(true),
   currency: z.literal("PHP"),
   maintaining_balance: maintainingBalance.default("0"),
@@ -43,6 +46,7 @@ export const updateAccountSchema = z.object({
   maintaining_balance: maintainingBalance.optional(),
   archived: z.boolean().optional(),
   account_group: accountGroupSchema.optional(),
+  logo: accountLogoSchema.optional(),
   include_in_summary: z.boolean().optional(),
   credit_limit: creditLimit.optional(),
   statement_day: monthDay.nullable().optional(),
@@ -66,6 +70,7 @@ export interface FinanceAccount {
   name: string;
   kind: z.infer<typeof accountKindSchema>;
   account_group: string;
+  logo: string;
   include_in_summary: boolean;
   currency: "PHP";
   opening_balance_cents: number;

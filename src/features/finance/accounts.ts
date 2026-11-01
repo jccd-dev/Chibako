@@ -183,7 +183,7 @@ function mutateAccount(actor: FinanceActor, requestId: string, operation: string
   });
   // Replayed results stored before newer account fields existed get their neutral values.
   const credit = { credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null, used_credit_cents: null, available_credit_cents: null, ...NO_STATEMENT };
-  return { account: { ...credit, ...result.account, account_group: result.account.account_group ?? "", include_in_summary: result.account.include_in_summary ?? true, maintaining_balance_cents: result.account.maintaining_balance_cents ?? 0, planned_expense_cents: result.account.planned_expense_cents ?? 0, spendable_cents: result.account.spendable_cents ?? (result.account.kind === "money" ? Math.max(0, result.account.balance_cents) : 0) } };
+  return { account: { ...credit, ...result.account, account_group: result.account.account_group ?? "", logo: result.account.logo ?? "", include_in_summary: result.account.include_in_summary ?? true, maintaining_balance_cents: result.account.maintaining_balance_cents ?? 0, planned_expense_cents: result.account.planned_expense_cents ?? 0, spendable_cents: result.account.spendable_cents ?? (result.account.kind === "money" ? Math.max(0, result.account.balance_cents) : 0) } };
 }
 
 function requireCreditSettings(kind: FinanceAccount["kind"], settings: CreditSettings) {
@@ -202,14 +202,14 @@ export function createAccount(actor: FinanceActor, input: unknown): { account: F
     statement_day: payload.statement_day ?? null, due_mode: payload.due_mode ?? null, due_value: payload.due_value ?? null,
   };
   requireCreditSettings(payload.kind, credit);
-  const { account_group, include_in_summary, maintaining_balance, ...core } = payload;
+  const { account_group, logo, include_in_summary, maintaining_balance, ...core } = payload;
   // Preserve retry fingerprints for accounts created before settings were added.
-  const requestPayload = { ...core, ...(account_group ? { account_group } : {}), ...(!include_in_summary ? { include_in_summary } : {}), ...(maintaining !== 0 ? { maintaining_balance } : {}) };
+  const requestPayload = { ...core, ...(account_group ? { account_group } : {}), ...(logo ? { logo } : {}), ...(!include_in_summary ? { include_in_summary } : {}), ...(maintaining !== 0 ? { maintaining_balance } : {}) };
   return mutateAccount(actor, request_id, "account.create", requestPayload, () => {
     const id = randomUUID();
     const timestamp = now();
-    getDb().prepare("INSERT INTO finance_accounts (id, name, kind, currency, opening_balance_cents, maintaining_balance_cents, account_group, include_in_summary, archived, version, created_at, updated_at, credit_limit_cents, statement_day, due_mode, due_value) VALUES (?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?)")
-      .run(id, payload.name, payload.kind, payload.currency, cents, maintaining, payload.account_group, Number(payload.include_in_summary), timestamp, timestamp, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value);
+    getDb().prepare("INSERT INTO finance_accounts (id, name, kind, currency, opening_balance_cents, maintaining_balance_cents, account_group, logo, include_in_summary, archived, version, created_at, updated_at, credit_limit_cents, statement_day, due_mode, due_value) VALUES (?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?)")
+      .run(id, payload.name, payload.kind, payload.currency, cents, maintaining, payload.account_group, payload.logo, Number(payload.include_in_summary), timestamp, timestamp, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value);
     return { before: null, after: readAccountBalance(id) };
   });
 }
@@ -231,8 +231,8 @@ export function updateAccount(actor: FinanceActor, id: string, input: unknown): 
       due_value: patch.due_value === undefined ? before.due_value : patch.due_value,
     };
     requireCreditSettings(before.kind, credit);
-    getDb().prepare("UPDATE finance_accounts SET name = ?, archived = ?, account_group = ?, include_in_summary = ?, maintaining_balance_cents = ?, credit_limit_cents = ?, statement_day = ?, due_mode = ?, due_value = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
-      .run(patch.name ?? before.name, Number(patch.archived ?? before.archived), patch.account_group ?? before.account_group, Number(patch.include_in_summary ?? before.include_in_summary), maintaining, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value, now(), id, before.version);
+    getDb().prepare("UPDATE finance_accounts SET name = ?, archived = ?, account_group = ?, logo = ?, include_in_summary = ?, maintaining_balance_cents = ?, credit_limit_cents = ?, statement_day = ?, due_mode = ?, due_value = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
+      .run(patch.name ?? before.name, Number(patch.archived ?? before.archived), patch.account_group ?? before.account_group, patch.logo ?? before.logo, Number(patch.include_in_summary ?? before.include_in_summary), maintaining, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value, now(), id, before.version);
     return { before, after: readAccountBalance(id) };
   });
 }

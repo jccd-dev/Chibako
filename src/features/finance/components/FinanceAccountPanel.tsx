@@ -32,6 +32,7 @@ import { decimalPHP, financeDrawerFooter, financeSheet, formatPHP } from "../pre
 import { FinanceDateInput } from "./FinanceDateInputs";
 import { FinanceAccountHistory } from "./FinanceAccountHistory";
 import { MoneyInput } from "./MoneyInput";
+import { FinanceLogoPicker } from "./FinanceLogoPicker";
 import { FinanceCreditFields } from "./FinanceCreditFields";
 
 export function FinanceAccountPanel({
@@ -188,6 +189,11 @@ export function FinanceAccountPanel({
                   disabled={busy}
                   onChange={(event) => editor.setName(event.target.value)}
                 />
+              </Field>
+              <Field>
+                <FieldLabel>Logo</FieldLabel>
+                <FinanceLogoPicker value={editor.logo} name={editor.name} disabled={busy} onChange={editor.setLogo} />
+                <FieldDescription>Shown on cards and when choosing this account. Optional.</FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="finance-kind">Account type</FieldLabel>

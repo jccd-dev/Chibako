@@ -64,7 +64,7 @@ test("a schema 3 vault upgrades to 4 with accounts, activity and links intact", 
 
   for (let boot = 0; boot < 2; boot++) {
     const db = getDb();
-    assert.equal(db.pragma("user_version", { simple: true }), 4);
+    assert.equal(db.pragma("user_version", { simple: true }), 5);
     assert.deepEqual(snapshot(db), before);
     assert.deepEqual(db.prepare("SELECT DISTINCT credit_limit_cents, statement_day, due_mode, due_value FROM finance_accounts").all(),
       [{ credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null }]);
@@ -81,12 +81,12 @@ test("a schema 3 vault upgrades to 4 with accounts, activity and links intact", 
   assert.throws(() => getDb().prepare("UPDATE finance_accounts SET credit_limit_cents = 5 WHERE id = ?").run(cash.id), /CHECK constraint failed/);
 });
 
-test("a vault stamped newer than schema 4 is still refused", () => {
+test("a vault stamped newer than schema 5 is still refused", () => {
   const newer = mkdtempSync(join(tmpdir(), "chibako-credit-migration-newer-"));
   const previous = process.env.CHIBAKO_DATA_DIR;
   try {
     const seed = new Database(join(newer, "brain.db"));
-    seed.pragma("user_version = 5");
+    seed.pragma("user_version = 6");
     seed.close();
     process.env.CHIBAKO_DATA_DIR = newer;
     assert.throws(() => getDb(), SchemaTooNewError);

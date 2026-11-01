@@ -35,6 +35,7 @@ import type { ReminderOptions } from "./FinancePlans";
 const planDrawerFooter =
   "flex shrink-0 flex-wrap justify-end gap-2 border-t border-border bg-background px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-6";
 
+import { FinanceAccountChoice } from "./FinanceAccountChoice";
 export function FinancePlanningForm({
   schedule,
   occurrence,
@@ -169,30 +170,16 @@ export function FinancePlanningForm({
             <FieldError id="schedule-error-amount">{errors.amount}</FieldError>
           </Field>
           <Field data-invalid={!!errors.account_id}>
-            <FieldLabel htmlFor="schedule-account_id">Account</FieldLabel>
-            <NativeSelect
-              id="schedule-account_id"
-              className="w-full"
+            <FieldLabel id="schedule-account_id-label">Account</FieldLabel>
+            <FinanceAccountChoice
+              label="Account"
               value={account}
+              onChange={setAccount}
               disabled={busy}
-              onChange={(event) => setAccount(event.target.value)}
-              {...invalid("account_id")}
-            >
-              <NativeSelectOption value="">
-                Choose a money account
-              </NativeSelectOption>
-              {activity.accounts
-                .filter(
-                  (row) =>
-                    row.kind === "money" && (!row.archived || row.id === account),
-                )
-                .map((row) => (
-                  <NativeSelectOption key={row.id} value={row.id}>
-                    {row.name}
-                    {row.archived ? " (archived)" : ""}
-                  </NativeSelectOption>
-                ))}
-            </NativeSelect>
+              accounts={activity.accounts.filter(
+                (row) => row.kind === "money" && (!row.archived || row.id === account),
+              )}
+            />
             <FieldError id="schedule-error-account_id">
               {errors.account_id}
             </FieldError>

@@ -2,6 +2,15 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { chooseFinanceDate } from "./finance-date-controls";
 
+async function pickAccount(page: Page, group: string, name: string) {
+  const choice = page.getByRole("radiogroup", { name: group, exact: true });
+  await choice.waitFor();
+  const tile = choice.locator("label", { hasText: name }).first();
+  // Long account lists collapse behind "Show N more".
+  if (!(await tile.count())) await page.getByRole("button", { name: /^Show \d+ more$/ }).first().click();
+  await tile.click();
+}
+
 async function authenticate(page: Page) {
   const clientId = randomUUID();
   await page.route("**/api/login", route => route.continue({ headers: { ...route.request().headers(), "x-chibako-client-ip": clientId } }));
@@ -187,7 +196,7 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
   await page.getByRole("switch", { name: "Set as recurring expense" }).click();
   await page.locator("#schedule-text").fill(planText);
   await page.locator("#schedule-amount").fill("35.50");
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await pickAccount(page, "Account", cash);
   await chooseFinanceDate(page, "Logged at", "2026-10-02");
   await page.getByRole("button", { name: "Save expense plan", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -200,7 +209,7 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
 
   await page.getByRole("button", { name: `Open ${planText}`, exact: true }).click();
   await page.getByRole("button", { name: "Log payment", exact: true }).click();
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await pickAccount(page, "Account", cash);
   await chooseFinanceDate(page, "Date paid", "2026-10-04");
   await page.getByRole("button", { name: "Confirm payment", exact: true }).click();
   await expect(page.getByText("Actual activity posted once. Account balance: PHP 464.50.", { exact: true })).toBeVisible();
@@ -269,7 +278,7 @@ test("credit accounts show card fields when added and list used and available cr
   await page.reload();
   await page.getByRole("button", { name: "Add transaction", exact: true }).click();
   await page.getByLabel("Amount (PHP)", { exact: true }).fill("7500.01");
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: name });
+  await pickAccount(page, "Account", name);
   await expect(page.getByRole("alert").filter({ hasText: "Over credit limit" })).toContainText(`${name} has PHP 7,500.00 available credit`);
   await expect(page.getByRole("button", { name: "Save transaction", exact: true })).toBeDisabled();
   await page.getByLabel("Amount (PHP)", { exact: true }).fill("100");
@@ -281,8 +290,8 @@ test("credit accounts show card fields when added and list used and available cr
   await page.getByRole("button", { name: "Transfer", exact: true }).click();
   await page.getByLabel("Amount (PHP)", { exact: true }).fill("600");
   await expect(page.getByLabel("Source account", { exact: true }).locator("option", { hasText: name })).toHaveCount(0);
-  await page.getByLabel("Source account", { exact: true }).selectOption({ label: cashName });
-  await page.getByLabel("Destination account", { exact: true }).selectOption({ label: name });
+  await pickAccount(page, "Source account", cashName);
+  await pickAccount(page, "Destination account", name);
   await page.getByRole("button", { name: "Save transaction", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(card).toContainText("Used PHP 2,000.00 · Available PHP 8,000.00");
@@ -308,7 +317,7 @@ test("a card statement due reminder appears after a charge and clears once paid 
 
   await page.getByRole("button", { name: "Add transaction", exact: true }).click();
   await page.getByLabel("Amount (PHP)", { exact: true }).fill("300");
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: name });
+  await pickAccount(page, "Account", name);
   await page.getByRole("button", { name: "Save transaction", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(card).toContainText("PHP 300.00 due");
@@ -317,8 +326,8 @@ test("a card statement due reminder appears after a charge and clears once paid 
   await page.getByRole("button", { name: "Add transaction", exact: true }).click();
   await page.getByRole("button", { name: "Transfer", exact: true }).click();
   await page.getByLabel("Amount (PHP)", { exact: true }).fill("300");
-  await page.getByLabel("Source account", { exact: true }).selectOption({ label: cashName });
-  await page.getByLabel("Destination account", { exact: true }).selectOption({ label: name });
+  await pickAccount(page, "Source account", cashName);
+  await pickAccount(page, "Destination account", name);
   await page.getByRole("button", { name: "Save transaction", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(card).toContainText("Next due");

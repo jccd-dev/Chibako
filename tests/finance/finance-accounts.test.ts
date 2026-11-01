@@ -273,3 +273,17 @@ test("owed credit reduces net balance only when included and is never an asset",
   updateAccount(owner, card.id, { request_id: randomUUID(), version: 1, include_in_summary: false });
   assert.deepEqual(getFinanceSummary(owner).credit, { balance_cents: 0, account_count: 0 });
 });
+
+test("account logos are optional, allowlisted, editable and replay-safe", () => {
+  const plain = create("0");
+  assert.equal(plain.logo, "");
+  const request_id = randomUUID();
+  const made = createAccount(owner, { ...input, request_id, name: "Wallet", logo: "gcash" }).account;
+  assert.equal(made.logo, "gcash");
+  assert.equal(createAccount(owner, { ...input, request_id, name: "Wallet", logo: "gcash" }).account.id, made.id);
+  assert.throws(() => createAccount(owner, { ...input, request_id: randomUUID(), logo: "../secret" }), { status: 400, code: "invalid_input" });
+  const changed = updateAccount(owner, made.id, { request_id: randomUUID(), version: made.version, logo: "maya" }).account;
+  assert.equal(getAccount(owner, made.id).logo, "maya");
+  assert.equal(updateAccount(owner, made.id, { request_id: randomUUID(), version: changed.version, logo: "" }).account.logo, "");
+  assert.throws(() => updateAccount(owner, made.id, { request_id: randomUUID(), version: changed.version + 1, logo: "nope" }), { status: 400 });
+});
