@@ -159,9 +159,9 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     const db = getDb();
     if (cashback && cashbackAmount !== null) {
       editable(cashback, cashback.version);
-      // Cashback keeps its own credited date unless the expense date itself changes.
+      // Cashback keeps its own credited date unless the expense date changes, and a separately chosen account stays put.
       db.prepare("UPDATE finance_transactions SET account_id = ?, transaction_date = ?, amount_cents = ? WHERE id = ?")
-        .run(account, patch.transaction_date === undefined ? cashback.transaction_date : date, cashbackAmount, cashback.id);
+        .run(cashback.account_id === before.account_id ? account : cashback.account_id, patch.transaction_date === undefined ? cashback.transaction_date : date, cashbackAmount, cashback.id);
       bump(cashback);
     }
     if (before.type === "transfer") {

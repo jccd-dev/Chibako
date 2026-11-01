@@ -73,7 +73,15 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
     }
     if (payload.type === "expense") requireSufficientFunds(account, amount);
     validateTransactionClassifications(payload);
-    const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)) + BigInt(cashbackAmount));
+    const cashbackAccountId = payload.cashback?.account_id ?? account.id;
+    if (cashbackAccountId !== account.id) {
+      const destination = getDb().prepare("SELECT kind, archived FROM finance_accounts WHERE id = ?").get(cashbackAccountId) as { kind: string; archived: number } | undefined;
+      if (!destination || destination.archived || !(destination.kind === "money" || destination.kind === "credit")) {
+        throw new FinanceError("Choose an active money or credit account for cashback", 400, "invalid_account");
+      }
+    }
+    const ownCashback = cashbackAccountId === account.id ? BigInt(cashbackAmount) : 0n;
+    const balance = exactCents(BigInt(account.balance_cents) + (payload.type === "income" ? BigInt(amount) : -BigInt(amount)) + ownCashback);
     const id = insertTransaction({ ...payload, amount_cents: amount });
     replaceActivityNoteLinks(id, note_ids);
     let cashbackId: string | null = null;
@@ -81,13 +89,13 @@ export function postTransaction(actor: FinanceActor, input: unknown): PostedTran
       const category = getDb().prepare("SELECT id FROM finance_classifications WHERE kind='category' AND type='income' AND parent_id IS NULL AND archived=0 AND name=? COLLATE NOCASE ORDER BY id LIMIT 1")
         .get("Cashback") as { id: string } | undefined;
       if (!category) throw new FinanceError("Create or restore an active income category named Cashback before adding cashback", 400, "invalid_category");
-      cashbackId = insertTransaction({ type: "income", account_id: account.id, amount_cents: cashbackAmount,
+      cashbackId = insertTransaction({ type: "income", account_id: cashbackAccountId, amount_cents: cashbackAmount,
         transaction_date: payload.transaction_date, category_id: category.id, subcategory_id: null, text: "Cashback", tag_ids: [] });
       getDb().prepare("INSERT INTO finance_cashbacks (expense_id,income_id,mode,value) VALUES (?,?,?,?)").run(id, cashbackId, payload.cashback.mode, payload.cashback.value);
     }
     const cashback = cashbackId ? readTransaction(cashbackId, false) : null;
     const result: PostedTransaction = { transaction: readTransaction(id, false), ...(cashback ? { cashback } : {}), balance_cents: balance, ...financeBalanceWarnings([{ account_id: account.id, balance_cents: balance }]) };
-    return { result, affectedIds: [id, account.id, ...note_ids, ...(cashbackId ? [cashbackId] : [])], before: null,
+    return { result, affectedIds: [id, account.id, ...note_ids, ...(cashbackId ? [cashbackId, ...(cashbackAccountId !== account.id ? [cashbackAccountId] : [])] : [])], before: null,
       after: { ...readTransaction(id, true), note_ids, ...(cashbackId ? { cashback: readTransaction(cashbackId, true) } : {}) } };
   });
 }

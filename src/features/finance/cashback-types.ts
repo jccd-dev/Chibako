@@ -5,6 +5,8 @@ import { FinanceError } from "./types";
 export const cashbackSchema = z.object({
   mode: z.enum(["percent", "amount"]),
   value: z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a non-negative cashback value with at most two decimal places"),
+  /** Account that receives the cashback; omitted means the expense's own account. */
+  account_id: z.string().min(1).max(128).optional(),
 }).strict();
 export type CashbackInput = z.infer<typeof cashbackSchema>;
 

@@ -746,7 +746,7 @@ export function FinanceTransactionEntry({
               </FieldDescription>
               <FieldError id="error-amount">{errors.amount}</FieldError>
             </Field>
-            {type === "expense" && <FinanceCashbackFields entry={entry} disabled={activity.busy} />}
+            {type === "expense" && <FinanceCashbackFields entry={entry} accounts={activity.accounts} disabled={activity.busy} />}
             <Field data-invalid={!!errors[accountKey]}>
               <FieldLabel htmlFor={`transaction-${accountKey}`}>
                 {type === "transfer" ? "Source account" : "Account"}

@@ -15,6 +15,7 @@ export function useFinanceEntry(activity: FinanceActivityController, open: boole
   const [amount, setAmount] = useState("");
   const [cashbackMode, setCashbackMode] = useState<"off" | CashbackInput["mode"]>("off");
   const [cashbackValue, setCashbackValue] = useState("");
+  const [cashbackAccountId, setCashbackAccountId] = useState("");
   const [destinationId, setDestinationId] = useState("");
   const [hasFee, setHasFee] = useState(false);
   const [feeAmount, setFeeAmount] = useState("");
@@ -31,14 +32,17 @@ export function useFinanceEntry(activity: FinanceActivityController, open: boole
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open && !wasOpen.current) {
-      activity.resetSave(); setType("expense"); setAmount(""); setCashbackMode("off"); setCashbackValue(""); setDestinationId(""); setHasFee(false); setFeeAmount(""); setFeeCategoryId(""); setFeeSubcategoryId(""); setAccountId(""); setDate(localCalendarDate()); setCategoryId(""); setSubcategoryId(""); setText(""); setTagIds([]); setNotes([]); setErrors({});
+      activity.resetSave(); setType("expense"); setAmount(""); setCashbackMode("off"); setCashbackValue(""); setCashbackAccountId(""); setDestinationId(""); setHasFee(false); setFeeAmount(""); setFeeCategoryId(""); setFeeSubcategoryId(""); setAccountId(""); setDate(localCalendarDate()); setCategoryId(""); setSubcategoryId(""); setText(""); setTagIds([]); setNotes([]); setErrors({});
     }
     wasOpen.current = open;
   }, [open, activity]);
 
-  function changeType(value: "expense" | "income" | "transfer") { setCashbackMode("off"); setCashbackValue(""); setType(value); setCategoryId(""); setSubcategoryId(""); }
+  function changeType(value: "expense" | "income" | "transfer") { setCashbackMode("off"); setCashbackValue(""); setCashbackAccountId(""); setType(value); setCategoryId(""); setSubcategoryId(""); }
   function changeCategory(value: string) { setCategoryId(value); setSubcategoryId(""); }
-  const cashback = type === "expense" && cashbackMode !== "off" ? { mode: cashbackMode, value: cashbackValue } : undefined;
+  // An empty or same-as-paying choice omits account_id, keeping the default destination.
+  const cashback = type === "expense" && cashbackMode !== "off"
+    ? { mode: cashbackMode, value: cashbackValue, ...(cashbackAccountId && cashbackAccountId !== accountId ? { account_id: cashbackAccountId } : {}) }
+    : undefined;
   let cashbackPreview: number | null = null;
   const parsedCashback = cashbackSchema.safeParse(cashback);
   if (parsedCashback.success && postTransactionSchema.shape.amount.safeParse(amount).success) {
@@ -78,5 +82,5 @@ export function useFinanceEntry(activity: FinanceActivityController, open: boole
     return { saved: true };
   }
 
-  return { cashbackMode, changeCashbackMode, cashbackValue, setCashbackValue, cashbackPreview, shortfall, destinationId, setDestinationId, hasFee, setHasFee, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory: (value: string) => { setFeeCategoryId(value); setFeeSubcategoryId(""); }, feeSubcategoryId, setFeeSubcategoryId, type, changeType, amount, setAmount, accountId, setAccountId, date, setDate, categoryId, changeCategory, subcategoryId, setSubcategoryId, text, setText, tagIds, setTagIds, notes, setNotes, errors, save };
+  return { cashbackMode, changeCashbackMode, cashbackValue, setCashbackValue, cashbackAccountId, setCashbackAccountId, cashbackPreview, shortfall, destinationId, setDestinationId, hasFee, setHasFee, feeAmount, setFeeAmount, feeCategoryId, changeFeeCategory: (value: string) => { setFeeCategoryId(value); setFeeSubcategoryId(""); }, feeSubcategoryId, setFeeSubcategoryId, type, changeType, amount, setAmount, accountId, setAccountId, date, setDate, categoryId, changeCategory, subcategoryId, setSubcategoryId, text, setText, tagIds, setTagIds, notes, setNotes, errors, save };
 }
