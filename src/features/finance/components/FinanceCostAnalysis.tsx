@@ -1,5 +1,7 @@
 "use client";
 
+import { CompactMoney } from "./CompactMoney";
+
 import { Pie, PieChart } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +36,7 @@ export function FinanceCostAnalysis({
         <CardDescription>Spending by category</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <p className="text-2xl font-semibold tabular-nums">{money(report?.spending_cents ?? 0)}</p>
+        <p className="text-2xl font-semibold tabular-nums"><CompactMoney cents={report?.spending_cents ?? 0} /></p>
         {data.length ? (
           <>
             <ChartContainer config={{ value: { label: "Spending" } }} className="h-44 w-full aspect-auto" aria-label="Category spending pie chart">
@@ -87,7 +89,7 @@ export function FinanceCostAnalysis({
           <p className="text-xs text-muted-foreground">{report ? "No positive category spending for these dates." : "Loading category spending…"}</p>
         )}
         {report && report.unbudgeted_cents !== 0 && (
-          <p className="text-xs text-muted-foreground">Unbudgeted spending · <span className="tabular-nums">{money(report.unbudgeted_cents)}</span></p>
+          <p className="text-xs text-muted-foreground">Unbudgeted spending · <CompactMoney cents={report.unbudgeted_cents} className="tabular-nums" /></p>
         )}
       </CardContent>
     </Card>
