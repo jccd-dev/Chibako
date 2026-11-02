@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
-  <img src="https://i.imgur.com/eGegh2T.png" alt="Chibako — the Knowledge Box" width="480">
-</picture>
+<img src="docs/assets/chibako-banner.png" alt="Chibako — Your self-hosted second brain" width="100%">
 
 ### A self-hosted second brain
 
