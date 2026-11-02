@@ -27554,11 +27554,16 @@ async function runMemoryEvent(options) {
     }
     const event = input2.hook_event_name;
     const limits = options.thresholds ?? defaultThresholds;
-    const due = () => state.users >= limits.user_turns || state.tools >= limits.tool_calls;
+    const due = () => state.tools >= limits.tool_calls || runtime !== "codex" && state.users >= limits.user_turns;
+    const dueNote = async () => {
+      state.dueRequested = true;
+      return `Memory checkpoint due. Update this session's ONE checkpoint: {"checkpoint": {"title": "<session label>", "content": "current objective, decisions, evidence, pending work"}, "now_line": "<=140 chars next action"}. When no work remains, use {"finish": {}} to close it and remove its Agent Now entry (the checkpoint stays as a session record), or include retain (wiki/preference role, subject, title, content, expected_revision, confirmation for preferences) to preserve lasting knowledge atomically first. Skip unchanged or trivial work with {"skip": "reason"}. Identity comes from the hook session, never a task name; if this session already continued an Agent Now checkpoint, saves update that shared note. For an existing note, read memory_session with action read and restage with its revision as "expected_revision" (inside checkpoint/finish or beside it). Stop means response end, not task completion. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Checkpoints need no schema; call get_knowledge_schema only before retain or another note write. This reminder runs once; a rejected stage changes nothing and can be fixed and rerun.`;
+    };
     if (event === "PostToolUse") {
       state.tools++;
+      const context2 = runtime === "codex" && options.promptRequests && !state.pending && !state.dueRequested && due() ? await dueNote() : void 0;
       await save();
-      return {};
+      return context2 ? { context: context2 } : {};
     }
     if (event === "SessionStart") {
       state.briefed = false;
@@ -27602,10 +27607,6 @@ async function runMemoryEvent(options) {
       }
     }
     let context = "";
-    const dueNote = async () => {
-      state.dueRequested = true;
-      return `Memory checkpoint due. Update this session's ONE checkpoint: {"checkpoint": {"title": "<session label>", "content": "current objective, decisions, evidence, pending work"}, "now_line": "<=140 chars next action"}. When no work remains, use {"finish": {}} to close it and remove its Agent Now entry (the checkpoint stays as a session record), or include retain (wiki/preference role, subject, title, content, expected_revision, confirmation for preferences) to preserve lasting knowledge atomically first. Skip unchanged or trivial work with {"skip": "reason"}. Identity comes from the hook session, never a task name; if this session already continued an Agent Now checkpoint, saves update that shared note. For an existing note, read memory_session with action read and restage with its revision as "expected_revision" (inside checkpoint/finish or beside it). Stop means response end, not task completion. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Checkpoints need no schema; call get_knowledge_schema only before retain or another note write. This reminder runs once; a rejected stage changes nothing and can be fixed and rerun.`;
-    };
     if (event === "SessionStart" || event === "UserPromptSubmit") {
       try {
         if (!state.nowLoaded) {
@@ -27642,7 +27643,7 @@ ${JSON.stringify(await call("recall", { query: `${state.project ? `${state.proje
       if (options.promptRequests && event === "UserPromptSubmit" && !state.pending && !state.dueRequested && due()) context += await dueNote() + "\n";
     }
     let output2 = {};
-    if (event === "Stop" && !state.pending && !input2.stop_hook_active && !state.dueRequested && due()) output2.request = await dueNote();
+    if (event === "Stop" && !(runtime === "codex" && options.promptRequests) && !state.pending && !input2.stop_hook_active && !state.dueRequested && due()) output2.request = await dueNote();
     if (context) output2.context = context;
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
@@ -33158,6 +33159,7 @@ var hookSchema = external_exports.object({
 });
 var codex = {
   runtime: "codex",
+  promptRequests: true,
   home,
   configPath: () => path8.join(home(), "config.toml"),
   renderConfig(original, endpoint, key, previous, remove = false) {
@@ -33207,9 +33209,8 @@ ${connection}
     return matches;
   },
   hookInput: (payload) => hookSchema.parse(payload),
-  hookOutput(input2, { context, request, warning }) {
+  hookOutput(input2, { context, warning }) {
     return {
-      ...request && input2.hook_event_name === "Stop" ? { decision: "block", reason: request } : {},
       ...context && ["SessionStart", "UserPromptSubmit", "PostToolUse"].includes(input2.hook_event_name) ? { hookSpecificOutput: { hookEventName: input2.hook_event_name, additionalContext: context } } : {},
       ...warning ? { systemMessage: warning } : {}
     };
