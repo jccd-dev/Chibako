@@ -4,7 +4,7 @@ import { financeBalanceShortfall } from "../../src/features/finance/balance-gate
 import type { FinanceAccount } from "../../src/features/finance/types";
 
 function account(balance_cents: number, partial: Partial<FinanceAccount> = {}): FinanceAccount {
-  return { id: "cash", name: "Cash", kind: "money", account_group: "", include_in_summary: true, currency: "PHP", opening_balance_cents: balance_cents, maintaining_balance_cents: 0, planned_expense_cents: 0, spendable_cents: balance_cents, balance_cents, archived: false, version: 1, created_at: 0, updated_at: 0, ...partial };
+  return { id: "cash", name: "Cash", kind: "money", account_group: "", logo: "", include_in_summary: true, currency: "PHP", opening_balance_cents: balance_cents, maintaining_balance_cents: 0, planned_expense_cents: 0, spendable_cents: balance_cents, balance_cents, credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null, used_credit_cents: null, available_credit_cents: null, statement_date: null, statement_balance_cents: null, remaining_due_cents: null, next_due_date: null, archived: false, version: 1, created_at: 0, updated_at: 0, ...partial };
 }
 
 test("reports a shortfall with raw balance and required debit", () => {
@@ -41,4 +41,13 @@ test("returns null for missing, unparseable, or non-outgoing inputs", () => {
   assert.equal(financeBalanceShortfall({ accounts: [account(1)], account_id: "cash", amount: "" }), null);
   assert.equal(financeBalanceShortfall({ accounts: [account(1)], account_id: "missing", amount: "50" }), null);
   assert.equal(financeBalanceShortfall({ accounts: [account(1, { kind: "asset" })], account_id: "cash", amount: "50" }), null);
+});
+
+test("credit accounts warn against available credit, not cash balance", () => {
+  const card = account(-2500, { id: "card", name: "Visa", kind: "credit", credit_limit_cents: 10000 });
+  assert.equal(financeBalanceShortfall({ accounts: [card], account_id: "card", amount: "75" }), null);
+  const result = financeBalanceShortfall({ accounts: [card], account_id: "card", amount: "75.01", subject: "expense" });
+  assert.ok(result);
+  assert.equal(result.available_cents, 7500);
+  assert.equal(result.message, "Over credit limit: Visa has PHP 75.00 available credit, and this expense needs PHP 75.01. Reduce the amount or choose another account.");
 });

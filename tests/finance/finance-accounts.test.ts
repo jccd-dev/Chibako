@@ -68,7 +68,7 @@ test("money and assets stay separate while rename, archive and restore retain ho
   const money = create("123.45");
   create("-10.01");
   create("456.78", "asset");
-  const expected = { currency: "PHP", money: { balance_cents: 11344, account_count: 2 }, assets: { balance_cents: 45678, account_count: 1 } };
+  const expected = { currency: "PHP", money: { balance_cents: 11344, account_count: 2 }, assets: { balance_cents: 45678, account_count: 1 }, credit: { balance_cents: 0, account_count: 0 } };
   assert.deepEqual(getFinanceSummary(owner), expected);
   const archived = updateAccount(owner, money.id, { request_id: "archive", version: 1, name: "Wallet", archived: true }).account;
   assert.equal(archived.version, 2);
@@ -216,4 +216,74 @@ test("account retries created before settings keep their fingerprints and receiv
   Reflect.deleteProperty(legacyAccount, "include_in_summary");
   getDb().prepare("UPDATE finance_requests SET result = ? WHERE request_id = ?").run(JSON.stringify({ account: legacyAccount }), input.request_id);
   assert.deepEqual(createAccount(owner, input), original);
+});
+
+test("credit accounts validate card settings before any write and derive used and available credit", () => {
+  const card = { ...input, kind: "credit", name: "Visa", opening_balance: "-2500", credit_limit: "10000" };
+  const count = () => listAccounts(owner, { archived: "all" }).total;
+  for (const bad of [
+    { credit_limit: undefined }, { credit_limit: "0" }, { credit_limit: "-1" },
+    { statement_day: 0 }, { statement_day: 32 }, { due_mode: "fixed_day", due_value: 32 },
+    { statement_day: 5, due_mode: "after_statement", due_value: 61 }, { due_mode: "after_statement", due_value: 20 },
+    { due_mode: "fixed_day" }, { due_value: 5 }, { due_mode: "weekly", due_value: 5 }, { maintaining_balance: "1" },
+  ]) assert.throws(() => createAccount(owner, { ...card, request_id: randomUUID(), ...bad }), { status: 400 }, JSON.stringify(bad));
+  for (const kind of ["money", "asset"]) {
+    for (const extra of [{ credit_limit: "100" }, { statement_day: 5 }, { due_mode: "fixed_day", due_value: 5 }]) {
+      assert.throws(() => createAccount(owner, { ...input, request_id: randomUUID(), kind, ...extra }), { status: 400, code: "invalid_input" });
+    }
+  }
+  assert.equal(count(), 0);
+
+  const created = createAccount(owner, { ...card, request_id: randomUUID(), statement_day: 31, due_mode: "after_statement", due_value: 21 }).account;
+  assert.deepEqual(
+    [created.kind, created.opening_balance_cents, created.balance_cents, created.credit_limit_cents, created.used_credit_cents, created.available_credit_cents, created.statement_day, created.due_mode, created.due_value, created.spendable_cents],
+    ["credit", -250000, -250000, 1000000, 250000, 750000, 31, "after_statement", 21, 0],
+  );
+  const cash = create("50");
+  assert.equal(cash.credit_limit_cents, null);
+  assert.equal(cash.used_credit_cents, null);
+  assert.deepEqual(listAccounts(owner, { kind: "credit" }).accounts, [created]);
+
+  const edit = { request_id: randomUUID(), version: 1, credit_limit: "2000", statement_day: null, due_mode: "fixed_day", due_value: 15 };
+  const updated = updateAccount(owner, created.id, edit).account;
+  assert.deepEqual([updated.version, updated.credit_limit_cents, updated.available_credit_cents, updated.statement_day, updated.due_mode, updated.due_value], [2, 200000, 0, null, "fixed_day", 15]);
+  assert.deepEqual(updateAccount(owner, created.id, edit).account, updated);
+  assert.throws(() => updateAccount(owner, created.id, { ...edit, request_id: randomUUID(), credit_limit: "3000" }), { status: 409, code: "version_conflict" });
+  for (const bad of [{ due_mode: "after_statement" }, { credit_limit: "0" }, { maintaining_balance: "5" }, { statement_day: 40 }]) {
+    assert.throws(() => updateAccount(owner, created.id, { request_id: randomUUID(), version: 2, ...bad }), { status: 400 }, JSON.stringify(bad));
+  }
+  assert.throws(() => updateAccount(owner, cash.id, { request_id: randomUUID(), version: 1, credit_limit: "100" }), { status: 400, code: "invalid_input" });
+  assert.deepEqual(getAccount(owner, created.id), updated);
+  assert.equal(getAccount(owner, cash.id).version, 1);
+  const cleared = updateAccount(owner, created.id, { request_id: randomUUID(), version: 2, due_mode: null, due_value: null, name: "Visa Gold", archived: true }).account;
+  assert.deepEqual([cleared.name, cleared.archived, cleared.due_mode, cleared.due_value, cleared.credit_limit_cents], ["Visa Gold", true, null, null, 200000]);
+});
+
+test("owed credit reduces net balance only when included and is never an asset", () => {
+  create("1000");
+  create("500", "asset");
+  const card = createAccount(owner, { ...input, request_id: randomUUID(), kind: "credit", opening_balance: "-300", credit_limit: "5000" }).account;
+  createAccount(owner, { ...input, request_id: randomUUID(), kind: "credit", opening_balance: "-900", credit_limit: "5000", include_in_summary: false });
+  assert.deepEqual(getFinanceSummary(owner), {
+    currency: "PHP",
+    money: { balance_cents: 100000, account_count: 1 },
+    assets: { balance_cents: 50000, account_count: 1 },
+    credit: { balance_cents: -30000, account_count: 1 },
+  });
+  updateAccount(owner, card.id, { request_id: randomUUID(), version: 1, include_in_summary: false });
+  assert.deepEqual(getFinanceSummary(owner).credit, { balance_cents: 0, account_count: 0 });
+});
+
+test("account logos are optional, allowlisted, editable and replay-safe", () => {
+  const plain = create("0");
+  assert.equal(plain.logo, "");
+  const request_id = randomUUID();
+  const made = createAccount(owner, { ...input, request_id, name: "Wallet", logo: "gcash" }).account;
+  assert.equal(made.logo, "gcash");
+  assert.equal(createAccount(owner, { ...input, request_id, name: "Wallet", logo: "gcash" }).account.id, made.id);
+  assert.throws(() => createAccount(owner, { ...input, request_id: randomUUID(), logo: "../secret" }), { status: 400, code: "invalid_input" });
+  const changed = updateAccount(owner, made.id, { request_id: randomUUID(), version: made.version, logo: "maya" }).account;
+  assert.equal(getAccount(owner, made.id).logo, "maya");
+  assert.equal(updateAccount(owner, made.id, { request_id: randomUUID(), version: changed.version, logo: "" }).account.logo, "");
+  assert.throws(() => updateAccount(owner, made.id, { request_id: randomUUID(), version: changed.version + 1, logo: "nope" }), { status: 400 });
 });

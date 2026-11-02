@@ -50,6 +50,10 @@ import {
   localCalendarDate,
 } from "@/features/finance/presentation";
 
+import { FinanceAccountChoice } from "./FinanceAccountChoice";
+const goalChoice = (row: { account_id: string; account_name: string; logo: string; balance_cents: number; archived?: boolean }) =>
+  ({ id: row.account_id, name: row.account_name + (row.archived ? " (archived)" : ""), logo: row.logo, balance_cents: row.balance_cents });
+
 export function FinanceGoals({
   focusAccountId,
   onFocusHandled,
@@ -242,7 +246,7 @@ function GoalRow({ goal, onOpen }: { goal: FinanceGoal; onOpen: () => void }) {
       ? "Achieved"
       : "Saving";
   const holding = goal.linked_account_name
-    ? `Held in ${goal.linked_account_name}`
+    ? `Tracks ${goal.linked_account_name}`
     : "Held in the goal";
   return (
     <li>
@@ -348,32 +352,23 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           </Field>
           {!readOnly && (
             <Field>
-              <FieldLabel htmlFor="goal-linked-account">
+              <FieldLabel id="goal-linked-account-label">
                 Linked account (optional)
               </FieldLabel>
-              <NativeSelect
-                id="goal-linked-account"
-                className="w-full"
-                disabled={disabled}
+              <FinanceAccountChoice
+                label="Linked account (optional)"
+                noneLabel="None (held in the goal)"
                 value={goals.linkedAccount}
-                onChange={(event) => goals.selectLinkedAccount(event.target.value)}
-              >
-                <NativeSelectOption value="">None (held in the goal)</NativeSelectOption>
-                {goals.accounts
+                onChange={goals.selectLinkedAccount}
+                disabled={disabled}
+                accounts={goals.accounts
                   .filter((row) => !row.archived || row.account_id === goal?.linked_account_id)
-                  .map((row) => (
-                    <NativeSelectOption key={row.account_id} value={row.account_id}>
-                      {row.account_name}
-                      {row.archived ? " (archived)" : ""}
-                    </NativeSelectOption>
-                  ))}
-              </NativeSelect>
+                  .map(goalChoice)}
+              />
               <FieldDescription>
-                {goal && goal.saved_cents > 0
-                  ? `Changing this link moves the current ${formatPHP(goal.saved_cents)} saved balance to the new backing account. It does not add money.`
-                  : !goal
-                    ? "The linked account's existing positive balance becomes this goal's progress. Choose an account with no money reserved by another goal. Without a link, the goal holds its own money."
-                    : "Money added to the goal is kept in this account. Without a link, the goal holds its own money."}
+                {goal && !goal.linked_account_id && goal.saved_cents > 0
+                  ? `Linking moves the ${formatPHP(goal.saved_cents)} held in this goal into the account. Progress then follows that account's balance.`
+                  : "Progress follows the linked account's balance, including transfers, income and spending. An account can back one goal. Without a link, the goal holds its own money."}
               </FieldDescription>
             </Field>
           )}
@@ -388,7 +383,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
                 </Button>
               )}
             </div>
-            {goal && !readOnly && goal.saved_cents > 0 && (
+            {goal && !readOnly && !goal.linked_account_id && goal.saved_cents > 0 && (
               <p className="text-right text-xs text-muted-foreground">
                 Withdraw the {formatPHP(goal.saved_cents)} still held before archiving.
               </p>
@@ -411,9 +406,11 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           <p className="text-xs text-muted-foreground">
             {readOnly
               ? "This goal is archived."
-              : "Remaining contributions by funding account. Withdrawals reduce these amounts."}
+              : goal.linked_account_name
+                ? `Progress follows ${goal.linked_account_name}'s balance.`
+                : "Remaining contributions by funding account. Withdrawals reduce these amounts."}
           </p>
-          {funding.length ? (
+          {goal.linked_account_id ? null : funding.length ? (
             <ul className="flex flex-col gap-3">
               {funding.map((row) => (
                 <GoalAllocationRow key={row.account_id} row={row} />
@@ -485,24 +482,16 @@ function MovementPanel({ goals, disabled }: { goals: FinanceGoalsController; dis
         </NativeSelect>
       </Field>
       <Field>
-        <FieldLabel htmlFor="goal-movement-account">
+        <FieldLabel id="goal-movement-account-label">
           {deposit ? "Source account" : "Destination account"}
         </FieldLabel>
-        <NativeSelect
-          id="goal-movement-account"
-          className="w-full"
-          disabled={disabled}
+        <FinanceAccountChoice
+          label={deposit ? "Source account" : "Destination account"}
           value={goals.accountId}
-          onChange={(event) => goals.selectAccount(event.target.value)}
-        >
-          <NativeSelectOption value="">Choose an account</NativeSelectOption>
-          {options.map((row) => (
-            <NativeSelectOption key={row.account_id} value={row.account_id}>
-              {row.account_name}
-              {!deposit && row.account_id === linked ? " (linked account)" : ""}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+          onChange={goals.selectAccount}
+          disabled={disabled}
+          accounts={options.map(goalChoice)}
+        />
         {selected && deposit && (
           <FieldDescription>
             {selected.account_name} holds {formatPHP(selected.balance_cents)}.
@@ -572,7 +561,7 @@ function GoalRemovalActions({ goal, goals, readOnly }: { goal: FinanceGoal; goal
         <Button
           type="button"
           variant="outline"
-          disabled={locked || goal.saved_cents > 0}
+          disabled={locked || (!goal.linked_account_id && goal.saved_cents > 0)}
           onClick={() => setConfirm("archive")}
         >
           Archive

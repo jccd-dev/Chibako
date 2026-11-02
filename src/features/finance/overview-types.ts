@@ -17,6 +17,7 @@ export interface FinanceOverview {
   currency: "PHP";
   money: { balance_cents: number; account_count: number };
   assets: { balance_cents: number; account_count: number };
+  credit: { balance_cents: number; account_count: number };
   spendable_cents: number;
   allocations: { reserved_cents: number; goal_count: number };
   obligations: { debt_cents: number; receivable_cents: number };
@@ -26,14 +27,15 @@ export type FinanceAttentionKind =
   | "pending_plan"
   | "obligation_due"
   | "budget_overrun"
-  | "allocation_shortfall";
+  | "allocation_shortfall"
+  | "credit_due";
 
 export interface FinanceAttentionItem {
   id: string;
   kind: FinanceAttentionKind;
   reference_id: string;
   title: string;
-  target: "planning" | "obligations" | "budgets" | "goals";
+  target: "planning" | "obligations" | "budgets" | "goals" | "accounts";
   urgency: "overdue" | "due" | "upcoming" | "warning";
   due_date: string | null;
   amount_cents: number;

@@ -3,12 +3,15 @@
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import type { useFinanceEntry } from "../use-finance-entry";
 import { formatPHP } from "../presentation";
+import type { FinanceAccount } from "../types";
 import { MoneyInput } from "./MoneyInput";
 
-export function FinanceCashbackFields({ entry, disabled }: {
+export function FinanceCashbackFields({ entry, accounts, disabled }: {
   entry: ReturnType<typeof useFinanceEntry>;
+  accounts: readonly FinanceAccount[];
   disabled: boolean;
 }) {
   const error = entry.errors.cashback_value;
@@ -58,11 +61,34 @@ export function FinanceCashbackFields({ entry, disabled }: {
             />
           )}
           <FieldDescription id="transaction-cashback-help">
-            Recorded as Cashback income in the same account on the expense date.
+            Recorded as Cashback income on the expense date.
             {entry.cashbackMode === "percent" && " Up to two decimal places; rounded to the nearest cent, with half-cents rounded up."}
             {entry.cashbackPreview !== null && ` Income: ${formatPHP(entry.cashbackPreview)}.`}
           </FieldDescription>
           <FieldError id="error-cashback_value">{error}</FieldError>
+        </Field>
+      )}
+      {entry.cashbackMode !== "off" && (
+        <Field>
+          <FieldLabel htmlFor="transaction-cashback_account_id">Cashback account</FieldLabel>
+          <NativeSelect
+            id="transaction-cashback_account_id"
+            className="w-full"
+            value={entry.cashbackAccountId === entry.accountId ? "" : entry.cashbackAccountId}
+            disabled={disabled}
+            onChange={(event) => entry.setCashbackAccountId(event.target.value)}
+            aria-describedby="transaction-cashback_account-help"
+          >
+            <NativeSelectOption value="">Same as paying account</NativeSelectOption>
+            {accounts
+              .filter((account) => !account.archived && account.id !== entry.accountId && (account.kind === "money" || account.kind === "credit"))
+              .map((account) => (
+                <NativeSelectOption key={account.id} value={account.id}>{account.name}</NativeSelectOption>
+              ))}
+          </NativeSelect>
+          <FieldDescription id="transaction-cashback_account-help">
+            Some banks credit cashback to another account, such as your credit card.
+          </FieldDescription>
         </Field>
       )}
     </>

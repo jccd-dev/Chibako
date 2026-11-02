@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { accountLogoIds } from "./account-logos";
 
 export const financeScopeSchema = z.enum(["finance:read", "finance:write", "finance:manage"]);
 export type FinanceScope = z.infer<typeof financeScopeSchema>;
@@ -11,20 +12,31 @@ export type FinanceActor =
 const requestId = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const accountId = z.string().min(1).max(128);
 const name = z.string().trim().min(1).max(120);
-export const accountKindSchema = z.enum(["money", "asset"]);
+export const accountKindSchema = z.enum(["money", "asset", "credit"]);
+export const dueModeSchema = z.enum(["fixed_day", "after_statement"]);
 export const accountGroupSchema = z.string().trim().max(80);
+export const accountLogoSchema = z.enum(["", ...accountLogoIds]);
 
 const maintainingBalance = z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a non-negative PHP decimal string with at most two decimal places");
+const creditLimit = maintainingBalance;
+const monthDay = z.number().int().min(1).max(31);
+// Day ranges per due mode (1–31 fixed, 1–60 after statement) are checked with the other account kind rules.
+const dueValue = z.number().int().min(1).max(60);
 
 export const createAccountSchema = z.object({
   request_id: requestId,
   name,
   kind: accountKindSchema,
   account_group: accountGroupSchema.default(""),
+  logo: accountLogoSchema.default(""),
   include_in_summary: z.boolean().default(true),
   currency: z.literal("PHP"),
   maintaining_balance: maintainingBalance.default("0"),
   opening_balance: z.string().max(32).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a PHP decimal string with at most two decimal places"),
+  credit_limit: creditLimit.optional(),
+  statement_day: monthDay.optional(),
+  due_mode: dueModeSchema.optional(),
+  due_value: dueValue.optional(),
 }).strict();
 
 export const updateAccountSchema = z.object({
@@ -34,8 +46,13 @@ export const updateAccountSchema = z.object({
   maintaining_balance: maintainingBalance.optional(),
   archived: z.boolean().optional(),
   account_group: accountGroupSchema.optional(),
+  logo: accountLogoSchema.optional(),
   include_in_summary: z.boolean().optional(),
-}).strict().refine(input => input.name !== undefined || input.archived !== undefined || input.account_group !== undefined || input.include_in_summary !== undefined || input.maintaining_balance !== undefined, "Provide account settings to update");
+  credit_limit: creditLimit.optional(),
+  statement_day: monthDay.nullable().optional(),
+  due_mode: dueModeSchema.nullable().optional(),
+  due_value: dueValue.nullable().optional(),
+}).strict().refine(input => Object.keys(input).some(key => key !== "request_id" && key !== "version"), "Provide account settings to update");
 
 export const getAccountSchema = z.object({ id: accountId }).strict();
 export const listAccountsSchema = z.object({
@@ -53,6 +70,7 @@ export interface FinanceAccount {
   name: string;
   kind: z.infer<typeof accountKindSchema>;
   account_group: string;
+  logo: string;
   include_in_summary: boolean;
   currency: "PHP";
   opening_balance_cents: number;
@@ -60,6 +78,20 @@ export interface FinanceAccount {
   planned_expense_cents: number;
   spendable_cents: number;
   balance_cents: number;
+  /** Credit settings and derived usage; null for money and asset accounts. */
+  credit_limit_cents: number | null;
+  statement_day: number | null;
+  due_mode: z.infer<typeof dueModeSchema> | null;
+  due_value: number | null;
+  used_credit_cents: number | null;
+  available_credit_cents: number | null;
+  /** Last closed statement (credit accounts with a statement day); null otherwise. */
+  statement_date: string | null;
+  /** Amount owed as of statement_date, and what remains after later payments and credits (never below 0). */
+  statement_balance_cents: number | null;
+  remaining_due_cents: number | null;
+  /** Due date of the last statement; null without both a statement day and a due rule. */
+  next_due_date: string | null;
   archived: boolean;
   version: number;
   created_at: number;
@@ -77,6 +109,8 @@ export interface FinanceSummary {
   currency: "PHP";
   money: { balance_cents: number; account_count: number };
   assets: { balance_cents: number; account_count: number };
+  /** Credit balances: negative when owed. Net balance is money plus credit; credit is never an asset. */
+  credit: { balance_cents: number; account_count: number };
 }
 
 export class FinanceError extends Error {

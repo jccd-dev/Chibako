@@ -24,6 +24,7 @@ import type { FinanceActivityController } from "@/features/finance/use-finance-a
 import { useFinanceCorrection } from "@/features/finance/use-finance-correction";
 import { formatPHP } from "@/features/finance/presentation";
 
+import { FinanceAccountChoice } from "./FinanceAccountChoice";
 export function FinanceCorrection({
   record,
   activity,
@@ -43,8 +44,10 @@ export function FinanceCorrection({
     (account) =>
       account.id === edit.accountId ||
       (!account.archived &&
-        account.kind ===
-          (record.type === "valuation" && !refund ? "asset" : "money")),
+        (record.type === "valuation" && !refund
+          ? account.kind === "asset"
+          : account.kind === "money" ||
+            (account.kind === "credit" && (refund || record.type === "expense" || record.type === "refund")))),
   );
   const errorProps = (key: string) => ({
     "aria-invalid": !!edit.errors[key],
@@ -154,28 +157,20 @@ export function FinanceCorrection({
                 </FieldError>
               </Field>
               <Field data-invalid={!!edit.errors.account_id}>
-                <FieldLabel htmlFor="correction-account">
+                <FieldLabel id="correction-account-label">
                   {refund
                     ? "Receiving account"
                     : record.type === "transfer"
                       ? "Source account"
                       : "Account"}
                 </FieldLabel>
-                <NativeSelect
-                  id="correction-account"
-                  className="w-full"
+                <FinanceAccountChoice
+                  label="Account"
                   value={edit.accountId}
+                  onChange={edit.setAccountId}
                   disabled={blocked || (linked && !refund)}
-                  onChange={(event) => edit.setAccountId(event.target.value)}
-                  {...errorProps("account_id")}
-                >
-                  {accounts.map((account) => (
-                    <NativeSelectOption key={account.id} value={account.id}>
-                      {account.name}
-                      {account.archived ? " (archived)" : ""}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  accounts={accounts}
+                />
                 <FieldError id="correction-error-account_id">
                   {edit.errors.account_id}
                 </FieldError>
@@ -198,7 +193,7 @@ export function FinanceCorrection({
                       .filter(
                         (account) =>
                           account.id === edit.destinationId ||
-                          (!account.archived && account.kind === "money"),
+                          (!account.archived && (account.kind === "money" || account.kind === "credit")),
                       )
                       .map((account) => (
                         <NativeSelectOption
@@ -386,16 +381,37 @@ export function FinanceCorrection({
           </div>
         </form>
       )}
+      {record.cashback_expense_id && !record.reverted && (
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <Field data-invalid={!!edit.errors.transaction_date}>
+            <FieldLabel htmlFor="correction-cashback-date">Credited date</FieldLabel>
+            <FinanceDateInput
+              id="correction-cashback-date"
+              min="1000-01-01"
+              max="9999-12-31"
+              value={edit.date}
+              disabled={activity.busy}
+              onChange={edit.setDate}
+              {...errorProps("transaction_date")}
+            />
+            <FieldDescription>When the bank actually credited this cashback.</FieldDescription>
+            <FieldError id="correction-error-transaction_date">{edit.errors.transaction_date}</FieldError>
+          </Field>
+          <Button type="submit" variant="outline" disabled={activity.busy || edit.date === record.transaction_date}>
+            {activity.busy ? "Saving…" : "Save cashback date"}
+          </Button>
+        </form>
+      )}
       {record.cashback_expense_id && (
         <p className="text-sm text-muted-foreground">
           This cashback income is managed with its original expense. Open that
-          expense to correct or revert both entries.
+          expense to change its amount, account, or revert both entries.
         </p>
       )}
       {record.cashback_transaction_id && (
         <p className="text-sm text-muted-foreground">
-          Cashback stays on the same account and date as this expense.
-          Percentage cashback recalculates when the expense amount changes.
+          Cashback stays on the same account as this expense and keeps its own
+          credited date. Percentage cashback recalculates when the expense amount changes.
         </p>
       )}
       {activity.saveError && (

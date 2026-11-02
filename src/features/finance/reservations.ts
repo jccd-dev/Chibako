@@ -10,6 +10,10 @@ export function reservedAccountCents(accountId: string): number {
   return exactCents(total);
 }
 
+function isCreditAccount(id: string): boolean {
+  return !!getDb().prepare("SELECT 1 FROM finance_accounts WHERE id = ? AND kind = 'credit'").get(id);
+}
+
 export function reservationAmounts(balance: number, reserved: number) {
   // A negative balance leaves all reservations uncovered; its cash deficit is separate.
   const backed = Math.max(0, balance);
@@ -23,7 +27,8 @@ export function financeBalanceWarnings(balances: { account_id: string; balance_c
     .filter(row => row.shortfall_cents > 0)
     .map(({ account_id, balance_cents, reserved_cents, shortfall_cents }) => ({ account_id, balance_cents, reserved_cents, shortfall_cents }));
   return {
-    warnings: [...(balances.some(row => row.balance_cents < 0) ? ["negative_balance"] : []), ...(shortfalls.length ? ["allocation_shortfall"] : [])],
+    // A negative credit balance is the amount owed, not a problem to flag.
+    warnings: [...(balances.some(row => row.balance_cents < 0 && !isCreditAccount(row.account_id)) ? ["negative_balance"] : []), ...(shortfalls.length ? ["allocation_shortfall"] : [])],
     ...(shortfalls.length ? { allocation_shortfalls: shortfalls } : {}),
   };
 }

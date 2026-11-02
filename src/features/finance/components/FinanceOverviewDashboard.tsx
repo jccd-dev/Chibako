@@ -1,5 +1,7 @@
 "use client";
 
+import { CompactMoney } from "./CompactMoney";
+
 
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import {
@@ -62,6 +64,7 @@ import type { FinanceReportsController } from "@/features/finance/use-finance-re
 import type { FinancePlanningController } from "@/features/finance/use-finance-planning";
 import type { FinanceAccount } from "@/features/finance/types";
 import { cn } from "cn";
+import { AccountLogo } from "./AccountLogo";
 
 interface FinanceOverviewDashboardProps {
   finance: ReturnType<typeof useFinanceAccounts>;
@@ -251,11 +254,11 @@ export function FinanceOverviewDashboard({
               className="text-3xl font-semibold tabular-nums"
               data-testid="finance-money-total"
             >
-              {money(finance.summary?.money.balance_cents ?? 0)}
+              <CompactMoney cents={(finance.summary?.money.balance_cents ?? 0) + (finance.summary?.credit.balance_cents ?? 0)} />
             </CardTitle>
             <CardDescription>
               Net balance ·{" "}
-              {countLabel(finance.summary?.money.account_count ?? 0, "account")}
+              {countLabel((finance.summary?.money.account_count ?? 0) + (finance.summary?.credit.account_count ?? 0), "account")}
             </CardDescription>
             <CardAction>
               <ToggleGroup
@@ -411,7 +414,7 @@ export function FinanceOverviewDashboard({
                   className="mt-1 break-words text-lg font-semibold tabular-nums"
                   data-testid="finance-income-total"
                 >
-                  {money(income)}
+                  <CompactMoney cents={income} />
                 </dd>
               </div>
               <div>
@@ -420,13 +423,13 @@ export function FinanceOverviewDashboard({
                   className="mt-1 break-words text-lg font-semibold tabular-nums"
                   data-testid="finance-expense-total"
                 >
-                  {money(expenses)}
+                  <CompactMoney cents={expenses} />
                 </dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Net cash flow</dt>
                 <dd className="mt-1 break-words text-lg font-semibold tabular-nums">
-                  {money(income - expenses)}
+                  <CompactMoney cents={income - expenses} />
                 </dd>
               </div>
               <div>
@@ -440,7 +443,7 @@ export function FinanceOverviewDashboard({
                   className="mt-1 break-words text-lg font-semibold tabular-nums"
                   data-testid="finance-spendable-total"
                 >
-                  {money(finance.summary?.spendable_cents ?? 0)}
+                  <CompactMoney cents={finance.summary?.spendable_cents ?? 0} />
                 </dd>
               </div>
             </dl>
@@ -663,28 +666,27 @@ export function FinanceOverviewDashboard({
                 className="grid w-full grid-flow-col auto-cols-[85%] gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-1 scrollbar-none motion-reduce:scroll-auto sm:auto-cols-[calc((100%-0.75rem)/2)] xl:auto-cols-[85%]"
               >
                 {accounts.map((account) => (
-                  <button
+                  <div
                     key={account.id}
-                    type="button"
-                    aria-label={`View ${account.name}`}
-                    onClick={() => onOpenAccount(account)}
-                    className="flex min-w-0 snap-start flex-col rounded-lg bg-primary/15 p-4 text-left ring-1 ring-foreground/5 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                    className="relative flex min-w-0 snap-start flex-col rounded-lg bg-primary/15 p-4 text-left ring-1 ring-foreground/5 hover:bg-muted"
                   >
-                    <span className="flex items-start justify-between gap-2">
+                    <button
+                      type="button"
+                      aria-label={`View ${account.name}`}
+                      onClick={() => onOpenAccount(account)}
+                      className="flex items-center gap-2 text-left after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-ring"
+                    >
+                      <AccountLogo logo={account.logo} name={account.name} className="size-7" />
                       <span className="min-w-0 flex-1 break-words text-xs font-medium">
                         {account.name}
                       </span>
-                      <IconWallet
-                        className="size-4 shrink-0 text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                    </span>
+                    </button>
                     <span className="mt-5 text-xs text-muted-foreground">Net balance</span>
                     <span className="mt-1 block break-words text-2xl font-semibold tracking-tight tabular-nums">
-                      {money(account.balance_cents)}
+                      <CompactMoney cents={account.balance_cents} className="relative z-10" />
                     </span>
                     <span className="mt-1 text-xs tabular-nums">
-                      Spendable this month {money(account.spendable_cents)}
+                      Spendable this month <CompactMoney cents={account.spendable_cents} className="relative z-10" />
                     </span>
                     <span className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                       <span>Debit account</span>
@@ -700,7 +702,7 @@ export function FinanceOverviewDashboard({
                         <span>PHP</span>
                       )}
                     </span>
-                  </button>
+                  </div>
                 ))}
               </div>
             ) : (
@@ -730,7 +732,7 @@ export function FinanceOverviewDashboard({
                       {account.name}
                     </span>
                     <span className="shrink-0 tabular-nums">
-                      {money(account.balance_cents)}
+                      <CompactMoney cents={account.balance_cents} />
                     </span>
                   </li>
                 ))}

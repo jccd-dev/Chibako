@@ -18,7 +18,8 @@ export const postTransferSchema = z.object({
   amount: postTransactionSchema.shape.amount,
   fee: z.object({
     amount: postTransactionSchema.shape.amount,
-    category_id: getAccountSchema.shape.id,
+    // Omitted: the fee is filed under the Fees expense category.
+    category_id: getAccountSchema.shape.id.optional(),
     subcategory_id: postTransactionSchema.shape.subcategory_id,
   }).strict().optional(),
 }).strict().refine(value => value.source_account_id !== value.destination_account_id, "Choose different source and destination accounts");

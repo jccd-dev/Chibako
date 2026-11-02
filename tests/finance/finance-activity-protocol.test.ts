@@ -84,3 +84,26 @@ test("REST and MCP share post retries, classification versions, details, bounded
   assert.ok(audits.every(row => row.actor_id === `api-key:${id}`));
   assert.equal(JSON.stringify(audits).includes(key), false);
 });
+
+test("REST and MCP charge card expenses with the same results and credit limit errors", async () => {
+  const { key } = createApiKey("Card spending", ["finance:read", "finance:write"]);
+  const card = createAccount({ kind: "owner" }, { request_id: "card", name: "Visa", kind: "credit", currency: "PHP", opening_balance: "0", credit_limit: "100" }).account;
+  const charge = { account_id: card.id, amount: "30", transaction_date: "2026-10-03" };
+  const restPosted = await (await post(rest(key, "activity", { ...charge, request_id: "rest-card" }), context)).json();
+  const mcpPosted = await rpc(key, "post_finance_transaction", { ...charge, request_id: "mcp-card" });
+  assert.equal(restPosted.balance_cents, -3000);
+  assert.equal(mcpPosted.structuredContent.balance_cents, -6000);
+  assert.deepEqual([restPosted.warnings, mcpPosted.structuredContent.warnings], [[], []]);
+
+  const over = { ...charge, amount: "40.01" };
+  const restRejected = await post(rest(key, "activity", { ...over, request_id: "rest-over" }), context);
+  assert.equal(restRejected.status, 409);
+  assert.deepEqual(await restRejected.json(), { error: "This exceeds the available credit on this card", code: "credit_limit_exceeded" });
+  const mcpRejected = await rpc(key, "post_finance_transaction", { ...over, request_id: "mcp-over" });
+  assert.equal(mcpRejected.isError, true);
+  assert.equal(mcpRejected.content[0].text, "error: credit_limit_exceeded: This exceeds the available credit on this card");
+  const income = { ...charge, type: "income", amount: "1" };
+  assert.equal((await post(rest(key, "activity", { ...income, request_id: "rest-income" }), context)).status, 400);
+  assert.equal((await rpc(key, "post_finance_transaction", { ...income, request_id: "mcp-income" })).content[0].text, "error: invalid_account: Choose an active money account");
+  assert.equal((await (await history(rest(key, "activity?type=expense"), context)).json()).total, 2);
+});

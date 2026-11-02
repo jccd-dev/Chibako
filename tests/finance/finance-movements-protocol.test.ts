@@ -65,3 +65,24 @@ test("REST and MCP share movement retries and enforce independent write/read sco
   assert.equal(result.total, 1);
   assert.equal((await transfer(request("invalid", "activity/transfers", {}), context)).status, 401);
 });
+
+test("REST and MCP pay a card by transfer and reject a card as the source alike", async () => {
+  const owner = { kind: "owner" } as const;
+  const { key } = createApiKey("Card payments", ["finance:read", "finance:write"]);
+  const cash = createAccount(owner, { request_id: "pay-cash", name: "Pay cash", kind: "money", currency: "PHP", opening_balance: "100" }).account;
+  const card = createAccount(owner, { request_id: "pay-card", name: "Pay card", kind: "credit", currency: "PHP", opening_balance: "-80", credit_limit: "500" }).account;
+  const payment = { source_account_id: cash.id, destination_account_id: card.id, amount: "30", transaction_date: "2026-10-03" };
+  const restPaid = await (await transfer(request(key, "activity/transfers", { ...payment, request_id: "rest-pay" }), context)).json();
+  const mcpPaid = await rpc(key, "post_finance_transfer", { ...payment, request_id: "mcp-pay" });
+  assert.deepEqual(restPaid.balances, [{ account_id: cash.id, balance_cents: 7000 }, { account_id: card.id, balance_cents: -5000 }]);
+  assert.deepEqual(mcpPaid.structuredContent.balances, [{ account_id: cash.id, balance_cents: 4000 }, { account_id: card.id, balance_cents: -2000 }]);
+
+  const reversed = { ...payment, source_account_id: card.id, destination_account_id: cash.id, amount: "1" };
+  const restRejected = await transfer(request(key, "activity/transfers", { ...reversed, request_id: "rest-from-card" }), context);
+  assert.equal(restRejected.status, 400);
+  assert.deepEqual(await restRejected.json(), { error: "Choose an active money source and an active money or credit destination", code: "invalid_account" });
+  assert.equal((await rpc(key, "post_finance_transfer", { ...reversed, request_id: "mcp-from-card" })).content[0].text, "error: invalid_account: Choose an active money source and an active money or credit destination");
+  const short = { ...payment, amount: "40.01" };
+  assert.equal((await transfer(request(key, "activity/transfers", { ...short, request_id: "rest-short" }), context)).status, 409);
+  assert.equal((await rpc(key, "post_finance_transfer", { ...short, request_id: "mcp-short" })).content[0].text, "error: insufficient_funds: Insufficient funds in this account");
+});

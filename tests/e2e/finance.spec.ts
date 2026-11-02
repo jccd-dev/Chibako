@@ -2,6 +2,15 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { chooseFinanceDate } from "./finance-date-controls";
 
+async function pickAccount(page: Page, group: string, name: string) {
+  const choice = page.getByRole("radiogroup", { name: group, exact: true });
+  await choice.waitFor();
+  const tile = choice.locator("label", { hasText: name }).first();
+  // Long account lists collapse behind "Show N more".
+  if (!(await tile.count())) await page.getByRole("button", { name: /^Show \d+ more$/ }).first().click();
+  await tile.click();
+}
+
 async function authenticate(page: Page) {
   const clientId = randomUUID();
   await page.route("**/api/login", route => route.continue({ headers: { ...route.request().headers(), "x-chibako-client-ip": clientId } }));
@@ -60,7 +69,7 @@ test("goal withdrawals validate available money and show progress", async ({ pag
   await expect(row).toContainText("25%");
   await row.click();
   await page.getByLabel("Action", { exact: true }).selectOption("withdrawal");
-  await page.getByLabel("Destination account", { exact: true }).selectOption(account.id);
+  await pickAccount(page, "Destination account", account.name);
   await expect(page.getByText(/Available to withdraw:/)).toBeVisible();
   await page.locator("#goal-movement-amount").fill("25.01");
   let submitted = 0;
@@ -187,7 +196,7 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
   await page.getByRole("switch", { name: "Set as recurring expense" }).click();
   await page.locator("#schedule-text").fill(planText);
   await page.locator("#schedule-amount").fill("35.50");
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await pickAccount(page, "Account", cash);
   await chooseFinanceDate(page, "Logged at", "2026-10-02");
   await page.getByRole("button", { name: "Save expense plan", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -200,7 +209,7 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
 
   await page.getByRole("button", { name: `Open ${planText}`, exact: true }).click();
   await page.getByRole("button", { name: "Log payment", exact: true }).click();
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: cash });
+  await pickAccount(page, "Account", cash);
   await chooseFinanceDate(page, "Date paid", "2026-10-04");
   await page.getByRole("button", { name: "Confirm payment", exact: true }).click();
   await expect(page.getByText("Actual activity posted once. Account balance: PHP 464.50.", { exact: true })).toBeVisible();
@@ -233,4 +242,95 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
   expect(reopened.plan.status).toBe("pending");
   expect(reopened.plan.transaction_id).toBeNull();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("credit accounts show card fields when added and list used and available credit", async ({ page }) => {
+  await authenticate(page);
+  await openFinanceTab(page, "accounts");
+  const name = `TEST CREDIT card ${randomUUID().slice(0, 8)}`;
+  await page.getByRole("button", { name: "Add account", exact: true }).click();
+  await page.getByLabel("Account name", { exact: true }).fill(name);
+  await expect(page.getByLabel("Credit limit (PHP)", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Account type", { exact: true }).selectOption("credit");
+  await expect(page.getByLabel("Opening balance (PHP)", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Maintaining balance (PHP)", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Credit limit (PHP)", { exact: true }).fill("10000");
+  await page.getByRole("checkbox", { name: "I already owe on this card", exact: true }).check();
+  await page.getByLabel("Existing owed balance (PHP)", { exact: true }).fill("2500");
+  await page.getByLabel("Statement day", { exact: true }).selectOption("25");
+  await page.getByRole("button", { name: "Days after statement", exact: true }).click();
+  await page.getByLabel("Days after statement", { exact: true }).selectOption("21");
+  await expect(page.getByRole("status").filter({ hasText: "Used credit" })).toContainText("Used credit PHP 2,500.00 · Available PHP 7,500.00");
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const card = page.locator("[data-slot=card]").filter({ has: page.getByRole("button", { name: "View " + name, exact: true }) });
+  await expect(card).toContainText("Credit");
+  await expect(card).toContainText("-PHP 2,500.00");
+  await expect(card).toContainText("Used PHP 2,500.00 · Available PHP 7,500.00");
+  await expect(card).not.toContainText("Negative balance");
+  const { accounts } = await (await page.request.get("/api/finance/accounts?kind=credit&limit=100")).json();
+  const saved = accounts.find((row: { name: string }) => row.name === name);
+  expect([saved.statement_day, saved.due_mode, saved.due_value, saved.credit_limit_cents]).toEqual([25, "after_statement", 21, 1000000]);
+
+  // Charge the card up to its available credit, then pay it from a money account.
+  const cashName = `TEST CREDIT payer ${randomUUID().slice(0, 8)}`;
+  expect((await page.request.post("/api/finance/accounts", { data: { request_id: randomUUID(), name: cashName, kind: "money", currency: "PHP", opening_balance: "1000" } })).ok()).toBe(true);
+  await page.reload();
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("7500.01");
+  await pickAccount(page, "Account", name);
+  await expect(page.getByRole("alert").filter({ hasText: "Over credit limit" })).toContainText(`${name} has PHP 7,500.00 available credit`);
+  await expect(page.getByRole("button", { name: "Save transaction", exact: true })).toBeDisabled();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("100");
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("Used PHP 2,600.00 · Available PHP 7,400.00");
+
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByRole("button", { name: "Transfer", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("600");
+  await expect(page.getByLabel("Source account", { exact: true }).locator("option", { hasText: name })).toHaveCount(0);
+  await pickAccount(page, "Source account", cashName);
+  await pickAccount(page, "Destination account", name);
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("Used PHP 2,000.00 · Available PHP 8,000.00");
+});
+
+test("a card statement due reminder appears after a charge and clears once paid by transfer", async ({ page }) => {
+  await authenticate(page);
+  await openFinanceTab(page, "accounts");
+  const name = `TEST CREDIT due ${randomUUID().slice(0, 8)}`;
+  const cashName = `TEST CREDIT due payer ${randomUUID().slice(0, 8)}`;
+  // Closing the statement today puts today's charge on it.
+  const statementDay = new Date().getDate();
+  const created = await page.request.post("/api/finance/accounts", { data: { request_id: randomUUID(), name, kind: "credit", currency: "PHP", opening_balance: "0", credit_limit: "5000", statement_day: statementDay, due_mode: "after_statement", due_value: 10 } });
+  expect(created.ok()).toBe(true);
+  const cardId = (await created.json()).account.id;
+  expect((await page.request.post("/api/finance/accounts", { data: { request_id: randomUUID(), name: cashName, kind: "money", currency: "PHP", opening_balance: "1000" } })).ok()).toBe(true);
+  const reminder = async () => ((await (await page.request.get("/api/finance/attention?limit=100")).json()).items as { reference_id: string; kind: string; title: string; amount_cents: number; urgency: string }[])
+    .find(item => item.reference_id === cardId);
+  await page.reload();
+  const card = page.locator("[data-slot=card]").filter({ has: page.getByRole("button", { name: "View " + name, exact: true }) });
+  await expect(card).toContainText("Next due");
+  expect(await reminder()).toBeUndefined();
+
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("300");
+  await pickAccount(page, "Account", name);
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("PHP 300.00 due");
+  expect(await reminder()).toMatchObject({ kind: "credit_due", title: name, amount_cents: 30000, urgency: "upcoming" });
+
+  await page.getByRole("button", { name: "Add transaction", exact: true }).click();
+  await page.getByRole("button", { name: "Transfer", exact: true }).click();
+  await page.getByLabel("Amount (PHP)", { exact: true }).fill("300");
+  await pickAccount(page, "Source account", cashName);
+  await pickAccount(page, "Destination account", name);
+  await page.getByRole("button", { name: "Save transaction", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(card).toContainText("Next due");
+  await expect(card).not.toContainText("PHP 300.00 due");
+  expect(await reminder()).toBeUndefined();
 });

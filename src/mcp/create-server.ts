@@ -478,11 +478,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: obligationHistorySchema, annotations: READ_ONLY,
     }, ({ id, ...args }) => financeResult("finance:read", actor => getObligationPaymentHistory(actor, id, args)));
     server.registerTool("list_finance_goals", {
-      title: "List savings goals", description: "Paginated PHP savings goals with held money, optional linked account and achievement, active by default. Unlinked savings are held in the goal and included once in money totals. Funding allocations identify remaining contributions, not source reservations.",
+      title: "List savings goals", description: "Paginated PHP savings goals with held money, optional linked account and achievement, active by default. A linked goal's saved amount is its account's live positive balance. Unlinked savings are held in the goal and included once in money totals; their allocations identify remaining contributions.",
       inputSchema: listGoalsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listGoals(actor, args) })));
     server.registerTool("get_finance_goal", {
-      title: "Inspect savings goal", description: "Read a goal's held money, linked account, target and remaining funding contributions. Account shortfalls describe linked account holdings, not missing cash at original funding sources.",
+      title: "Inspect savings goal", description: "Read a goal's saved money, linked account, target and, for unlinked goals, remaining funding contributions. A linked goal's saved amount is its account's live positive balance.",
       inputSchema: getGoalSchema, annotations: READ_ONLY,
     }, ({ id }) => financeResult("finance:read", actor => ({ goal: getGoal(actor, id) })));
     server.registerTool("list_finance_goal_accounts", {
@@ -534,11 +534,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: listAccountsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listAccounts(actor, args) })));
     server.registerTool("get_finance_account", {
-      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version.",
+      title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version. Credit accounts also return credit_limit_cents, used_credit_cents, available_credit_cents, statement/due settings, and statement_date, statement_balance_cents, remaining_due_cents and next_due_date from the last closed statement; a negative balance is the amount owed.",
       inputSchema: getAccountSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ account: getAccount(actor, args.id) })));
     server.registerTool("get_finance_summary", {
-      title: "Finance summary", description: "Separate money and asset totals in PHP integer cents, including archived holdings. Openings do not count as income or spending.",
+      title: "Finance summary", description: "Separate money, asset and credit totals in PHP integer cents, including archived holdings. Credit balances are negative when owed; net balance is money plus credit, and credit is never an asset. Openings do not count as income or spending.",
       inputSchema: z.object({}).strict(), annotations: READ_ONLY,
     }, () => financeResult("finance:read", actor => ({ ...getFinanceSummary(actor) })));
     server.registerTool("get_finance_overview", {
@@ -546,7 +546,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: z.object({}).strict(), annotations: READ_ONLY,
     }, () => financeResult("finance:read", actor => ({ ...getFinanceOverview(actor) })));
     server.registerTool("get_finance_attention", {
-      title: "Finance attention queue", description: "Bounded upcoming and overdue plans, obligation due dates, current-month budget overruns and account allocation shortfalls. Text and personal obligation names are omitted; use the linked review capability for detail.",
+      title: "Finance attention queue", description: "Bounded upcoming and overdue plans, obligation due dates, credit card statement amounts still due (title is the card name), current-month budget overruns and account allocation shortfalls. Text and personal obligation names are omitted; use the linked review capability for detail.",
       inputSchema: financeAttentionSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...getFinanceAttention(actor, args) })));
   }
@@ -605,7 +605,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: recordRefundSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...recordRefund(actor, id, args) })));
     server.registerTool("post_finance_transfer", {
-      title: "Transfer money", description: "Atomically move a positive PHP amount between two active money accounts. Optional categorized fee is a linked expense deducted from the source. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
+      title: "Transfer money", description: "Atomically move a positive PHP amount from an active money account to another active money account or to a credit account (paying the card; the purchase was already counted as spending). Credit accounts cannot be a source; the source needs sufficient funds. Optional fee is a linked expense deducted from the source; without category_id it is filed under the Fees expense category. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
       inputSchema: postTransferSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransfer(actor, args) })));
     server.registerTool("reconcile_finance_account", {
@@ -617,7 +617,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postAdjustmentSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...valueAsset(actor, args) })));
     server.registerTool("post_finance_transaction", {
-      title: "Record income or expense", description: "Post actual PHP activity to an active money account. Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string} atomically records Cashback income to the same account/date. Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking.",
+      title: "Record income or expense", description: "Post actual PHP activity to an active money account; expenses may also be charged to an active credit (card) account up to its available credit (credit_limit_exceeded otherwise). Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string, account_id?} atomically records Cashback income on the expense date, to the expense's account unless account_id names another active money or credit account (invalid_account otherwise). Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking.",
       inputSchema: postTransactionSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
   }
@@ -640,15 +640,15 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:manage", actor => deleteObligation(actor, id, args)));
     const annotations = { ...MUTATING, idempotentHint: true };
     server.registerTool("create_finance_goal", {
-      title: "Create savings goal", description: "Create a positive PHP target, optional due date and optional linked_account_id. Starts empty. Deposits debit a source and credit the linked account, or stay held in the goal if unlinked.",
+      title: "Create savings goal", description: "Create a positive PHP target, optional due date and optional linked_account_id (an account backs one active goal). A linked goal tracks that account's balance; an unlinked one starts empty. Deposits debit a source and credit the linked account, or stay held in the goal if unlinked.",
       inputSchema: createGoalSchema, annotations,
     }, args => financeResult("finance:manage", actor => createGoal(actor, args)));
     server.registerTool("update_finance_goal", {
-      title: "Edit or archive savings goal", description: "Update name, target, due date or linked_account_id, or archive an empty goal. Changing linked_account_id requires finance:write too and moves the saved balance between backing locations; null holds money in the goal. Withdraw all money before archiving. Requires request_id and current version.",
+      title: "Edit or archive savings goal", description: "Update name, target, due date or linked_account_id, or archive. Changing linked_account_id requires finance:write too; linking an unlinked goal moves its held money into the account, other link changes move no money, and null starts goal-held savings. Withdraw an unlinked goal's money before archiving. Requires request_id and current version.",
       inputSchema: updateGoalSchema.safeExtend({ id: getGoalSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateGoal(actor, id, args)));
     server.registerTool("delete_finance_goal", {
-      title: "Permanently delete a savings goal", description: "Remove a mistaken goal and its movement history for good. Refused when its deposits, withdrawals or relocations left any account balance changed (return the money to its source or archive instead). Linked-account reservations are released. Never changes balances. Requires finance:manage, request_id and current version.",
+      title: "Permanently delete a savings goal", description: "Remove a mistaken goal and its movement history for good. Refused when its deposits, withdrawals or relocations left any account balance changed (return the money to its source or archive instead). Never changes balances. Requires finance:manage, request_id and current version.",
       inputSchema: deleteGoalSchema.extend({ id: getGoalSchema.shape.id }), annotations: DESTRUCTIVE,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => deleteGoal(actor, id, args)));
     if (financeAuthorized("finance:write")) server.registerTool("set_finance_goal_allocation", {
@@ -688,11 +688,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: updateClassificationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateClassification(actor, id, args)));
     server.registerTool("create_finance_account", {
-      title: "Create finance account", description: "Create a PHP money (Debit in the UI) or asset account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Optional account_group and include_in_summary (default true). Requires request_id; identical retries return the original account.",
+      title: "Create finance account", description: "Create a PHP money (Debit in the UI), asset, or credit (card) account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Credit accounts require a positive credit_limit and take an existing owed amount as a negative opening_balance; optional statement_day (1-31) and due rule: due_mode fixed_day with due_value 1-31, or after_statement with due_value 1-60 days (needs statement_day). Credit fields are rejected on other kinds. Optional account_group, logo (a bundled bank/wallet logo id such as gcash, empty for none) and include_in_summary (default true). Requires request_id; identical retries return the original account.",
       inputSchema: createAccountSchema, annotations,
     }, args => financeResult("finance:manage", actor => createAccount(actor, args)));
     server.registerTool("update_finance_account", {
-      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, or edit maintaining_balance on a money account. Changing maintaining_balance changes net balance by the same difference. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
+      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, edit maintaining_balance on a money account, or edit credit_limit, statement_day and due_mode/due_value on a credit account (null clears statement day or due rule). Changing maintaining_balance changes net balance by the same difference. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
       inputSchema: updateAccountSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateAccount(actor, id, args)));
   }

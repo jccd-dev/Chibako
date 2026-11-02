@@ -3,15 +3,42 @@ import { getDb, now } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { parseFinance as parse, financeMutation } from "./mutations";
 import { exactCents, decimalCents as openingCents } from "./money";
+import { canSpendFromAccount, accountSummaryBucket, creditSettingsError, type CreditSettings } from "./account-policy";
 import { localCalendarDate } from "./presentation";
+import { statementDate, statementDueDate } from "./credit-statement";
 import {
   createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema,
   FinanceError, type FinanceAccount, type FinanceActor, type FinanceAccountList, type FinanceSummary,
 } from "./types";
 
-type AccountRow = Omit<FinanceAccount, "archived" | "include_in_summary" | "balance_cents" | "planned_expense_cents" | "spendable_cents"> & { archived: number; include_in_summary: number };
+type AccountRow = Omit<FinanceAccount, "archived" | "include_in_summary" | "balance_cents" | "planned_expense_cents" | "spendable_cents" | "used_credit_cents" | "available_credit_cents" | "statement_date" | "statement_balance_cents" | "remaining_due_cents" | "next_due_date"> & { archived: number; include_in_summary: number };
 
-function accountFromRow(row: AccountRow): FinanceAccount {
+type CreditStatement = Pick<FinanceAccount, "statement_date" | "statement_balance_cents" | "remaining_due_cents" | "next_due_date">;
+const NO_STATEMENT: CreditStatement = { statement_date: null, statement_balance_cents: null, remaining_due_cents: null, next_due_date: null };
+
+/** Owed as of the last statement close, less payments and credits dated after it. Opening balance predates every statement. */
+function creditStatement(row: AccountRow, asOf: string): CreditStatement {
+  if (row.kind !== "credit" || row.statement_day === null) return NO_STATEMENT;
+  const closed = statementDate(row.statement_day, asOf);
+  const totals = getDb().prepare(`SELECT COALESCE(SUM(CASE WHEN effective_date <= @closed THEN cents END), 0) AS through,
+    COALESCE(SUM(CASE WHEN effective_date > @closed AND cents > 0 THEN cents END), 0) AS credits FROM (
+      SELECT transaction_date AS effective_date, CASE WHEN type = 'income' THEN amount_cents ELSE -amount_cents END AS cents FROM finance_transactions WHERE reverted = 0 AND account_id = @id
+      UNION ALL SELECT transaction_date, CASE WHEN type = 'transfer' AND account_id = @id THEN -amount_cents ELSE amount_cents END FROM finance_movements WHERE reverted = 0 AND (account_id = @id OR destination_account_id = @id)
+      UNION ALL SELECT transaction_date, amount_cents FROM finance_refunds WHERE reverted = 0 AND account_id = @id
+      UNION ALL SELECT transaction_date, CASE WHEN type = 'borrowing' THEN amount_cents ELSE -amount_cents END FROM finance_obligation_movements WHERE reverted = 0 AND account_id = @id
+    )`).safeIntegers().get({ id: row.id, closed }) as { through: bigint; credits: bigint };
+  const balance = BigInt(row.opening_balance_cents) + totals.through;
+  const owed = balance < 0n ? -balance : 0n;
+  const remaining = owed - totals.credits;
+  return {
+    statement_date: closed,
+    statement_balance_cents: exactCents(owed),
+    remaining_due_cents: exactCents(remaining > 0n ? remaining : 0n),
+    next_due_date: row.due_mode === null || row.due_value === null ? null : statementDueDate(closed, row.due_mode, row.due_value),
+  };
+}
+
+function accountFromRow(row: AccountRow, asOf = localCalendarDate()): FinanceAccount {
   let balance = BigInt(row.opening_balance_cents) + BigInt(row.maintaining_balance_cents);
   const effects = getDb().prepare("SELECT type, amount_cents FROM finance_transactions WHERE reverted = 0 AND account_id = ?").safeIntegers()
     .iterate(row.id) as Iterable<{ type: string; amount_cents: bigint }>;
@@ -32,13 +59,18 @@ function accountFromRow(row: AccountRow): FinanceAccount {
     if (effect.source_account_id === row.id) balance -= effect.amount_cents;
     if (effect.destination_account_id === row.id) balance += effect.amount_cents;
   }
-  const month = localCalendarDate().slice(0, 7);
+  const month = asOf.slice(0, 7);
   const plans = getDb().prepare("SELECT amount_cents FROM finance_plans WHERE account_id = ? AND type = 'expense' AND status = 'pending' AND due_date >= ? AND due_date <= ?")
     .safeIntegers().iterate(row.id, `${month}-01`, `${month}-31`) as Iterable<{ amount_cents: bigint }>;
   let planned = 0n;
   for (const plan of plans) planned += plan.amount_cents;
   const spendable = row.kind === "money" ? balance - BigInt(row.maintaining_balance_cents) - planned : 0n;
-  return { ...row, planned_expense_cents: exactCents(planned), spendable_cents: exactCents(spendable > 0n ? spendable : 0n), archived: row.archived === 1, include_in_summary: row.include_in_summary === 1, balance_cents: exactCents(balance) };
+  const used = balance < 0n ? -balance : 0n;
+  const available = row.credit_limit_cents === null ? 0n : BigInt(row.credit_limit_cents) + balance;
+  const credit = row.kind === "credit"
+    ? { used_credit_cents: exactCents(used), available_credit_cents: exactCents(available > 0n ? available : 0n) }
+    : { used_credit_cents: null, available_credit_cents: null };
+  return { ...row, ...credit, ...creditStatement(row, asOf), planned_expense_cents: exactCents(planned), spendable_cents: exactCents(spendable > 0n ? spendable : 0n), archived: row.archived === 1, include_in_summary: row.include_in_summary === 1, balance_cents: exactCents(balance) };
 }
 
 export function readAccountBalance(id: string): FinanceAccount {
@@ -47,8 +79,17 @@ export function readAccountBalance(id: string): FinanceAccount {
   return accountFromRow(row);
 }
 
-export function requireSufficientFunds(balanceCents: number | bigint, outgoingCents: number | bigint) {
-  if (BigInt(balanceCents) < BigInt(outgoingCents)) throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
+export function requireSufficientFunds(account: Pick<FinanceAccount, "kind" | "credit_limit_cents"> & { balance_cents: number | bigint }, outgoingCents: number | bigint) {
+  if (canSpendFromAccount(account, outgoingCents)) return;
+  if (account.kind === "credit") throw new FinanceError("This exceeds the available credit on this card", 409, "credit_limit_exceeded");
+  throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
+}
+
+/** Active credit accounts whose last statement still has an amount due on a known due date. */
+export function listCreditDueAccounts(actor: FinanceActor, asOf: string): FinanceAccount[] {
+  authorizeFinance(actor, "finance:read");
+  const rows = getDb().prepare("SELECT * FROM finance_accounts WHERE kind = 'credit' AND archived = 0 AND statement_day IS NOT NULL AND due_mode IS NOT NULL ORDER BY created_at, id").all() as AccountRow[];
+  return rows.map(row => accountFromRow(row, asOf)).filter(account => (account.remaining_due_cents ?? 0) > 0);
 }
 
 export function getAccount(actor: FinanceActor, id: string): FinanceAccount {
@@ -75,7 +116,7 @@ export function listAccounts(actor: FinanceActor, input: unknown = {}): FinanceA
     const { total } = db.prepare(`SELECT COUNT(*) AS total FROM finance_accounts ${where}`).get(...values) as { total: number };
     const rows = db.prepare(`SELECT * FROM finance_accounts ${where} ORDER BY created_at, id LIMIT ? OFFSET ?`)
       .all(...values, query.limit, query.offset) as AccountRow[];
-    return { accounts: rows.map(accountFromRow), total, limit: query.limit, offset: query.offset };
+    return { accounts: rows.map(row => accountFromRow(row)), total, limit: query.limit, offset: query.offset };
   })();
 }
 
@@ -85,28 +126,32 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
   const db = getDb();
   return db.transaction(() => {
     const rows = db.prepare("SELECT kind, opening_balance_cents, maintaining_balance_cents FROM finance_accounts WHERE include_in_summary = 1")
-      .safeIntegers().iterate() as Iterable<{ kind: "money" | "asset"; opening_balance_cents: bigint; maintaining_balance_cents: bigint }>;
-    const totals = { money: 0n, assets: 0n };
-    const summary: FinanceSummary = { currency: "PHP", money: { balance_cents: 0, account_count: 0 }, assets: { balance_cents: 0, account_count: 0 } };
+      .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; opening_balance_cents: bigint; maintaining_balance_cents: bigint }>;
+    const totals = { money: 0n, assets: 0n, credit: 0n };
+    const summary: FinanceSummary = { currency: "PHP", money: { balance_cents: 0, account_count: 0 }, assets: { balance_cents: 0, account_count: 0 }, credit: { balance_cents: 0, account_count: 0 } };
     for (const row of rows) {
-      const kind = row.kind === "money" ? "money" : "assets";
+      const kind = accountSummaryBucket(row.kind);
       totals[kind] += row.opening_balance_cents + row.maintaining_balance_cents;
       summary[kind].account_count++;
     }
     const effects = db.prepare("SELECT a.kind, t.type, t.amount_cents FROM finance_transactions t JOIN finance_accounts a ON a.id = t.account_id WHERE t.reverted = 0 AND a.include_in_summary = 1")
-      .safeIntegers().iterate() as Iterable<{ kind: string; type: string; amount_cents: bigint }>;
-    for (const effect of effects) totals[effect.kind === "money" ? "money" : "assets"] += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
+      .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; type: string; amount_cents: bigint }>;
+    for (const effect of effects) totals[accountSummaryBucket(effect.kind)] += effect.type === "income" ? effect.amount_cents : -effect.amount_cents;
     const adjustments = db.prepare("SELECT a.kind, m.amount_cents FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.type != 'transfer' AND m.reverted = 0 AND a.include_in_summary = 1")
-      .safeIntegers().iterate() as Iterable<{ kind: string; amount_cents: bigint }>;
-    for (const effect of adjustments) totals[effect.kind === "money" ? "money" : "assets"] += effect.amount_cents;
-    const transfers = db.prepare(`SELECT m.amount_cents, source.include_in_summary AS source_included, destination.include_in_summary AS destination_included
+      .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; amount_cents: bigint }>;
+    for (const effect of adjustments) totals[accountSummaryBucket(effect.kind)] += effect.amount_cents;
+    const transfers = db.prepare(`SELECT m.amount_cents, source.kind AS source_kind, source.include_in_summary AS source_included,
+      destination.kind AS destination_kind, destination.include_in_summary AS destination_included
       FROM finance_movements m JOIN finance_accounts source ON source.id = m.account_id
       JOIN finance_accounts destination ON destination.id = m.destination_account_id WHERE m.type = 'transfer' AND m.reverted = 0`)
-      .safeIntegers().iterate() as Iterable<{ amount_cents: bigint; source_included: bigint; destination_included: bigint }>;
-    for (const transfer of transfers) totals.money += transfer.amount_cents * (transfer.destination_included - transfer.source_included);
+      .safeIntegers().iterate() as Iterable<{ amount_cents: bigint; source_kind: FinanceAccount["kind"]; source_included: bigint; destination_kind: FinanceAccount["kind"]; destination_included: bigint }>;
+    for (const transfer of transfers) {
+      totals[accountSummaryBucket(transfer.source_kind)] -= transfer.amount_cents * transfer.source_included;
+      totals[accountSummaryBucket(transfer.destination_kind)] += transfer.amount_cents * transfer.destination_included;
+    }
     const refunds = db.prepare("SELECT a.kind, r.amount_cents FROM finance_refunds r JOIN finance_accounts a ON a.id = r.account_id WHERE r.reverted = 0 AND a.include_in_summary = 1")
-      .safeIntegers().iterate() as Iterable<{ kind: string; amount_cents: bigint }>;
-    for (const refund of refunds) totals[refund.kind === "money" ? "money" : "assets"] += refund.amount_cents;
+      .safeIntegers().iterate() as Iterable<{ kind: FinanceAccount["kind"]; amount_cents: bigint }>;
+    for (const refund of refunds) totals[accountSummaryBucket(refund.kind)] += refund.amount_cents;
     const principal = db.prepare("SELECT m.type, m.amount_cents FROM finance_obligation_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.reverted = 0 AND a.include_in_summary = 1").safeIntegers()
       .iterate() as Iterable<{ type: string; amount_cents: bigint }>;
     for (const effect of principal) totals.money += effect.type === "borrowing" ? effect.amount_cents : -effect.amount_cents;
@@ -126,6 +171,7 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
     }
     summary.money.balance_cents = exactCents(totals.money);
     summary.assets.balance_cents = exactCents(totals.assets);
+    summary.credit.balance_cents = exactCents(totals.credit);
     return summary;
   })();
 }
@@ -135,7 +181,14 @@ function mutateAccount(actor: FinanceActor, requestId: string, operation: string
     const { before, after } = change();
     return { result: { account: after }, affectedIds: [after.id], before, after };
   });
-  return { account: { ...result.account, account_group: result.account.account_group ?? "", include_in_summary: result.account.include_in_summary ?? true, maintaining_balance_cents: result.account.maintaining_balance_cents ?? 0, planned_expense_cents: result.account.planned_expense_cents ?? 0, spendable_cents: result.account.spendable_cents ?? (result.account.kind === "money" ? Math.max(0, result.account.balance_cents) : 0) } };
+  // Replayed results stored before newer account fields existed get their neutral values.
+  const credit = { credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null, used_credit_cents: null, available_credit_cents: null, ...NO_STATEMENT };
+  return { account: { ...credit, ...result.account, account_group: result.account.account_group ?? "", logo: result.account.logo ?? "", include_in_summary: result.account.include_in_summary ?? true, maintaining_balance_cents: result.account.maintaining_balance_cents ?? 0, planned_expense_cents: result.account.planned_expense_cents ?? 0, spendable_cents: result.account.spendable_cents ?? (result.account.kind === "money" ? Math.max(0, result.account.balance_cents) : 0) } };
+}
+
+function requireCreditSettings(kind: FinanceAccount["kind"], settings: CreditSettings) {
+  const error = creditSettingsError(kind, settings);
+  if (error) throw new FinanceError(error, 400, "invalid_input");
 }
 
 export function createAccount(actor: FinanceActor, input: unknown): { account: FinanceAccount } {
@@ -143,15 +196,20 @@ export function createAccount(actor: FinanceActor, input: unknown): { account: F
   const { request_id, ...payload } = parse(createAccountSchema, input);
   const cents = openingCents(payload.opening_balance);
   const maintaining = openingCents(payload.maintaining_balance);
-  if (payload.kind === "asset" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
-  const { account_group, include_in_summary, maintaining_balance, ...core } = payload;
+  if (payload.kind !== "money" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
+  const credit: CreditSettings = {
+    credit_limit_cents: payload.credit_limit === undefined ? null : openingCents(payload.credit_limit),
+    statement_day: payload.statement_day ?? null, due_mode: payload.due_mode ?? null, due_value: payload.due_value ?? null,
+  };
+  requireCreditSettings(payload.kind, credit);
+  const { account_group, logo, include_in_summary, maintaining_balance, ...core } = payload;
   // Preserve retry fingerprints for accounts created before settings were added.
-  const requestPayload = { ...core, ...(account_group ? { account_group } : {}), ...(!include_in_summary ? { include_in_summary } : {}), ...(maintaining !== 0 ? { maintaining_balance } : {}) };
+  const requestPayload = { ...core, ...(account_group ? { account_group } : {}), ...(logo ? { logo } : {}), ...(!include_in_summary ? { include_in_summary } : {}), ...(maintaining !== 0 ? { maintaining_balance } : {}) };
   return mutateAccount(actor, request_id, "account.create", requestPayload, () => {
     const id = randomUUID();
     const timestamp = now();
-    getDb().prepare("INSERT INTO finance_accounts (id, name, kind, currency, opening_balance_cents, maintaining_balance_cents, account_group, include_in_summary, archived, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,0,1,?,?)")
-      .run(id, payload.name, payload.kind, payload.currency, cents, maintaining, payload.account_group, Number(payload.include_in_summary), timestamp, timestamp);
+    getDb().prepare("INSERT INTO finance_accounts (id, name, kind, currency, opening_balance_cents, maintaining_balance_cents, account_group, logo, include_in_summary, archived, version, created_at, updated_at, credit_limit_cents, statement_day, due_mode, due_value) VALUES (?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?)")
+      .run(id, payload.name, payload.kind, payload.currency, cents, maintaining, payload.account_group, payload.logo, Number(payload.include_in_summary), timestamp, timestamp, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value);
     return { before: null, after: readAccountBalance(id) };
   });
 }
@@ -165,9 +223,16 @@ export function updateAccount(actor: FinanceActor, id: string, input: unknown): 
     if (patch.version !== before.version) throw new FinanceError("Account changed; refresh before editing", 409, "version_conflict");
     if (before.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Account version limit reached", 409, "version_conflict");
     const maintaining = patch.maintaining_balance === undefined ? before.maintaining_balance_cents : openingCents(patch.maintaining_balance);
-    if (before.kind === "asset" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
-    getDb().prepare("UPDATE finance_accounts SET name = ?, archived = ?, account_group = ?, include_in_summary = ?, maintaining_balance_cents = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
-      .run(patch.name ?? before.name, Number(patch.archived ?? before.archived), patch.account_group ?? before.account_group, Number(patch.include_in_summary ?? before.include_in_summary), maintaining, now(), id, before.version);
+    if (before.kind !== "money" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
+    const credit: CreditSettings = {
+      credit_limit_cents: patch.credit_limit === undefined ? before.credit_limit_cents : openingCents(patch.credit_limit),
+      statement_day: patch.statement_day === undefined ? before.statement_day : patch.statement_day,
+      due_mode: patch.due_mode === undefined ? before.due_mode : patch.due_mode,
+      due_value: patch.due_value === undefined ? before.due_value : patch.due_value,
+    };
+    requireCreditSettings(before.kind, credit);
+    getDb().prepare("UPDATE finance_accounts SET name = ?, archived = ?, account_group = ?, logo = ?, include_in_summary = ?, maintaining_balance_cents = ?, credit_limit_cents = ?, statement_day = ?, due_mode = ?, due_value = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
+      .run(patch.name ?? before.name, Number(patch.archived ?? before.archived), patch.account_group ?? before.account_group, patch.logo ?? before.logo, Number(patch.include_in_summary ?? before.include_in_summary), maintaining, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value, now(), id, before.version);
     return { before, after: readAccountBalance(id) };
   });
 }

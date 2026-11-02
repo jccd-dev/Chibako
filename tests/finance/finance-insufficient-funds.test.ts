@@ -11,6 +11,7 @@ import { createClassification } from "../../src/features/finance/classifications
 import { createObligation, postObligationMovement, postObligationPayment } from "../../src/features/finance/obligations";
 import { createPlan, postPlan } from "../../src/features/finance/planning";
 import { postTransfer } from "../../src/features/finance/movements";
+import { localCalendarDate } from "../../src/features/finance/presentation";
 import type { FinanceActor } from "../../src/features/finance/types";
 
 const vault = mkdtempSync(join(tmpdir(), "chibako-finance-insufficient-funds-"));
@@ -45,9 +46,11 @@ test("expense rejection ignores cashback, rolls back, and the same request succe
 });
 
 test("a planned expense remains payable against raw balance despite reserved plans", () => {
-  const cash = account("10"), plan = createPlan(owner, { request_id: request(), type: "expense", account_id: cash.id, amount: "10", due_date: "2026-10-03" }).plan;
+  // Spendable reserves pending plans due this month, so the plan must be dated in the current month.
+  const today = localCalendarDate();
+  const cash = account("10"), plan = createPlan(owner, { request_id: request(), type: "expense", account_id: cash.id, amount: "10", due_date: today }).plan;
   assert.equal(getAccount(owner, cash.id).spendable_cents, 0);
-  const payload = { request_id: request(), version: plan.version, account_id: cash.id, amount: "11", transaction_date: "2026-10-03" };
+  const payload = { request_id: request(), version: plan.version, account_id: cash.id, amount: "11", transaction_date: today };
   assert.throws(() => postPlan(owner, plan.id, payload), { code: "insufficient_funds" });
   assert.equal(getAccount(owner, cash.id).balance_cents, 1000);
   assert.equal(listTransactions(owner, { hidden: "all", reverted: "all" }).total, 0);

@@ -28,7 +28,7 @@ interface FinanceAttentionQueueProps {
 function itemIcon(item: FinanceAttentionItem) {
   if (item.kind === "allocation_shortfall") return IconTarget;
   if (item.kind === "budget_overrun") return IconAlertTriangle;
-  if (item.kind === "obligation_due") return IconReceipt;
+  if (item.kind === "obligation_due" || item.kind === "credit_due") return IconReceipt;
   return IconCalendarEvent;
 }
 
@@ -43,6 +43,7 @@ function targetLabel(item: FinanceAttentionItem) {
   if (item.target === "budgets") return "Review budgets";
   if (item.target === "goals") return "Review goals";
   if (item.target === "obligations") return "Review obligations";
+  if (item.target === "accounts") return "Review accounts";
   return "Review planning";
 }
 

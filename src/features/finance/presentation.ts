@@ -3,6 +3,30 @@ export function formatPHP(cents: number): string {
   return `${cents < 0 ? "-" : ""}PHP ${new Intl.NumberFormat("en-PH").format(absolute / 100n)}.${String(absolute % 100n).padStart(2, "0")}`;
 }
 
+/** Display only: accepts integer cents; truncates compact amounts toward zero to one decimal. */
+export function formatCompactPHP(cents: number): string {
+  if (!Number.isSafeInteger(cents)) {
+    throw new RangeError("Money must be a safe integer number of cents");
+  }
+  const absolute = BigInt(cents < 0 ? -cents : cents);
+  if (absolute < 100_000n) return formatPHP(cents);
+
+  const units = [
+    { cents: 100_000n, suffix: "k" },
+    { cents: 100_000_000n, suffix: "M" },
+    { cents: 100_000_000_000n, suffix: "B" },
+    { cents: 100_000_000_000_000n, suffix: "T" },
+  ];
+  let index = 0;
+  while (index < units.length - 1 && absolute >= units[index + 1].cents) {
+    index++;
+  }
+  const unit = units[index];
+  const tenths = absolute * 10n / unit.cents;
+  const fraction = tenths % 10n;
+  return `${cents < 0 ? "-" : ""}PHP ${tenths / 10n}${fraction ? `.${fraction}` : ""}${unit.suffix}`;
+}
+
 export function decimalPHP(cents: number): string {
   return `${cents < 0 ? "-" : ""}${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
 }

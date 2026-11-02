@@ -138,7 +138,7 @@ export function postObligationMovement(actor: FinanceActor, input: unknown): Pos
   return financeMutation(actor, request_id, "obligation.post", payload, () => {
     const account = readAccountBalance(payload.account_id);
     if (account.archived || account.kind !== "money") throw new FinanceError("Choose an active money account", 400, "invalid_account");
-    if (payload.type === "lending") requireSufficientFunds(account.balance_cents, amount);
+    if (payload.type === "lending") requireSufficientFunds(account, amount);
     validateTransactionClassifications({ type: "expense", category_id: null, subcategory_id: null, tag_ids: payload.tag_ids });
     const kind = payload.type === "borrowing" ? "debt" : "receivable";
     const before = payload.obligation_id ? readObligation(payload.obligation_id) : null;
@@ -180,8 +180,8 @@ export function insertObligationPayment(payload: z.output<typeof postObligationP
   if (account.archived || account.kind !== "money") throw new FinanceError("Choose an active money account", 400, "invalid_account");
   const type = before.kind === "debt" ? "expense" : "income";
   const feeAmount = payload.fee ? decimalCents(payload.fee.amount) : 0;
-  if (!payload.cash_activity_id && type === "expense") requireSufficientFunds(account.balance_cents, BigInt(amount) + BigInt(payload.fee?.type === "expense" ? feeAmount : 0));
-  else if (!payload.cash_activity_id && payload.fee?.type === "expense") requireSufficientFunds(BigInt(account.balance_cents) + BigInt(amount), feeAmount);
+  if (!payload.cash_activity_id && type === "expense") requireSufficientFunds(account, BigInt(amount) + BigInt(payload.fee?.type === "expense" ? feeAmount : 0));
+  else if (!payload.cash_activity_id && payload.fee?.type === "expense") requireSufficientFunds({ ...account, balance_cents: BigInt(account.balance_cents) + BigInt(amount) }, feeAmount);
   let activityId: string, cashActivityBefore: ReturnType<typeof readTransaction> | null = null;
   if (payload.cash_activity_id) {
     const cash = getDb().prepare(`SELECT t.id,t.type,t.account_id,t.amount_cents,t.transaction_date,t.version,t.hidden,t.reverted,

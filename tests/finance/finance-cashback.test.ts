@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { getDb } from "../../src/lib/db";
 import { createApiKey } from "../../src/server/auth/api-key-authorization";
-import { createAccount, getAccount } from "../../src/features/finance/accounts";
+import { createAccount, getAccount, updateAccount } from "../../src/features/finance/accounts";
 import { getActivityTotals, getTransaction, listTransactions, postTransaction } from "../../src/features/finance/activity";
 import { readClassification, updateClassification } from "../../src/features/finance/classifications";
 import { correctActivity, hideActivity, revertActivity } from "../../src/features/finance/corrections";
@@ -201,4 +201,69 @@ test("REST and remote MCP accept cashback and share the paired retry result", as
   const envelope = await mcpResponse.json();
   assert.deepEqual(envelope.result.structuredContent, restResult);
   assert.equal(listTransactions(owner).total, 2);
+});
+
+// Test decision: extend — a chosen cashback destination is new money routing through the shared post/correct/revert capabilities.
+test("cashback can go to another active money or credit account, stays linked and reverts with its expense", () => {
+  const cash = account("Debit", "1000");
+  const card = createAccount(owner, { request_id: request(), name: "Card", kind: "credit", currency: "PHP", opening_balance: "-200", credit_limit: "5000" }).account;
+  const posted = postTransaction(owner, {
+    request_id: request(), type: "expense", account_id: cash.id, amount: "100", transaction_date: "2026-10-03",
+    cashback: { mode: "amount", value: "5", account_id: card.id },
+  });
+  assert.equal(posted.balance_cents, 90000, "the paying account is not credited");
+  assert.equal(posted.cashback?.account_id, card.id);
+  assert.equal(posted.cashback?.amount_cents, 500);
+  assert.equal(getAccount(owner, card.id).balance_cents, -19500);
+  assert.equal(getTransaction(owner, posted.transaction.id).cashback_transaction_id, posted.cashback?.id);
+
+  const corrected = correctActivity(owner, posted.transaction.id, { request_id: request(), version: posted.transaction.version, amount: "200" });
+  assert.equal(getTransaction(owner, posted.cashback!.id).account_id, card.id, "a chosen destination survives expense corrections");
+  assert.deepEqual([getAccount(owner, cash.id).balance_cents, getAccount(owner, card.id).balance_cents], [80000, -19500]);
+
+  revertActivity(owner, posted.transaction.id, { request_id: request(), version: corrected.transaction.version });
+  assert.deepEqual([getAccount(owner, cash.id).balance_cents, getAccount(owner, card.id).balance_cents], [100000, -20000]);
+  assert.equal(getTransaction(owner, posted.cashback!.id).reverted, true);
+});
+
+test("an invalid cashback destination is rejected with no partial write, and the paying account stays the default", () => {
+  const cash = account("Debit", "1000");
+  const asset = createAccount(owner, { request_id: request(), name: "House", kind: "asset", currency: "PHP", opening_balance: "0" }).account;
+  const archived = account("Old", "0");
+  updateAccount(owner, archived.id, { request_id: request(), version: archived.version, archived: true });
+  for (const account_id of [asset.id, archived.id, "missing-account"]) {
+    const input = { request_id: request(), type: "expense", account_id: cash.id, amount: "100", transaction_date: "2026-10-03", cashback: { mode: "amount", value: "5", account_id } };
+    assert.throws(() => postTransaction(owner, input), { status: 400, code: "invalid_account", message: "Choose an active money or credit account for cashback" });
+    assert.deepEqual(getDb().prepare("SELECT COUNT(*) AS count FROM finance_requests WHERE request_id = ?").get(input.request_id), { count: 0 });
+  }
+  assert.equal(listTransactions(owner, { hidden: "all", reverted: "all" }).total, 0);
+  const same = postTransaction(owner, { request_id: request(), type: "expense", account_id: cash.id, amount: "100", transaction_date: "2026-10-03", cashback: { mode: "amount", value: "5", account_id: cash.id } });
+  assert.deepEqual([same.cashback?.account_id, same.balance_cents], [cash.id, 90500]);
+});
+
+test("REST and remote MCP route cashback to a chosen account and reject invalid destinations alike", async () => {
+  const cash = account("Protocol debit", "100");
+  const card = createAccount(owner, { request_id: request(), name: "Protocol card", kind: "credit", currency: "PHP", opening_balance: "0", credit_limit: "100" }).account;
+  const asset = createAccount(owner, { request_id: request(), name: "Protocol house", kind: "asset", currency: "PHP", opening_balance: "0" }).account;
+  const { key } = createApiKey("Cashback destination writer", ["finance:read", "finance:write"]);
+  const rest = (body: object) => postRest(new Request("https://chibako.test/api/finance/activity", {
+    method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify(body),
+  }), { params: Promise.resolve({}) });
+  const mcp = async (args: object) => (await (await postRemote(new Request("https://chibako.test/mcp", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, accept: "application/json, text/event-stream", "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: request(), method: "tools/call", params: { name: "post_finance_transaction", arguments: args } }),
+  }))).json()).result;
+  const payload = (request_id: string, account_id: string) => ({ request_id, type: "expense", account_id: cash.id, amount: "10", transaction_date: "2026-10-03", cashback: { mode: "amount", value: "1", account_id } });
+
+  const restRejected = await rest(payload("rest-bad-destination", asset.id));
+  assert.equal(restRejected.status, 400);
+  assert.deepEqual(await restRejected.json(), { error: "Choose an active money or credit account for cashback", code: "invalid_account" });
+  assert.equal((await mcp(payload("mcp-bad-destination", asset.id))).content[0].text, "error: invalid_account: Choose an active money or credit account for cashback");
+
+  const restPosted = await (await rest(payload("rest-card-destination", card.id))).json();
+  const mcpPosted = (await mcp(payload("mcp-card-destination", card.id))).structuredContent;
+  assert.deepEqual([restPosted.cashback.account_id, mcpPosted.cashback.account_id], [card.id, card.id]);
+  assert.deepEqual([restPosted.balance_cents, mcpPosted.balance_cents], [9000, 8000]);
+  assert.equal(getAccount(owner, card.id).balance_cents, 200);
 });

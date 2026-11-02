@@ -19,7 +19,30 @@ let _dbIdentity: string | null = null;
  * as any migration an older image cannot run against, so downgrades are refused
  * before any write. Images that predate the stamp cannot enforce it.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 6;
+
+const FINANCE_ACCOUNT_COLUMNS = `
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('money', 'asset', 'credit')),
+    currency TEXT NOT NULL CHECK (currency = 'PHP'),
+    opening_balance_cents INTEGER NOT NULL CHECK (typeof(opening_balance_cents) = 'integer' AND opening_balance_cents BETWEEN -9007199254740991 AND 9007199254740991),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991),
+    account_group TEXT NOT NULL DEFAULT '',
+    include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    credit_limit_cents INTEGER CHECK (credit_limit_cents IS NULL OR (typeof(credit_limit_cents) = 'integer' AND credit_limit_cents BETWEEN 1 AND 9007199254740991)),
+    statement_day INTEGER CHECK (statement_day IS NULL OR statement_day BETWEEN 1 AND 31),
+    due_mode TEXT CHECK (due_mode IS NULL OR due_mode IN ('fixed_day', 'after_statement')),
+    due_value INTEGER CHECK ((due_mode IS NULL AND due_value IS NULL)
+      OR (due_mode = 'fixed_day' AND due_value BETWEEN 1 AND 31)
+      OR (due_mode = 'after_statement' AND due_value BETWEEN 1 AND 60 AND statement_day IS NOT NULL)),
+    CHECK (CASE WHEN kind = 'credit' THEN credit_limit_cents IS NOT NULL
+      ELSE credit_limit_cents IS NULL AND statement_day IS NULL AND due_mode IS NULL END)
+  `;
 
 export class SchemaTooNewError extends Error {
   constructor(public found: number) {
@@ -178,20 +201,7 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_bookmarks_note ON bookmarks (note_id);
   `,
   `
-  CREATE TABLE IF NOT EXISTS finance_accounts (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('money', 'asset')),
-    currency TEXT NOT NULL CHECK (currency = 'PHP'),
-    opening_balance_cents INTEGER NOT NULL CHECK (typeof(opening_balance_cents) = 'integer' AND opening_balance_cents BETWEEN -9007199254740991 AND 9007199254740991),
-    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
-    maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991),
-    account_group TEXT NOT NULL DEFAULT '',
-    include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1)),
-    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
+  CREATE TABLE IF NOT EXISTS finance_accounts (${FINANCE_ACCOUNT_COLUMNS});
   CREATE INDEX IF NOT EXISTS idx_finance_accounts_list ON finance_accounts (archived, created_at, id);
   CREATE TABLE IF NOT EXISTS finance_requests (
     actor_id TEXT NOT NULL,
@@ -478,9 +488,10 @@ function openDb(): Database.Database {
     throw new SchemaTooNewError(stamped);
   }
   db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
   db.pragma("synchronous = NORMAL");
+  // better-sqlite3 enables foreign keys by default; table rebuilds below need them off until COMMIT.
+  db.pragma("foreign_keys = OFF");
   db.exec("BEGIN");
   try {
     for (const m of MIGRATIONS) db.exec(m);
@@ -508,6 +519,18 @@ function openDb(): Database.Database {
     if (!accountNames.has("account_group")) db.exec("ALTER TABLE finance_accounts ADD COLUMN account_group TEXT NOT NULL DEFAULT ''");
     if (!accountNames.has("include_in_summary")) db.exec("ALTER TABLE finance_accounts ADD COLUMN include_in_summary INTEGER NOT NULL DEFAULT 1 CHECK (include_in_summary IN (0, 1))");
     if (!accountNames.has("maintaining_balance_cents")) db.exec("ALTER TABLE finance_accounts ADD COLUMN maintaining_balance_cents INTEGER NOT NULL DEFAULT 0 CHECK (typeof(maintaining_balance_cents) = 'integer' AND maintaining_balance_cents BETWEEN 0 AND 9007199254740991)");
+    if (!accountNames.has("credit_limit_cents")) {
+      // Schema 4: rebuild so the kind CHECK admits credit. Foreign keys are off during migrations; IDs are copied verbatim.
+      const copied = "id, name, kind, currency, opening_balance_cents, archived, maintaining_balance_cents, account_group, include_in_summary, version, created_at, updated_at";
+      db.exec(`CREATE TABLE finance_accounts_v4 (${FINANCE_ACCOUNT_COLUMNS});
+        INSERT INTO finance_accounts_v4 (${copied}) SELECT ${copied} FROM finance_accounts;
+        DROP TABLE finance_accounts;
+        ALTER TABLE finance_accounts_v4 RENAME TO finance_accounts;
+        CREATE INDEX IF NOT EXISTS idx_finance_accounts_list ON finance_accounts (archived, created_at, id);`);
+    }
+    // Schema 5: optional bank/wallet logo id (see features/finance/account-logos.ts). Re-read columns: the v4 rebuild above replaces the table.
+    const logoColumns = db.prepare("PRAGMA table_info(finance_accounts)").all() as Array<{ name: string }>;
+    if (!logoColumns.some(column => column.name === "logo")) db.exec("ALTER TABLE finance_accounts ADD COLUMN logo TEXT NOT NULL DEFAULT ''");
     const goalColumns = db.prepare("PRAGMA table_info(finance_goals)").all() as Array<{ name: string }>;
     if (!goalColumns.some(column => column.name === "linked_account_id")) {
       db.exec(`ALTER TABLE finance_goals ADD COLUMN linked_account_id TEXT REFERENCES finance_accounts(id);
@@ -515,6 +538,9 @@ function openDb(): Database.Database {
           SELECT 'goal-migration:' || a.goal_id || ':' || a.account_id, a.goal_id, 'deposit', a.account_id, a.amount_cents, g.updated_at
           FROM finance_goal_allocations a JOIN finance_goals g ON g.id = a.goal_id WHERE g.archived = 0;`);
     }
+    // Schema 6: a linked goal's progress is its account's live balance, so its old contribution rows no longer apply.
+    // Balances and goal movements are untouched.
+    if (stamped < 6) db.exec("DELETE FROM finance_goal_allocations WHERE goal_id IN (SELECT id FROM finance_goals WHERE linked_account_id IS NOT NULL)");
     for (const table of ["finance_transactions", "finance_movements"]) {
       const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
       const existing = new Set(columns.map(column => column.name));
@@ -621,6 +647,7 @@ function openDb(): Database.Database {
     db.exec("ROLLBACK");
     throw e;
   }
+  db.pragma("foreign_keys = ON");
   _db = db;
   _dbFile = file;
   _dbIdentity = fileIdentity(file);

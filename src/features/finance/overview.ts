@@ -1,7 +1,7 @@
 import { getDb } from "../../lib/db";
 import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { FinanceError, type FinanceActor } from "./types";
-import { getFinanceSummary, readAccountBalance } from "./accounts";
+import { getFinanceSummary, listCreditDueAccounts, readAccountBalance } from "./accounts";
 import { listAttentionBudgetOverruns } from "./budgets";
 import { listGoalAllocationShortfalls } from "./goals";
 import { listDueAttentionObligations, listObligations } from "./obligations";
@@ -56,6 +56,8 @@ export function getFinanceOverview(actor: FinanceActor): FinanceOverview {
     LEFT JOIN finance_goal_allocations a ON a.goal_id = g.id
     WHERE g.archived = 0
   `).safeIntegers().get() as { goal_count: number | bigint; reserved_cents: bigint };
+  const linkedGoals = db.prepare("SELECT linked_account_id FROM finance_goals WHERE archived = 0 AND linked_account_id IS NOT NULL").all() as { linked_account_id: string }[];
+  for (const goal of linkedGoals) allocation.reserved_cents += BigInt(Math.max(0, readAccountBalance(goal.linked_account_id).balance_cents));
   const accounts = db.prepare("SELECT id FROM finance_accounts WHERE kind = 'money' AND include_in_summary = 1").all() as { id: string }[];
   let spendable = 0n;
   for (const account of accounts) spendable += BigInt(readAccountBalance(account.id).spendable_cents);
@@ -148,6 +150,22 @@ export function getFinanceAttention(actor: FinanceActor, input: unknown = {}): F
     });
   }
 
+  const cards = listCreditDueAccounts(actor, asOf);
+  for (const card of cards) {
+    if (!card.next_due_date || card.remaining_due_cents === null) continue;
+    items.push({
+      id: `credit:${card.id}`,
+      kind: "credit_due",
+      reference_id: card.id,
+      title: card.name,
+      target: "accounts",
+      urgency: urgencyFor(asOf, card.next_due_date),
+      due_date: card.next_due_date,
+      amount_cents: card.remaining_due_cents,
+      currency: "PHP",
+    });
+  }
+
   const urgencyRank: Record<FinanceAttentionItem["urgency"], number> = {
     overdue: 0,
     due: 1,
@@ -161,7 +179,7 @@ export function getFinanceAttention(actor: FinanceActor, input: unknown = {}): F
 
   return {
     items: items.slice(query.offset, query.offset + query.limit),
-    total: planPage.total + obligations.total + categories.total + goalAccounts.total,
+    total: planPage.total + obligations.total + categories.total + goalAccounts.total + cards.length,
     limit: query.limit,
     offset: query.offset,
     as_of: asOf,

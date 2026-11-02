@@ -40,7 +40,9 @@
     ".scratch/tarsi-finance/checks/e2e-build/dev/types/**/*.ts",
     ".next/test-builds/password-routes/dev/dev/types/**/*.ts",
     ".next/test-builds/browser-auth/types/**/*.ts",
-    ".next/test-builds/browser-auth/dev/types/**/*.ts"
+    ".next/test-builds/browser-auth/dev/types/**/*.ts",
+    ".next/test-builds/compact-money/types/**/*.ts",
+    ".next/test-builds/compact-money/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

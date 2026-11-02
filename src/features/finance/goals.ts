@@ -14,16 +14,19 @@ function goalFromRow(row: GoalRow): FinanceGoal {
   const rows = getDb().prepare("SELECT account_id, amount_cents FROM finance_goal_allocations WHERE goal_id = ? ORDER BY account_id")
     .all(row.id) as { account_id: string; amount_cents: number }[];
   const allocations = rows.map(allocation => ({ ...readReservationAccount(allocation.account_id), amount_cents: allocation.amount_cents }));
-  const saved_cents = exactCents(allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount_cents), 0n));
+  const linked = row.linked_account_id ? readAccountBalance(row.linked_account_id) : null;
+  // A linked goal's progress is its account's live balance; only unlinked goals hold allocations.
+  const saved_cents = linked ? Math.max(0, linked.balance_cents)
+    : exactCents(allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount_cents), 0n));
   return { ...row, saved_cents, achieved: saved_cents >= row.target_cents, allocations,
     linked_account_id: row.linked_account_id ?? null,
-    linked_account_name: row.linked_account_id ? readAccountBalance(row.linked_account_id).name : null,
+    linked_account_name: linked?.name ?? null,
     due_date: row.due_date ?? null, archived: row.archived === 1, currency: "PHP" };
 }
 
 function readReservationAccount(id: string): FinanceReservationAccount {
   const account = readAccountBalance(id);
-  return { account_id: id, account_name: account.name, balance_cents: account.balance_cents,
+  return { account_id: id, account_name: account.name, logo: account.logo, balance_cents: account.balance_cents,
     ...reservationAmounts(account.balance_cents, reservedAccountCents(id)) };
 }
 
@@ -121,16 +124,11 @@ export function createGoal(actor: FinanceActor, input: unknown): { goal: Finance
   const targetCents = decimalCents(payload.target);
   if (targetCents <= 0) throw new FinanceError("Use a target above PHP 0.00", 400, "invalid_input");
   return mutateGoal(actor, request_id, "goal.create", payload, () => {
-    const linked = payload.linked_account_id ? activeMoneyAccount(payload.linked_account_id) : null;
-    const initialCents = linked ? Math.max(0, linked.balance_cents) : 0;
-    if (linked && initialCents > 0) {
-      requireSufficientFunds(BigInt(linked.balance_cents) - BigInt(reservedAccountCents(linked.id)), initialCents);
-    }
+    if (payload.linked_account_id) availableLinkAccount(payload.linked_account_id, null);
     const id = randomUUID();
     const timestamp = now();
     getDb().prepare("INSERT INTO finance_goals (id, name, target_cents, saved_cents, due_date, linked_account_id, archived, version, created_at, updated_at) VALUES (?,?,?,?,?,?,0,1,?,?)")
       .run(id, payload.name, targetCents, 0, payload.due_date ?? null, payload.linked_account_id ?? null, timestamp, timestamp);
-    if (linked && initialCents > 0) writeAllocation(id, linked.id, initialCents);
     return { before: null, after: readGoal(id) };
   });
 }
@@ -144,7 +142,7 @@ export function updateGoal(actor: FinanceActor, id: string, input: unknown): { g
   if (targetCents !== null && targetCents <= 0) throw new FinanceError("Use a target above PHP 0.00", 400, "invalid_input");
   return mutateGoal(actor, request_id, "goal.update", { id, ...patch }, () => {
     const before = editableGoal(id, patch.version);
-    if (patch.archived && before.saved_cents > 0) throw new FinanceError("Withdraw all goal money before archiving", 409, "goal_has_money");
+    if (patch.archived && !before.linked_account_id && before.saved_cents > 0) throw new FinanceError("Withdraw all goal money before archiving", 409, "goal_has_money");
     const assignments: string[] = [], values: (string | number | null)[] = [];
     if (patch.name !== undefined) { assignments.push("name = ?"); values.push(patch.name); }
     if (targetCents !== null) { assignments.push("target_cents = ?"); values.push(targetCents); }
@@ -153,9 +151,11 @@ export function updateGoal(actor: FinanceActor, id: string, input: unknown): { g
     if (patch.linked_account_id !== undefined) {
       const linked = patch.linked_account_id;
       if (linked !== before.linked_account_id) {
-        if (linked) activeMoneyAccount(linked);
-        if (before.saved_cents > 0) {
-          recordGoalMovement(before, "relocation", before.linked_account_id, linked, before.saved_cents);
+        if (linked) availableLinkAccount(linked, id);
+        // Money held by an unlinked goal moves into its new account; a linked goal holds none of its own.
+        if (!before.linked_account_id && linked && before.saved_cents > 0) {
+          recordGoalMovement(before, "relocation", null, linked, before.saved_cents);
+          getDb().prepare("DELETE FROM finance_goal_allocations WHERE goal_id = ?").run(id);
         }
       }
       assignments.push("linked_account_id = ?"); values.push(linked);
@@ -172,6 +172,13 @@ function activeMoneyAccount(id: string) {
   return account;
 }
 
+// One account backs at most one active goal, so its balance is never counted twice.
+function availableLinkAccount(accountId: string, goalId: string | null) {
+  activeMoneyAccount(accountId);
+  const taken = getDb().prepare("SELECT 1 FROM finance_goals WHERE linked_account_id = ? AND archived = 0 AND id IS NOT ?").get(accountId, goalId);
+  if (taken) throw new FinanceError("This account already backs another goal", 409, "account_linked");
+}
+
 function recordGoalMovement(goal: FinanceGoal, type: "deposit" | "withdrawal" | "relocation", sourceId: string | null, destinationId: string | null, amount: number) {
   if (type === "withdrawal" && sourceId !== null && sourceId === destinationId) {
     throw new FinanceError("Choose a destination different from the goal's linked account", 400, "invalid_account");
@@ -179,8 +186,7 @@ function recordGoalMovement(goal: FinanceGoal, type: "deposit" | "withdrawal" | 
   if (sourceId !== destinationId) {
     if (sourceId) {
       const source = readAccountBalance(sourceId);
-      const ownHolding = sourceId === goal.linked_account_id ? goal.saved_cents : 0;
-      requireSufficientFunds(BigInt(source.balance_cents) - BigInt(reservedAccountCents(sourceId)) + BigInt(ownHolding), amount);
+      requireSufficientFunds({ ...source, balance_cents: BigInt(source.balance_cents) - BigInt(reservedAccountCents(sourceId)) }, amount);
       exactCents(BigInt(source.balance_cents) - BigInt(amount));
     }
     if (destinationId) exactCents(BigInt(activeMoneyAccount(destinationId).balance_cents) + BigInt(amount));
@@ -203,7 +209,7 @@ function depositGoalMoney(goal: FinanceGoal, accountId: string, amount: number) 
   if (!existing && goal.allocations.length >= 100) throw new FinanceError("A goal supports at most 100 funding accounts", 400, "allocation_limit");
   exactCents(BigInt(goal.saved_cents) + BigInt(amount));
   recordGoalMovement(goal, "deposit", accountId, goal.linked_account_id, amount);
-  writeAllocation(goal.id, accountId, exactCents(BigInt(existing) + BigInt(amount)));
+  if (!goal.linked_account_id) writeAllocation(goal.id, accountId, exactCents(BigInt(existing) + BigInt(amount)));
 }
 
 export function moveGoalMoney(actor: FinanceActor, id: string, input: unknown): { goal: FinanceGoal } {
