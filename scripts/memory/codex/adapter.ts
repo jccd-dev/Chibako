@@ -20,6 +20,7 @@ const hookSchema = z.object({
 
 export const codex: HostAdapter = {
   runtime: "codex",
+  promptRequests: true,
   home,
   configPath: () => path.join(home(), "config.toml"),
   renderConfig(original, endpoint, key, previous, remove = false) {
@@ -57,9 +58,8 @@ export const codex: HostAdapter = {
     return matches;
   },
   hookInput: (payload) => hookSchema.parse(payload),
-  hookOutput(input, { context, request, warning }) {
+  hookOutput(input, { context, warning }) {
     return {
-      ...(request && input.hook_event_name === "Stop" ? { decision: "block", reason: request } : {}),
       ...(context && ["SessionStart", "UserPromptSubmit", "PostToolUse"].includes(input.hook_event_name)
         ? { hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } } : {}),
       ...(warning ? { systemMessage: warning } : {}),

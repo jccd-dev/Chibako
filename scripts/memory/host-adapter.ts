@@ -18,7 +18,7 @@ export interface HostAdapter {
   /** Encodes an engine result for this host; undefined writes nothing. */
   hookOutput(input: HookInput, result: MemoryResult): Record<string, unknown> | undefined;
   hookFailure(message: string): Record<string, unknown>;
-  /** Also deliver due checkpoint requests in prompt context, for hosts whose turn-end continuation is limited. */
+  /** Also deliver due checkpoint requests in prompt context, without blocking turn end. */
   promptRequests?: boolean;
   setupLimit?: string;
 }

@@ -88,6 +88,7 @@ test("over the threshold, exactly one Stop request; a verified save resets the c
   const call = caller(calls, async (name, args) => isSave(name, args)
     ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64), closed: false } : {});
   for (let turn = 1; turn <= 4; turn++) await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: `t${turn}` }) });
+  await tools(directory, call, 10);
   const requested = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") });
   assert.match(String(requested.request), /Memory checkpoint due/);
   assert.doesNotMatch(String(requested.reason), /Schema \(evidence/, "a checkpoint request carries no vault schema");

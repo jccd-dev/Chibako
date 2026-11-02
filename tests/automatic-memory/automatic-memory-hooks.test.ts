@@ -14,7 +14,6 @@ test("Codex encodes context, continuation and warnings only on events that accep
     const input = codex.hookInput({ session_id: "codex-session", hook_event_name, cwd: "/fixture", turn_id: "turn-1" });
     const output = codex.hookOutput(input, { context: "briefing", request: "checkpoint", warning: "warning", saved: true });
     assert.deepEqual(output, {
-      ...(hook_event_name === "Stop" ? { decision: "block", reason: "checkpoint" } : {}),
       ...(["SessionStart", "UserPromptSubmit", "PostToolUse"].includes(hook_event_name)
         ? { hookSpecificOutput: { hookEventName: hook_event_name, additionalContext: "briefing" } } : {}),
       systemMessage: "warning",
@@ -164,4 +163,29 @@ test("stage --session fills the hook identity; a malformed payload names the bad
   assert.equal(JSON.parse(good.stdout).staged, true);
   const pending = (await states(directory)).map((state) => (state.pending as { checkpoint?: { session_id?: string } } | undefined)?.checkpoint?.session_id);
   assert.ok(pending.includes(session_id));
+}));
+
+
+test("Codex keeps trivial chats silent and delivers one work reminder as developer context", async () => withPrivateDirectory(async (directory) => {
+  const run = (hook_event_name: string, turn_id = "t1") => runMemoryEvent({
+    runtime: "codex", promptRequests: codex.promptRequests, directory, enabled: true,
+    call: async () => ({}), input: { session_id: "quiet-chat", hook_event_name, turn_id, prompt: "Thanks" },
+  });
+  for (let turn = 1; turn <= 6; turn++) {
+    assert.doesNotMatch(String((await run("UserPromptSubmit", `t${turn}`)).context), /Memory checkpoint due/);
+    assert.deepEqual(codex.hookOutput({ session_id: "quiet-chat", hook_event_name: "Stop" }, await run("Stop")), {});
+  }
+  // A couple of turns and a few tools remain below both activity limits.
+  await runMemoryEvent({ runtime: "codex", promptRequests: true, directory, enabled: true, call: async () => ({}),
+    input: { session_id: "quiet-chat", hook_event_name: "Checkpoint" }, stage: { skip: "New task" } });
+  await run("UserPromptSubmit", "work-1");
+  for (let tool = 1; tool < 10; tool++) assert.deepEqual(await run("PostToolUse"), {});
+  const result = await run("PostToolUse");
+  assert.match(String(result.context), /Memory checkpoint due/);
+  assert.deepEqual(codex.hookOutput({ session_id: "quiet-chat", hook_event_name: "PostToolUse" }, result), {
+    hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: result.context },
+  });
+  assert.deepEqual(await run("PostToolUse"), {});
+  assert.deepEqual(await run("Stop"), {});
+  assert.doesNotMatch(String((await run("UserPromptSubmit", "work-2")).context), /Memory checkpoint due/);
 }));

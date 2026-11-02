@@ -124,9 +124,9 @@ retaining knowledge or writing other notes. The agent
 retrieves again on meaningful topic changes. Retrieved content is marked as evidence,
 never executable instructions.
 
-PostToolUse and UserPromptSubmit hooks only count activity (no model cost, no
-memory calls). A checkpoint is requested once, after at least 4 user turns or 10 tool
-calls since the last verified save (`thresholds: { user_turns, tool_calls }` in
+PostToolUse counts activity without remote memory calls. A checkpoint is requested
+once after 10 tool calls for Codex; chat turns alone never qualify. Other hosts
+request one after 4 user turns or 10 tool calls since the last verified save (`thresholds: { user_turns, tool_calls }` in
 `profile.json` overrides). Trivial turns get no request, skip or Stop block. A
 verified save, or an explicit skip, restarts the count. The active agent produces the
 summary and stages it when requested:
@@ -235,7 +235,13 @@ the model, so the receipt is delivered once in the next prompt or Hermes `pre_ll
 context. Hosts with a start event (Codex, Claude Code) also replay it at every session start or resume without a remote call; Hermes has none, so its receipt is delivered once. It describes
 a past operation, not the current revision: read and merge before updating.
 
-Stop requests a due checkpoint once; its continuation guard prevents loops.
+Claude Code requests a due checkpoint once at Stop; its continuation guard prevents loops.
+Codex delivers it as developer context through PostToolUse additionalContext, or
+UserPromptSubmit when activity is already due. It never blocks Stop for a reminder.
+The [Codex hook protocol](https://learn.chatgpt.com/docs/hooks#stop) exposes no
+model-only Stop context: a block reason becomes a new user continuation prompt.
+Context delivery avoids that prompt, but does not force a checkpoint before turn end.
+Tool counts are a work proxy, not proof of file edits; tool-free discussions get no reminder.
 Hermes instead gets a "checkpoint due" note on its next `pre_llm_call` (it also counts
 `post_tool_call`). Stop ends a response, not a session; neither Stop nor app closure
 automatically declares work complete. Compaction
@@ -254,7 +260,7 @@ need real pilot measurement; no cost or reliability claim is made from fixtures.
 
 | Runtime | Retrieval | Checkpoint request | Flush staged data |
 | --- | --- | --- | --- |
-| Codex | SessionStart, UserPromptSubmit | Stop, after activity threshold | Stage, Stop, PreCompact, Interrupt |
+| Codex | SessionStart, UserPromptSubmit | PostToolUse or UserPromptSubmit additionalContext, after tool threshold | Stage, Stop, PreCompact, Interrupt |
 | Claude Code | SessionStart, UserPromptSubmit | Stop, after activity threshold | Stage, Stop, PreCompact |
 | Hermes | pre_llm_call | pre_llm_call; pre_verify for edited-code turns | Stage, on_session_end, agent_loop_stopped, post_compaction |
 
