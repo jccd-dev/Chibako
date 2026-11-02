@@ -478,11 +478,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: obligationHistorySchema, annotations: READ_ONLY,
     }, ({ id, ...args }) => financeResult("finance:read", actor => getObligationPaymentHistory(actor, id, args)));
     server.registerTool("list_finance_goals", {
-      title: "List savings goals", description: "Paginated PHP savings goals with held money, optional linked account and achievement, active by default. Unlinked savings are held in the goal and included once in money totals. Funding allocations identify remaining contributions, not source reservations.",
+      title: "List savings goals", description: "Paginated PHP savings goals with held money, optional linked account and achievement, active by default. A linked goal's saved amount is its account's live positive balance. Unlinked savings are held in the goal and included once in money totals; their allocations identify remaining contributions.",
       inputSchema: listGoalsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listGoals(actor, args) })));
     server.registerTool("get_finance_goal", {
-      title: "Inspect savings goal", description: "Read a goal's held money, linked account, target and remaining funding contributions. Account shortfalls describe linked account holdings, not missing cash at original funding sources.",
+      title: "Inspect savings goal", description: "Read a goal's saved money, linked account, target and, for unlinked goals, remaining funding contributions. A linked goal's saved amount is its account's live positive balance.",
       inputSchema: getGoalSchema, annotations: READ_ONLY,
     }, ({ id }) => financeResult("finance:read", actor => ({ goal: getGoal(actor, id) })));
     server.registerTool("list_finance_goal_accounts", {
@@ -605,7 +605,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: recordRefundSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...recordRefund(actor, id, args) })));
     server.registerTool("post_finance_transfer", {
-      title: "Transfer money", description: "Atomically move a positive PHP amount from an active money account to another active money account or to a credit account (paying the card; the purchase was already counted as spending). Credit accounts cannot be a source; the source needs sufficient funds. Optional categorized fee is a linked expense deducted from the source. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
+      title: "Transfer money", description: "Atomically move a positive PHP amount from an active money account to another active money account or to a credit account (paying the card; the purchase was already counted as spending). Credit accounts cannot be a source; the source needs sufficient funds. Optional fee is a linked expense deducted from the source; without category_id it is filed under the Fees expense category. Requires request_id and calendar transaction_date. Returns both resulting balances; transfers never count as income or spending.",
       inputSchema: postTransferSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransfer(actor, args) })));
     server.registerTool("reconcile_finance_account", {
@@ -640,15 +640,15 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
     }, ({ id, ...args }) => financeResult("finance:manage", actor => deleteObligation(actor, id, args)));
     const annotations = { ...MUTATING, idempotentHint: true };
     server.registerTool("create_finance_goal", {
-      title: "Create savings goal", description: "Create a positive PHP target, optional due date and optional linked_account_id. Starts empty. Deposits debit a source and credit the linked account, or stay held in the goal if unlinked.",
+      title: "Create savings goal", description: "Create a positive PHP target, optional due date and optional linked_account_id (an account backs one active goal). A linked goal tracks that account's balance; an unlinked one starts empty. Deposits debit a source and credit the linked account, or stay held in the goal if unlinked.",
       inputSchema: createGoalSchema, annotations,
     }, args => financeResult("finance:manage", actor => createGoal(actor, args)));
     server.registerTool("update_finance_goal", {
-      title: "Edit or archive savings goal", description: "Update name, target, due date or linked_account_id, or archive an empty goal. Changing linked_account_id requires finance:write too and moves the saved balance between backing locations; null holds money in the goal. Withdraw all money before archiving. Requires request_id and current version.",
+      title: "Edit or archive savings goal", description: "Update name, target, due date or linked_account_id, or archive. Changing linked_account_id requires finance:write too; linking an unlinked goal moves its held money into the account, other link changes move no money, and null starts goal-held savings. Withdraw an unlinked goal's money before archiving. Requires request_id and current version.",
       inputSchema: updateGoalSchema.safeExtend({ id: getGoalSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateGoal(actor, id, args)));
     server.registerTool("delete_finance_goal", {
-      title: "Permanently delete a savings goal", description: "Remove a mistaken goal and its movement history for good. Refused when its deposits, withdrawals or relocations left any account balance changed (return the money to its source or archive instead). Linked-account reservations are released. Never changes balances. Requires finance:manage, request_id and current version.",
+      title: "Permanently delete a savings goal", description: "Remove a mistaken goal and its movement history for good. Refused when its deposits, withdrawals or relocations left any account balance changed (return the money to its source or archive instead). Never changes balances. Requires finance:manage, request_id and current version.",
       inputSchema: deleteGoalSchema.extend({ id: getGoalSchema.shape.id }), annotations: DESTRUCTIVE,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => deleteGoal(actor, id, args)));
     if (financeAuthorized("finance:write")) server.registerTool("set_finance_goal_allocation", {

@@ -37,6 +37,13 @@ function postAdjustment(actor: FinanceActor, input: unknown, type: "reconciliati
   });
 }
 
+// The active top-level "Fees" expense category; the fee stays uncategorized if it was removed.
+function feesCategoryId(): string | null {
+  const row = getDb().prepare(`SELECT id FROM finance_classifications WHERE kind = 'category' AND type = 'expense' AND parent_id IS NULL
+    AND archived = 0 AND name = 'Fees' COLLATE NOCASE ORDER BY created_at, id LIMIT 1`).get() as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
 export function postTransfer(actor: FinanceActor, input: unknown): PostedMovement {
   authorizeFinance(actor, "finance:write");
   const { request_id, note_ids, ...payload } = parseFinance(postTransferSchema, input);
@@ -50,13 +57,14 @@ export function postTransfer(actor: FinanceActor, input: unknown): PostedMovemen
       throw new FinanceError("Choose an active money source and an active money or credit destination", 400, "invalid_account");
     }
     requireSufficientFunds(source, BigInt(amount) + BigInt(feeAmount));
-    validateTransactionClassifications({ type: "expense", category_id: payload.fee?.category_id ?? null, subcategory_id: payload.fee?.subcategory_id ?? null, tag_ids: payload.tag_ids });
+    const feeCategoryId = payload.fee ? payload.fee.category_id ?? feesCategoryId() : null;
+    validateTransactionClassifications({ type: "expense", category_id: feeCategoryId, subcategory_id: payload.fee?.subcategory_id ?? null, tag_ids: payload.tag_ids });
     const balances = [
       { account_id: source.id, balance_cents: exactCents(BigInt(source.balance_cents) - BigInt(amount) - BigInt(feeAmount)) },
       { account_id: destination.id, balance_cents: exactCents(BigInt(destination.balance_cents) + BigInt(amount)) },
     ];
     const id = randomUUID(), timestamp = now();
-    const feeId = payload.fee ? insertTransaction({ type: "expense", account_id: source.id, amount_cents: feeAmount, transaction_date: payload.transaction_date, category_id: payload.fee.category_id, subcategory_id: payload.fee.subcategory_id, text: "Transfer fee", tag_ids: [] }) : null;
+    const feeId = payload.fee ? insertTransaction({ type: "expense", account_id: source.id, amount_cents: feeAmount, transaction_date: payload.transaction_date, category_id: feeCategoryId, subcategory_id: payload.fee.subcategory_id ?? null, text: "Transfer fee", tag_ids: [] }) : null;
     getDb().prepare("INSERT INTO finance_movements (id,type,account_id,destination_account_id,amount_cents,transaction_date,text,tag_ids,fee_transaction_id,created_at,updated_at) VALUES (?,'transfer',?,?,?,?,?,?,?,?,?)")
       .run(id, source.id, destination.id, amount, payload.transaction_date, payload.text, JSON.stringify(payload.tag_ids), feeId, timestamp, timestamp);
     replaceActivityNoteLinks(id, note_ids);

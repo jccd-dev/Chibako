@@ -1,22 +1,31 @@
 # Goal money
 
-Adding money to a goal deducts it from the selected source account. An optional
-linked money account receives it; otherwise the money stays held in the goal.
-Unlinked savings remain included once in total money, outside account balances.
-Goal movements do not create income or expenses and do not affect cash-flow reports.
+A linked goal tracks one active money account: its progress is that account's
+live positive balance. Transfers, income, spending, refunds and reverts on the
+account all change progress. An account backs at most one active goal, so a
+balance is never counted twice. Linked goals hold no money of their own.
 
-Withdrawals reduce the goal balance and send money to a selected active money
-account. For a linked goal, its linked account supplies the money. Choosing that
-same account releases the goal holding without changing the account balance.
-Changing or clearing a funded goal's account link moves its current saved balance
-between backing locations. Archive requires withdrawing all goal money first.
+Without a link, the goal holds its own money. Adding money deducts it from the
+selected source account and keeps it in the goal; it is included once in total
+money, outside account balances. For a linked goal, adding money moves it from
+the source into the linked account. Goal movements do not create income or
+expenses and do not affect cash-flow reports.
 
-Deposits need enough source money after other linked goal holdings. Withdrawals
-and account-link changes cannot use money backing other goals. A linked account
-can still develop a shortfall through ordinary spending; the existing attention
-warnings show that shortfall.
+Withdrawals send money to a selected active money account other than the linked
+account. A linked goal's withdrawal debits its linked account; an unlinked goal's
+debits its held money. Linking an unlinked goal moves its held money into the
+account. Switching to another account or clearing the link moves no money; a goal
+that loses its link starts with no held money. Archiving an unlinked goal requires
+withdrawing its money first; a linked goal can be archived with money left in its
+account.
 
 ## Existing vaults
+
+Schema 6 deletes funding-allocation rows of linked goals, because a linked goal's
+progress now comes from its account balance. Balances and goal movements are not
+changed. Restoring a pre-upgrade backup with the previous app version undoes it.
+
+The earlier goal-money update did the following:
 
 On the first startup with this update, every active goal reservation is converted
 to money held in that goal. Each original source account is debited once, and goal

@@ -102,10 +102,21 @@ test("linked effects, audit and retry outcome roll back together, then a retry p
   assert.equal(audit.actor_id, "owner");
 });
 
+test("a transfer fee without a category is filed under Fees, or left uncategorized when Fees is gone", () => {
+  const cash = account("Cash"), bank = account("Bank", "0");
+  assert.equal(postTransfer(owner, { ...transfer(cash.id, bank.id), fee: { amount: "1" } }).fee?.category_id, null);
+  const fees = createClassification(owner, { request_id: randomUUID(), kind: "category", type: "expense", name: "fees" }).classification;
+  createClassification(owner, { request_id: randomUUID(), kind: "category", type: "income", name: "Fees" });
+  const posted = postTransfer(owner, { ...transfer(cash.id, bank.id), fee: { amount: "1.25" } });
+  assert.equal(posted.fee?.category_id, fees.id);
+  assert.equal(posted.fee?.subcategory_id, null);
+  assert.equal(posted.fee?.amount_cents, 125);
+});
+
 test("invalid movements reject account kinds, dates, currencies, fees and unsafe cent ranges without effects", () => {
   const source = account("Source"), target = account("Target"), asset = account("Asset", "1", "asset");
   const payload = transfer(source.id, target.id);
-  for (const patch of [{ destination_account_id: source.id }, { destination_account_id: asset.id }, { amount: "0" }, { amount: "-1" }, { amount: "0.001" }, { amount: "1e2" }, { amount: "90071992547409.92" }, { currency: "USD" }, { transaction_date: "2025-02-29" }, { fee: { amount: "1" } }]) assert.throws(() => postTransfer(owner, { ...payload, ...patch }), { status: 400 });
+  for (const patch of [{ destination_account_id: source.id }, { destination_account_id: asset.id }, { amount: "0" }, { amount: "-1" }, { amount: "0.001" }, { amount: "1e2" }, { amount: "90071992547409.92" }, { currency: "USD" }, { transaction_date: "2025-02-29" }, { fee: { amount: "0" } }]) assert.throws(() => postTransfer(owner, { ...payload, ...patch }), { status: 400 });
   const income = createClassification(owner, { request_id: "income-cat", kind: "category", type: "income", name: "Income" }).classification;
   assert.throws(() => postTransfer(owner, { ...payload, fee: { amount: "1", category_id: income.id } }), { code: "invalid_category" });
   const max = account("Max", "90071992547409.91");

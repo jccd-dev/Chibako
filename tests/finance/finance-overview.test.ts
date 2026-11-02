@@ -163,7 +163,7 @@ test("overview keeps reserved money and obligations separate while attention agg
   assert.equal(overview.money.balance_cents, 6500);
   assert.equal(overview.assets.balance_cents, 0);
   assert.deepEqual(overview.allocations, {
-    reserved_cents: 10000,
+    reserved_cents: 6500,
     goal_count: 1,
   });
   assert.deepEqual(overview.obligations, {
@@ -176,7 +176,7 @@ test("overview keeps reserved money and obligations separate while attention agg
     through_date: "2026-10-31",
     limit: 20,
   });
-  assert.equal(attention.total, 5);
+  assert.equal(attention.total, 4);
   assert.equal(attention.items.some((item) => item.reference_id === overduePlan.id && item.urgency === "overdue"), true);
   assert.equal(attention.items.some((item) => item.reference_id === upcomingPlan.id && item.urgency === "upcoming"), true);
   assert.equal(attention.items.some((item) => item.kind === "obligation_due" && item.reference_id === debt.id), true);
@@ -192,17 +192,8 @@ test("overview keeps reserved money and obligations separate while attention agg
     amount_cents: 2500,
     currency: "PHP",
   });
-  assert.deepEqual(attention.items.find((item) => item.kind === "allocation_shortfall"), {
-    id: `allocation:${account.id}`,
-    kind: "allocation_shortfall",
-    reference_id: account.id,
-    title: "Goal allocation shortfall",
-    target: "goals",
-    urgency: "warning",
-    due_date: null,
-    amount_cents: 3500,
-    currency: "PHP",
-  });
+  // A linked goal tracks its account balance, so spending there is never a shortfall.
+  assert.equal(attention.items.some((item) => item.kind === "allocation_shortfall"), false);
   assert.equal(JSON.stringify(attention).includes("Private plan text"), false);
   assert.equal(JSON.stringify(attention).includes("Private debt name"), false);
   assert.equal(JSON.stringify(attention).includes("Overview cash"), false);

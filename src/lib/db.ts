@@ -19,7 +19,7 @@ let _dbIdentity: string | null = null;
  * as any migration an older image cannot run against, so downgrades are refused
  * before any write. Images that predate the stamp cannot enforce it.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const FINANCE_ACCOUNT_COLUMNS = `
     id TEXT PRIMARY KEY,
@@ -538,6 +538,9 @@ function openDb(): Database.Database {
           SELECT 'goal-migration:' || a.goal_id || ':' || a.account_id, a.goal_id, 'deposit', a.account_id, a.amount_cents, g.updated_at
           FROM finance_goal_allocations a JOIN finance_goals g ON g.id = a.goal_id WHERE g.archived = 0;`);
     }
+    // Schema 6: a linked goal's progress is its account's live balance, so its old contribution rows no longer apply.
+    // Balances and goal movements are untouched.
+    if (stamped < 6) db.exec("DELETE FROM finance_goal_allocations WHERE goal_id IN (SELECT id FROM finance_goals WHERE linked_account_id IS NOT NULL)");
     for (const table of ["finance_transactions", "finance_movements"]) {
       const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
       const existing = new Set(columns.map(column => column.name));

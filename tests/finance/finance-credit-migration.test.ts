@@ -10,6 +10,7 @@ import { createNote } from "../../src/lib/notes";
 import { createAccount, getAccount } from "../../src/features/finance/accounts";
 import { postTransaction } from "../../src/features/finance/activity";
 import { postTransfer } from "../../src/features/finance/movements";
+import { createGoal, getGoal, setGoalAllocation } from "../../src/features/finance/goals";
 import type { FinanceActor } from "../../src/features/finance/types";
 
 // Test decision: add, integration — the schema 4 accounts rebuild runs on real vaults during update.
@@ -64,7 +65,7 @@ test("a schema 3 vault upgrades to 4 with accounts, activity and links intact", 
 
   for (let boot = 0; boot < 2; boot++) {
     const db = getDb();
-    assert.equal(db.pragma("user_version", { simple: true }), 5);
+    assert.equal(db.pragma("user_version", { simple: true }), 6);
     assert.deepEqual(snapshot(db), before);
     assert.deepEqual(db.prepare("SELECT DISTINCT credit_limit_cents, statement_day, due_mode, due_value FROM finance_accounts").all(),
       [{ credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null }]);
@@ -81,12 +82,12 @@ test("a schema 3 vault upgrades to 4 with accounts, activity and links intact", 
   assert.throws(() => getDb().prepare("UPDATE finance_accounts SET credit_limit_cents = 5 WHERE id = ?").run(cash.id), /CHECK constraint failed/);
 });
 
-test("a vault stamped newer than schema 5 is still refused", () => {
+test("a vault stamped newer than schema 6 is still refused", () => {
   const newer = mkdtempSync(join(tmpdir(), "chibako-credit-migration-newer-"));
   const previous = process.env.CHIBAKO_DATA_DIR;
   try {
     const seed = new Database(join(newer, "brain.db"));
-    seed.pragma("user_version = 6");
+    seed.pragma("user_version = 7");
     seed.close();
     process.env.CHIBAKO_DATA_DIR = newer;
     assert.throws(() => getDb(), SchemaTooNewError);
@@ -94,4 +95,21 @@ test("a vault stamped newer than schema 5 is still refused", () => {
     process.env.CHIBAKO_DATA_DIR = previous;
     rmSync(newer, { recursive: true, force: true });
   }
+});
+
+test("schema 6 drops linked goals' contribution rows without changing balances", () => {
+  const account = (name: string) => createAccount(owner, { request_id: randomUUID(), name, kind: "money", currency: "PHP", opening_balance: "50" }).account;
+  const linkedAccount = account("Linked"), source = account("Source");
+  const linked = createGoal(owner, { request_id: randomUUID(), name: "Linked", target: "100", linked_account_id: linkedAccount.id }).goal;
+  const held = createGoal(owner, { request_id: randomUUID(), name: "Held", target: "100" }).goal;
+  setGoalAllocation(owner, held.id, { request_id: randomUUID(), version: held.version, account_id: source.id, amount: "10" });
+  // Schema 5 kept a contribution row on linked goals.
+  getDb().prepare("INSERT INTO finance_goal_allocations (goal_id, account_id, amount_cents) VALUES (?,?,?)").run(linked.id, linkedAccount.id, 5000);
+  const balances = [linkedAccount, source].map(row => getAccount(owner, row.id).balance_cents);
+  getDb().pragma("user_version = 5");
+  getDb().close();
+  const db = getDb();
+  assert.deepEqual(db.prepare("SELECT goal_id, amount_cents FROM finance_goal_allocations").all(), [{ goal_id: held.id, amount_cents: 1000 }]);
+  assert.deepEqual([linkedAccount, source].map(row => getAccount(owner, row.id).balance_cents), balances);
+  assert.equal(getGoal(owner, linked.id).saved_cents, 5000);
 });

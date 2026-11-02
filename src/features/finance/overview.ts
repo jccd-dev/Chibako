@@ -56,6 +56,8 @@ export function getFinanceOverview(actor: FinanceActor): FinanceOverview {
     LEFT JOIN finance_goal_allocations a ON a.goal_id = g.id
     WHERE g.archived = 0
   `).safeIntegers().get() as { goal_count: number | bigint; reserved_cents: bigint };
+  const linkedGoals = db.prepare("SELECT linked_account_id FROM finance_goals WHERE archived = 0 AND linked_account_id IS NOT NULL").all() as { linked_account_id: string }[];
+  for (const goal of linkedGoals) allocation.reserved_cents += BigInt(Math.max(0, readAccountBalance(goal.linked_account_id).balance_cents));
   const accounts = db.prepare("SELECT id FROM finance_accounts WHERE kind = 'money' AND include_in_summary = 1").all() as { id: string }[];
   let spendable = 0n;
   for (const account of accounts) spendable += BigInt(readAccountBalance(account.id).spendable_cents);

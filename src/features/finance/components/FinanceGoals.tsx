@@ -246,7 +246,7 @@ function GoalRow({ goal, onOpen }: { goal: FinanceGoal; onOpen: () => void }) {
       ? "Achieved"
       : "Saving";
   const holding = goal.linked_account_name
-    ? `Held in ${goal.linked_account_name}`
+    ? `Tracks ${goal.linked_account_name}`
     : "Held in the goal";
   return (
     <li>
@@ -366,11 +366,9 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
                   .map(goalChoice)}
               />
               <FieldDescription>
-                {goal && goal.saved_cents > 0
-                  ? `Changing this link moves the current ${formatPHP(goal.saved_cents)} saved balance to the new backing account. It does not add money.`
-                  : !goal
-                    ? "The linked account's existing positive balance becomes this goal's progress. Choose an account with no money reserved by another goal. Without a link, the goal holds its own money."
-                    : "Money added to the goal is kept in this account. Without a link, the goal holds its own money."}
+                {goal && !goal.linked_account_id && goal.saved_cents > 0
+                  ? `Linking moves the ${formatPHP(goal.saved_cents)} held in this goal into the account. Progress then follows that account's balance.`
+                  : "Progress follows the linked account's balance, including transfers, income and spending. An account can back one goal. Without a link, the goal holds its own money."}
               </FieldDescription>
             </Field>
           )}
@@ -385,7 +383,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
                 </Button>
               )}
             </div>
-            {goal && !readOnly && goal.saved_cents > 0 && (
+            {goal && !readOnly && !goal.linked_account_id && goal.saved_cents > 0 && (
               <p className="text-right text-xs text-muted-foreground">
                 Withdraw the {formatPHP(goal.saved_cents)} still held before archiving.
               </p>
@@ -408,9 +406,11 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
           <p className="text-xs text-muted-foreground">
             {readOnly
               ? "This goal is archived."
-              : "Remaining contributions by funding account. Withdrawals reduce these amounts."}
+              : goal.linked_account_name
+                ? `Progress follows ${goal.linked_account_name}'s balance.`
+                : "Remaining contributions by funding account. Withdrawals reduce these amounts."}
           </p>
-          {funding.length ? (
+          {goal.linked_account_id ? null : funding.length ? (
             <ul className="flex flex-col gap-3">
               {funding.map((row) => (
                 <GoalAllocationRow key={row.account_id} row={row} />
@@ -561,7 +561,7 @@ function GoalRemovalActions({ goal, goals, readOnly }: { goal: FinanceGoal; goal
         <Button
           type="button"
           variant="outline"
-          disabled={locked || goal.saved_cents > 0}
+          disabled={locked || (!goal.linked_account_id && goal.saved_cents > 0)}
           onClick={() => setConfirm("archive")}
         >
           Archive

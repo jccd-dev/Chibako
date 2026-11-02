@@ -69,7 +69,7 @@ test("goal withdrawals validate available money and show progress", async ({ pag
   await expect(row).toContainText("25%");
   await row.click();
   await page.getByLabel("Action", { exact: true }).selectOption("withdrawal");
-  await page.getByLabel("Destination account", { exact: true }).selectOption(account.id);
+  await pickAccount(page, "Destination account", account.name);
   await expect(page.getByText(/Available to withdraw:/)).toBeVisible();
   await page.locator("#goal-movement-amount").fill("25.01");
   let submitted = 0;
