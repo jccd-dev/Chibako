@@ -78,8 +78,11 @@ export async function runMemoryCli(host: HostAdapter, argv = process.argv.slice(
     const stateDirectory = profile ? path.join(directory, "state") : process.env.CHIBAKO_MEMORY_STATE_DIR || "";
     const start = Date.now();
     try {
+      const threadId = process.env.T3CODE_THREAD_ID;
       const command = (verb: string) => `node ${quote(runner)} ${runtime} ${verb} --profile-dir ${quote(directory)} --session ${quote(input.session_id)}`;
       const options = { runtime, input, directory: stateDirectory, enabled: true, call: connection.call, resolveProject: (cwd: string | undefined) => resolveProject(cwd, undefined, profile ?? {}), promptRequests: host.promptRequests,
+        // T3 sets this for every runtime it hosts (ticket 01 evidence); a model or runtime switch keeps it.
+        ...(threadId && threadId.length <= 200 ? { thread: { host: "t3", id: threadId } } : {}),
         ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
           stageCommand: command("stage"), inspectCommand: command("inspect") } : {}) };

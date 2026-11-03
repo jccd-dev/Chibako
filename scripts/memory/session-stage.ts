@@ -28,7 +28,7 @@ const stageSchema = z.object({
   .refine(value => value.expected_revision === undefined || Boolean(value.checkpoint || value.finish), "expected_revision needs a checkpoint or finish")
   .refine(value => value.expected_revision === undefined || [value.checkpoint?.expected_revision, value.finish?.expected_revision].every(inner => inner === undefined || inner === value.expected_revision), "expected_revision differs between the stage and its checkpoint or finish");
 
-export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, session_id: string, raw: unknown, legacy?: MemoryWriteInput, scope: { project?: string } = {}): Promise<{
+export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, session_id: string, raw: unknown, legacy?: MemoryWriteInput, scope: { project?: string; thread_key?: string } = {}): Promise<{
   checkpoint?: SessionMutation | MemoryWriteInput; skip?: string; replaces_request_id?: string; now_line?: string; continue?: SessionContinue;
 }> {
   if (legacy) {
@@ -49,7 +49,7 @@ export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, se
       : { action: "finish", ...(stage.finish?.retain ? { retain: stage.finish.retain } : {}) }),
   });
   if (expected === undefined) {
-    const current = await call("memory_session", { action: "read", runtime, session_id });
+    const current = await call("memory_session", { action: "read", runtime, session_id, ...(scope.thread_key ? { thread_key: scope.thread_key } : {}) });
     const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
     if (revision && current.note) {
       throw new MemoryClientError(`This session memory already exists at revision ${revision}. Read memory_session with action read, runtime ${runtime} and the hook session_id, merge the current content, then restage with "expected_revision": "${revision}".`);

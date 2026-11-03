@@ -131,7 +131,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       HOME: root,
       CODEX_HOME: hostHome,
       CHIBAKO_DATA_DIR: process.env.CHIBAKO_DATA_DIR,
-      CHIBAKO_MEMORY_PROFILE_DIR: undefined,
+      CHIBAKO_MEMORY_PROFILE_DIR: undefined, T3CODE_THREAD_ID: undefined,
     } satisfies NodeJS.ProcessEnv;
     const invoke = (input: object, action = "hook", extra: string[] = [], allowFailure = false) =>
       run([runner, "codex", action, "--profile-dir", profileDirectory, ...extra], input, environment, allowFailure);
@@ -319,7 +319,7 @@ test("packaged Claude, Codex and Hermes runners survive faults, restarts and a s
     const environment = {
       ...process.env, HOME: root, CHIBAKO_DATA_DIR: process.env.CHIBAKO_DATA_DIR,
       CODEX_HOME: path.join(root, "lifecycle", "codex-home"), CLAUDE_CONFIG_DIR: path.join(root, "lifecycle", "claude-home"), HERMES_HOME: path.join(root, "lifecycle", "hermes-home"),
-      CHIBAKO_MEMORY_PROFILE_DIR: undefined, CHIBAKO_MEMORY_PROFILE: undefined, CHIBAKO_MEMORY_ENABLED: undefined,
+      CHIBAKO_MEMORY_PROFILE_DIR: undefined, CHIBAKO_MEMORY_PROFILE: undefined, CHIBAKO_MEMORY_ENABLED: undefined, T3CODE_THREAD_ID: undefined,
     } satisfies NodeJS.ProcessEnv;
     const invoke = async (args: string[], input: object) => {
       const output = await run(args, input, environment);
