@@ -79,7 +79,7 @@ export async function runMemoryCli(host: HostAdapter, argv = process.argv.slice(
     const start = Date.now();
     try {
       const command = (verb: string) => `node ${quote(runner)} ${runtime} ${verb} --profile-dir ${quote(directory)} --session ${quote(input.session_id)}`;
-      const options = { runtime, input, directory: stateDirectory, enabled: true, call: connection.call, resolveProject, promptRequests: host.promptRequests,
+      const options = { runtime, input, directory: stateDirectory, enabled: true, call: connection.call, resolveProject: (cwd: string | undefined) => resolveProject(cwd, undefined, profile ?? {}), promptRequests: host.promptRequests,
         ...(profile?.thresholds ? { thresholds: profile.thresholds } : {}),
         ...(profile ? { binding: { endpoint: profile.endpoint, principal_id: profile.principal_id, area: profile.area },
           stageCommand: command("stage"), inspectCommand: command("inspect") } : {}) };

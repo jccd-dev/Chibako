@@ -308,3 +308,24 @@ test("Hermes YAML aliases do not add the managed connection to unrelated default
   assert.deepEqual(Object.keys(parsed.defaults), ["other"]);
   assert.ok(parsed.mcp_servers["chibako-memory"]);
 });
+
+test("profiles validate project maps, stay readable without them, and setup keeps and shows them", async () => {
+  const target = input("claude", "projects");
+  const fresh = await applySetup(await prepareSetup(target, stub()));
+  assert.equal("project_paths" in fresh, false, "older shape is unchanged");
+  const base = JSON.parse(readFileSync(join(target.directory, "profile.json"), "utf8"));
+  const write = (extra: object) => writeFileSync(join(target.directory, "profile.json"), JSON.stringify({ ...base, ...extra }));
+  write({ project_paths: { "relative/dir": "x" } });
+  await assert.rejects(() => readProfile(target.directory));
+  write({ project_aliases: { "Bad Slug": "x" } });
+  await assert.rejects(() => readProfile(target.directory));
+  write({ project_paths: { "/work/client": "client" }, project_aliases: { app: "client" } });
+  const status = await runControl(claude, "status", target.directory, "projects") as Record<string, unknown>;
+  assert.deepEqual(status.project_paths, { "/work/client": "client" });
+  assert.deepEqual(status.project_aliases, { app: "client" });
+  const again = await prepareSetup(target, stub());
+  assert.deepEqual((redactedPreview(again) as Record<string, unknown>).project_aliases, { app: "client" });
+  const applied = await applySetup(again);
+  assert.deepEqual(applied.project_paths, { "/work/client": "client" });
+  assert.deepEqual((await readProfile(target.directory))?.project_aliases, { app: "client" });
+});

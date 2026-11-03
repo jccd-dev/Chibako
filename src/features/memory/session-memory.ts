@@ -43,9 +43,11 @@ function sessionRevision(record: SessionRecord, note: Note): string {
   return hash([memoryRevision(note), note.deleted_at, record.closed_at]);
 }
 
-/** The single active-work index at the area root; entries are `- [[Checkpoint]] (project) — next action`. */
+/** The single active-work index at the area root; entries are `- [[Checkpoint]] (project) — next action · YYYY-MM-DD` (older lines have no date). */
 const AGENT_NOW = { subject: "Agent Now", title: "Agent Now", lines: 15 };
 const nowKey = (line: string) => line.slice(0, line.indexOf("]]") + 2);
+const staleSeconds = () => (Number(process.env.CHIBAKO_MEMORY_STALE_DAYS) > 0 ? Number(process.env.CHIBAKO_MEMORY_STALE_DAYS) : 7) * 86_400;
+const lineDate = (line: string) => /· (\d{4}-\d{2}-\d{2})$/.exec(line)?.[1];
 const inArea = "(folder = ? OR (folder >= ? AND folder < ?))";
 const areaArgs = (area: string) => [area, `${area}/`, `${area}0`];
 
@@ -70,8 +72,20 @@ function updateNow(principal: ApiKeyPrincipal, area: string, project: string | u
     return item.content.split("\n").filter(line => line.startsWith("- [[")).map(line => tag ? line.replace("]]", `]] (${tag})`) : line);
   });
   const seen = new Set([`- [[${title}]]`]);
-  const entries = [...lines.filter(line => line.startsWith("- [[")), ...migrated].filter(line => !seen.has(nowKey(line)) && Boolean(seen.add(nowKey(line))));
-  if (input.action === "save") entries.unshift(`- [[${title}]]${project ? ` (${project})` : ""} — ${input.now_line}`);
+  const cutoff = now() - staleSeconds();
+  // An entry ages by its checkpoint's last update, else by its line date; a line with neither stays.
+  const entries = [...lines.filter(line => line.startsWith("- [[")), ...migrated].filter(line => !seen.has(nowKey(line)) && Boolean(seen.add(nowKey(line))))
+    .filter(line => {
+      const target = db.prepare(`SELECT note_id FROM memory_records WHERE ${inArea} AND role = 'session' AND title = ?`)
+        .get(...areaArgs(area), line.slice(4, line.indexOf("]]"))) as { note_id: string } | undefined;
+      const checkpoint = target ? getNote(target.note_id) : null;
+      const date = lineDate(line);
+      const updated = checkpoint?.updated_at ?? (date ? Date.parse(`${date}T00:00:00Z`) / 1000 : cutoff);
+      if (updated >= cutoff) return true;
+      if (checkpoint?.properties.status === "active") updateNote(checkpoint.id, { properties: { status: "stale" } });
+      return false;
+    });
+  if (input.action === "save") entries.unshift(`- [[${title}]]${project ? ` (${project})` : ""} — ${input.now_line} · ${new Date().toISOString().slice(0, 10)}`);
   const kept = entries.slice(0, AGENT_NOW.lines);
   const content = `${head ? `${head}\n\n` : ""}${kept.join("\n")}\n`;
   if (content !== note?.content) {
