@@ -198,12 +198,14 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
     let noteId = note?.id ?? null;
     let retainedNoteId: string | null = null;
     if (input.action === "continue") noteId = continueCheckpoint(area, record, note, ownerId, subject, input.title);
-    // A workstream join may come from a session that never read the match; its save carries the merged content.
-    else if (currentRevision !== (matched && input.expected_revision === null ? currentRevision : input.expected_revision)) {
+    else if (currentRevision !== input.expected_revision) {
       // Name the expected value: agents otherwise invent placeholder hashes for a new checkpoint.
+      // A workstream match also names its title, since this session cannot read it through memory_session yet.
       throw new MemoryError(currentRevision === null
         ? "No session checkpoint exists yet; use expected_revision null to create it"
-        : `Session memory is at revision ${currentRevision}; read it, merge, and retry with that expected_revision`, 409, "revision_conflict");
+        : matched
+          ? `Checkpoint [[${matched.title}]] already holds this workstream at revision ${currentRevision}; read that note, merge, and retry with that expected_revision to join it`
+          : `Session memory is at revision ${currentRevision}; read it, merge, and retry with that expected_revision`, 409, "revision_conflict");
     }
     else if (input.action === "save") {
       if (record?.closed_at === null && note?.deleted_at != null) throw new MemoryError("Session checkpoint is in Trash; finish its cleanup or restore it before saving", 409, "ineligible_note");
