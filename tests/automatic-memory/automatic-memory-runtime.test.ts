@@ -77,14 +77,14 @@ test("loads the Now index and first prompt recall once, from private state", asy
   const call = caller(calls);
   const start = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart", { prompt: "Resume the memory work" }) });
   assert.equal(calls.filter(({ name }) => name === "get_knowledge_schema").length, 0, "schema is fetched only when a checkpoint is due");
-  assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } });
+  assert.deepEqual(calls.find(({ name }) => name === "memory_read"), { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } });
   assert.equal(calls.filter(({ name }) => name === "recall").length, 1);
   assert.match(String(start.context), /Automatic memory:/);
   assert.equal((await stat(directory)).mode & 0o077, 0);
 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-2", prompt: "Another prompt" }) });
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-3", prompt: "Again" }) });
-  assert.deepEqual(calls.map(({ name }) => name), ["memory_read", "recall"]);
+  assert.deepEqual(calls.map(({ name }) => name), ["memory_status", "memory_read", "recall"], "feature detection, then Now and recall, once");
 }));
 
 test("Now is injected capped, and the instruction block appears once per session", async () => withPrivateDirectory(async (directory) => {
@@ -508,7 +508,7 @@ test("the project resolves once per session and scopes Agent Now order, recall a
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("SessionStart", { cwd: "/work/atlas", prompt: "Resume" }) });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("UserPromptSubmit", { cwd: "/elsewhere", turn_id: "turn-1" }) });
   assert.equal(resolved, 1);
-  assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } }, "Agent Now is global; the project only orders it");
+  assert.deepEqual(calls.find(({ name }) => name === "memory_read"), { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } }, "Agent Now is global; the project only orders it");
   assert.match(String(calls.find(({ name }) => name === "recall")!.args.query), /^atlas Resume/);
   const result = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("Checkpoint"),
     stage: { checkpoint: { title: "Atlas", content: "Progress", expected_revision: null } } });

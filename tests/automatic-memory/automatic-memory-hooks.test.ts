@@ -101,7 +101,7 @@ async function child(args: string[], input: string, env: NodeJS.ProcessEnv): Pro
 }
 
 function env(directory: string, enabled: boolean): NodeJS.ProcessEnv {
-  return { ...process.env, CHIBAKO_MEMORY_ENABLED: enabled ? "1" : "0", CHIBAKO_MEMORY_STATE_DIR: directory, CHIBAKO_MEMORY_MCP_URL: "", CHIBAKO_MEMORY_API_KEY: "", CODEX_HOME: join(directory, "codex-home"), CLAUDE_CONFIG_DIR: join(directory, "claude-home"), HERMES_HOME: join(directory, "hermes-home") };
+  return { ...process.env, CHIBAKO_MEMORY_ENABLED: enabled ? "1" : "0", CHIBAKO_MEMORY_STATE_DIR: directory, CHIBAKO_MEMORY_MCP_URL: "", CHIBAKO_MEMORY_API_KEY: "", CODEX_HOME: join(directory, "codex-home"), CLAUDE_CONFIG_DIR: join(directory, "claude-home"), HERMES_HOME: join(directory, "hermes-home"), T3CODE_THREAD_ID: undefined };
 }
 function checkpoint(session_id: string, request_id = `request-${session_id}`) {
   return { request_id, role: "session", subject: "topic", session_id, title: "Hook checkpoint", content: "Local staged content", expected_revision: null };
