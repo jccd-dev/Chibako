@@ -161,8 +161,31 @@ installed cache is modified by building the packages. Existing custom knowledge
 schemas are preserved; align their Agent memory section with the new session
 lifecycle if they still prescribe per-task overviews.
 
-Automatic memory now keeps one checkpoint per key/runtime/session.
-The agent explicitly finishes it when no work remains, optionally retaining lasting
+Automatic memory keeps one checkpoint per session, with shared thread/workstream
+continuation when the server reports `continuity: 1`. Thread resume uses a locally
+hashed host thread ID under the same API-key principal. New checkpoints use plain
+task titles; a first save matching a same-project workstream requires a read/merge
+and revision-conflict retry before joining. Older servers without `continuity: 1`
+keep the previous workflow, without thread keys, resumed-checkpoint briefing,
+Activity or SessionEnd capture. These continuity changes require no schema migration.
+
+Project aliases and absolute path mappings are optional `project_aliases` and
+`project_paths` fields hand-edited in private `profile.json`; there is no editing
+command. Setup preserves and previews them, and `status` shows them. See the
+bundled setup skill for resolution order and examples. Non-project sessions use
+`workstation` under the memory area. `CHIBAKO_MEMORY_STALE_DAYS` sets the day window
+(default 7) separately in server and hook environments; it is not a profile field
+and setup/status show the effective local `stale_days` beside the maps.
+Aged-out active checkpoints become `stale` and return to Agent Now on save.
+
+After three unsaved tool calls, hooks can capture metadata-only entries in a
+bounded per-project Activity note: Claude at Stop/SessionEnd, Codex at Stop, Hermes
+at `pre_verify`. Claude SessionEnd also flushes pending data and never finishes
+work; Hermes `on_session_end` only flushes. Host-marked Claude/Codex subagents are
+suppressed; CLI staging has no marker and must be left to the parent. See the
+setup skill for capture and detection limits.
+
+The agent explicitly finishes the checkpoint when no work remains, optionally retaining lasting
 wiki/preference knowledge. Finishing closes the checkpoint and removes its Agent Now
 entry atomically; the note stays as a session record. Automatic memory never deletes
 notes; use the `chibako-memory-cleanup` skill to review and remove records you
@@ -173,7 +196,8 @@ private setup fixtures, scope checks, replay/binding and native callback envelop
 Those checks do not prove a particular desktop host or remote gateway runs hooks.
 
 - Codex CLI/desktop and Claude Code/Code Desktop need actual-host event and consent
-  checks. T3 Code is a separate host check.
+  checks, including Codex hook inheritance of `T3CODE_THREAD_ID` and Claude
+  SessionEnd delivery. T3 Code is a separate host check.
 - Hermes native `pre_verify` only prompts for missing checkpoints on edited-code
   turns. Other workflows depend on normal agent staging. Messaging and desktop
   routes must be verified independently. Interrupt events without a stable session

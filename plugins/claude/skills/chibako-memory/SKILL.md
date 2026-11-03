@@ -20,7 +20,7 @@ restricted memory scope does not grant general Note-write authority.
   continue work that does not require it. Never claim to remember or save data
   without a successful tool result. Do not configure connections or open a
   database file as a workaround without authorization.
-- Fetch `get_knowledge_schema({})` only before the first write in a session,
+- Fetch `get_knowledge_schema({})` only before retention or a general Note write,
   and again after a schema change or switching vaults. Read-only retrieval does
   not need it. Follow its naming, linking, property, and compilation conventions
   within the user's task scope. Its "Agent memory" section defines the "Agent Now"
@@ -31,9 +31,9 @@ restricted memory scope does not grant general Note-write authority.
 
 ## Retrieve only useful context
 
-0. With automatic memory, startup already reads the "Agent Now" index. Use it to
-   pick the relevant thread and open only that thread's checkpoint. If it is
-   the same task or handoff, continue it rather than starting a new one.
+0. With automatic memory, use the resumed checkpoint when supplied, or open the
+   relevant checkpoint from the startup Agent Now index.
+   If it is the same task or handoff, continue it rather than starting a new one.
 1. Call `recall` with a short query containing the project and topic. A useful
    starting point is `{ "query": "project authentication decisions", "limit": 5,
    "budget": 2000 }`. Results contain snippets, not complete notes.
@@ -126,9 +126,11 @@ authorize rewriting existing notes or broadening a targeted edit.
 - Search the topic before creating a note. Read the closest canonical note and
   inspect its folder and related notes; reuse that location and naming pattern.
   Browse with `list_notes` only as needed to find the relevant branch.
-- Choose the folder from the content's primary project or subject. Reuse an
-  existing broad area; add a subfolder only for a distinct collection that needs
-  it. Keep one canonical note for a topic and link related topics with wikilinks.
+- Keep checkpoints, Activity notes, and retained agent facts inside the configured
+  memory area. For reader-facing notes, reuse the existing project or topic branch
+  found by search; create a new top-level folder only when the user asks. Link
+  each project note to the existing project overview with `[[Exact Note Title]]`.
+  Keep one canonical note for a topic and link related topics with wikilinks.
 - Use topic folders for durable guides, decisions, and reference material. Use
   date-based folders or title prefixes for chronological collections such as
   meetings and logs, following the collection's existing period format. A date
@@ -183,23 +185,45 @@ authorize rewriting existing notes or broadening a targeted edit.
   edited note is not necessarily the most recent evidence. Recall alone does
   not guarantee a date-filtered result.
 
-With automatic memory, hooks scope checkpoints and retained notes to a
-project folder under the memory area, derived from the session's repository
-(`CHIBAKO_MEMORY_PROJECT` overrides it). Do not put a project prefix in the
-checkpoint title; the folder already carries it. Retained knowledge defaults to
-the session's project; set `retain.project` to `null` for genuinely cross-project
-knowledge, which then lives at the memory area root. "Agent Now" is one index
-at the area root, with each entry tagged by project.
+## Automatic memory
 
-Saving is activity-gated: the hook counts work since the
-last save (defaults: 4 user turns or 10 tool calls). Trivial turns need no
-checkpoint and no skip. When due, update the session's single checkpoint and
-`now_line`; task changes do not create more session notes. When no work remains,
-explicitly finish the checkpoint even below the threshold. Preserve confirmed,
-lasting knowledge in canonical wiki/preference memory, then finish with
-`memory_session`. Finishing closes the checkpoint and removes its Agent Now entry;
-the note stays as a session record. Automatic memory never deletes notes;
-`chibako-memory-cleanup` reviews and removes records only with approval. The `chibako-memory-setup` skill describes staging and atomic retention.
+With automatic memory, hooks resolve a project once per session from the override,
+profile path mappings, or repository; sessions outside a project use `workstation`.
+Checkpoints, Activity and retained facts stay under `<memory area>/<project>`.
+Retained knowledge defaults to that project; set `retain.project` to `null` only
+for cross-project facts at the area root. Reader-facing notes follow the branch
+rule above and require their own write authorization.
+
+Use a plain task title without a runtime/session suffix or redundant project
+prefix. The first title stays stable. When the hook has a T3 thread identifier,
+it hashes it locally and resumes that thread's checkpoint across model/runtime
+switches within the same API-key principal. Startup can include its revision and
+up to 1,500 characters of content; read the note by title when more is needed.
+Without an existing session/thread checkpoint, a save can join a matching title
+in the same project, ignoring case, whitespace and old `(runtime-hex)` suffixes.
+An unread match returns `revision_conflict` naming the title and revision: read
+that note by title, merge both contributions, and restage with `expected_revision`
+and the pending `replaces_request_id` from the recovery message, omitting
+`request_id`. A successful join can reopen a finished workstream. Explicit
+`{"continue":{"title":"<checkpoint title>"}}` still joins a known handoff.
+
+Saving is activity-gated: defaults are 10 tool calls for Codex, or 4 user turns
+or 10 tool calls for other hosts. Trivial turns need no checkpoint or skip. When
+due, update the session's single checkpoint and `now_line`; task changes do not
+create more session notes. Hooks can also record metadata-only Activity after
+three unsaved tool calls at Stop (and Claude SessionEnd), without changing the
+checkpoint body or revision. Activity holds dates, runtime, git metadata and
+counts, never prompts or responses. See `chibako-memory-setup` for host limits.
+
+One Agent Now at the area root lists project-tagged next actions and dates.
+Entries age out after seven days by default; the server marks active checkpoints
+`stale` without closing or deleting them. A later save restores `active` and the
+entry. When no work remains, explicitly finish even below the save threshold.
+Preserve lasting facts in canonical wiki/preference memory first, then finish
+with `memory_session`. Finishing closes the checkpoint and removes its Agent Now
+entry; the note stays as a session record. Automatic memory never deletes notes;
+`chibako-memory-cleanup` reviews and removes records only with approval. The
+`chibako-memory-setup` skill describes staging, compatibility and atomic retention.
 
 At handoff, briefly name what was saved and where when writes occurred. If no
 durable change was needed, finish the task without manufacturing a memory entry.

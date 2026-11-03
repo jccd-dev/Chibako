@@ -54,6 +54,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/memory.mjs\" claude",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
