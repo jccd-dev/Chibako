@@ -165,7 +165,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       assert.deepEqual([result.saved, result.pending], [true, false]);
     }
     const now = getDb().prepare("SELECT content FROM notes WHERE folder = ? AND title = ?").get("Agent Memory Test", "Agent Now") as { content: string } | undefined;
-    assert.equal(now?.content, `- [[${note.title}]] — verifying transport\n`, "a task change and replay keep one session entry");
+    assert.equal(now?.content, `- [[${note.title}]] (workstation) — verifying transport\n`, "a task change and replay keep one session entry");
     const status = JSON.parse((await invoke({}, "status")).stdout) as { pending: number; last_verified_save: string | null };
     assert.equal(status.pending, 0);
     assert.ok(status.last_verified_save);
@@ -173,8 +173,9 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     const replay = JSON.parse((await invoke({ session_id: "bundle-session", hook_event_name: "PostToolUse", checkpoint }, "stage")).stdout) as { saved: boolean; pending: boolean };
     assert.equal(replay.saved, true, "the same request identity returns its original verified receipt");
     assert.equal(replay.pending, false);
+    // Sessions outside a repository file under the workstation project folder.
     const count = (getDb().prepare("SELECT COUNT(*) AS count FROM memory_records WHERE folder = ? AND role = 'session'")
-      .get("Agent Memory Test") as { count: number }).count;
+      .get("Agent Memory Test/workstation") as { count: number }).count;
     assert.equal(count, 1, "a repeated Stop must not create a duplicate note");
     const latest = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "bundle-session" });
     assert.ok("note" in latest);
