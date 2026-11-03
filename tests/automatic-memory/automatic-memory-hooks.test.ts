@@ -169,7 +169,9 @@ test("stage --session fills the hook identity; a malformed payload names the bad
 test("Codex keeps trivial chats silent and delivers one work reminder as developer context", async () => withPrivateDirectory(async (directory) => {
   const run = (hook_event_name: string, turn_id = "t1") => runMemoryEvent({
     runtime: "codex", promptRequests: codex.promptRequests, directory, enabled: true,
-    call: async () => ({}), input: { session_id: "quiet-chat", hook_event_name, turn_id, prompt: "Thanks" },
+    // Work turns end with a verified activity capture; everything else reads as empty.
+    call: async (_name, args) => args.action === "activity" ? { saved: true, request_id: args.request_id, note_id: "activity", revision: "a".repeat(64) } : {},
+    input: { session_id: "quiet-chat", hook_event_name, turn_id, prompt: "Thanks" },
   });
   for (let turn = 1; turn <= 6; turn++) {
     assert.doesNotMatch(String((await run("UserPromptSubmit", `t${turn}`)).context), /Memory checkpoint due/);

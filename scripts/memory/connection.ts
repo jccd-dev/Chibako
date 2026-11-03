@@ -15,6 +15,7 @@ export const memoryStatusSchema = z.object({
   enabled: z.boolean(), area: z.string().nullable(),
   session_lifecycle: z.literal(1).optional(),
   projects: z.literal(1).optional(),
+  continuity: z.literal(1).optional(),
 });
 export type MemoryStatus = z.infer<typeof memoryStatusSchema>;
 export function validateEndpoint(raw: string): string {
@@ -105,6 +106,8 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
       if (name === "memory_session") {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
         if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.", { category: "unsupported", phase: "connect" });
+        // Older servers lack the activity action; the runtime skips capture on this category.
+        if (args.action === "activity" && status.continuity !== 1) throw new MemoryClientError("Server does not support activity capture.", { category: "unsupported", phase: "connect" });
       }
       if ("project" in args) {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));

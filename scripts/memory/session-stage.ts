@@ -4,7 +4,7 @@ import { memoryWriteSchema, retainedMemorySchema, sessionMemorySchema, type Memo
 import { MemoryClientError } from "./client-error";
 import type { MemoryCall, Runtime } from "./runtime";
 
-export type SessionMutation = Exclude<SessionMemoryInput, { action: "read" | "continue" }>;
+export type SessionMutation = Exclude<SessionMemoryInput, { action: "read" | "continue" | "activity" }>;
 export type SessionContinue = Extract<SessionMemoryInput, { action: "continue" }>;
 export const sessionMutationSchema = z.discriminatedUnion("action", [sessionMemorySchema.options[1], sessionMemorySchema.options[2]]);
 const checkpointSchema = memoryWriteSchema.pick({ title: true, content: true }).extend({

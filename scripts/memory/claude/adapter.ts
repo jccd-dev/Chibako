@@ -7,7 +7,7 @@ import type { HostAdapter } from "../host-adapter";
 
 const hookSchema = z.object({
   session_id: z.string().min(1).max(200),
-  hook_event_name: z.enum(["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact"]),
+  hook_event_name: z.enum(["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "SessionEnd"]),
   cwd: z.string().max(4096).optional(), turn_id: z.string().optional(), prompt: z.string().optional(), stop_hook_active: z.boolean().optional(),
 });
 

@@ -104,6 +104,8 @@ assert calls[0]['env']['PLUGIN_ROOT'] == str(m._PLUGIN_ROOT)
           const native = JSON.parse(await readFile(path.join(extracted, ".claude-plugin/plugin.json"), "utf8"));
           assert.equal(native.hooks, "./hooks/hooks.json");
           assert.deepEqual(native.mcpServers, {});
+          // SessionEnd flushes pending state and captures activity for sessions that close under the save threshold.
+          assert.deepEqual(Object.keys(hooks.hooks).sort(), ["PostToolUse", "PreCompact", "SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"]);
           assert.doesNotMatch(await readFile(path.join(extracted, "bin/memory.mjs"), "utf8"), /pre_llm_call|CODEX_HOME/, "the Claude bundle carries no other host adapter");
         }
       }

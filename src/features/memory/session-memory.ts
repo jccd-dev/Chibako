@@ -64,28 +64,32 @@ function updateNow(principal: ApiKeyPrincipal, area: string, project: string | u
   const legacy = db.prepare(`SELECT r.note_id, r.folder, r.title, r.closed_at FROM memory_records r JOIN notes n ON n.id = r.note_id WHERE ${inArea.replaceAll("folder", "r.folder")} AND r.role = 'overview' AND r.subject = 'Now' AND r.owner_id = 'shared' ORDER BY n.updated_at DESC`)
     .all(...areaArgs(area)) as SessionRecord[];
   const legacyNotes = legacy.map(item => getNote(item.note_id)).filter((item, index): item is Note => item?.folder === legacy[index].folder && item.title === legacy[index].title);
-  if (!note && !legacyNotes.length && input.action === "finish") return;
+  if (!note && !legacyNotes.length && input.action !== "save") return;
   const lines = (note?.content ?? "").split("\n");
   const head = lines.filter(line => !line.startsWith("- [[")).join("\n").trim();
   const migrated = legacyNotes.flatMap(item => {
     const tag = memoryProject(area, item.folder);
     return item.content.split("\n").filter(line => line.startsWith("- [[")).map(line => tag ? line.replace("]]", `]] (${tag})`) : line);
   });
-  const seen = new Set([`- [[${title}]]`]);
+  // Activity keeps the entry and only refreshes its date; save and finish replace or drop it.
+  const seen = new Set(input.action === "activity" ? [] : [`- [[${title}]]`]);
+  const today = new Date().toISOString().slice(0, 10);
+  const refresh = (line: string) => input.action === "activity" && nowKey(line) === `- [[${title}]]` ? `${line.replace(/ · \d{4}-\d{2}-\d{2}$/, "")} · ${today}` : line;
   const cutoff = now() - staleSeconds();
-  // An entry ages by its checkpoint's last update, else by its line date; a line with neither stays.
+  // An entry ages by the later of its checkpoint's last update and its line date (activity refreshes the date); a line with neither stays.
   const entries = [...lines.filter(line => line.startsWith("- [[")), ...migrated].filter(line => !seen.has(nowKey(line)) && Boolean(seen.add(nowKey(line))))
-    .filter(line => {
+    .map(refresh).filter(line => {
       const target = db.prepare(`SELECT note_id FROM memory_records WHERE ${inArea} AND role = 'session' AND title = ?`)
         .get(...areaArgs(area), line.slice(4, line.indexOf("]]"))) as { note_id: string } | undefined;
       const checkpoint = target ? getNote(target.note_id) : null;
       const date = lineDate(line);
-      const updated = checkpoint?.updated_at ?? (date ? Date.parse(`${date}T00:00:00Z`) / 1000 : cutoff);
+      const updated = Math.max(checkpoint?.updated_at ?? -Infinity, date ? Date.parse(`${date}T00:00:00Z`) / 1000 : -Infinity);
+      if (updated === -Infinity) return true;
       if (updated >= cutoff) return true;
       if (checkpoint?.properties.status === "active") updateNote(checkpoint.id, { properties: { status: "stale" } });
       return false;
     });
-  if (input.action === "save") entries.unshift(`- [[${title}]]${project ? ` (${project})` : ""} — ${input.now_line} · ${new Date().toISOString().slice(0, 10)}`);
+  if (input.action === "save") entries.unshift(`- [[${title}]]${project ? ` (${project})` : ""} — ${input.now_line} · ${today}`);
   const kept = entries.slice(0, AGENT_NOW.lines);
   const content = `${head ? `${head}\n\n` : ""}${kept.join("\n")}\n`;
   if (content !== note?.content) {
@@ -102,6 +106,45 @@ function updateNow(principal: ApiKeyPrincipal, area: string, project: string | u
     if (lines.every(line => /^# Now$/.test(line) || (line.startsWith("- [[") && keys.has(nowKey(line))))) deleteNote(item.id);
   }
   for (const item of legacy) db.prepare("DELETE FROM memory_records WHERE note_id = ?").run(item.note_id);
+}
+
+/** One bounded, metadata-only Activity note per project folder, newest line first. */
+const ACTIVITY = { subject: "Activity", title: "Activity", lines: 30 };
+type ActivityInput = Extract<SessionMemoryInput, { action: "activity" }>;
+
+function activityLine(input: ActivityInput, linked: string | undefined): string {
+  const { branch, head, files, files_changed, tool_calls, user_turns } = input.entry;
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  const changed = Math.max(files_changed, files.length);
+  const parts = [`${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`, input.runtime];
+  if (branch || head) parts.push([branch && `\`${branch}\``, head && `@ \`${head}\``].filter(Boolean).join(" "));
+  if (changed) parts.push(`${plural(changed, "file")} changed${files.length ? `: ${files.map(file => `\`${file}\``).join(", ")}${changed > files.length ? ` (+${changed - files.length} more)` : ""}` : ""}`);
+  parts.push(`${plural(tool_calls, "tool call")}, ${plural(user_turns, "prompt")}`);
+  if (linked) parts.push(`[[${linked}]]`);
+  return `- ${parts.join(" · ")}`;
+}
+
+/** Writes the Activity line and refreshes the linked checkpoint's Agent Now date; the checkpoint note itself is never edited. */
+function recordActivity(principal: ApiKeyPrincipal, area: string, input: ActivityInput, record: SessionRecord | undefined): SessionMemoryReceipt {
+  const db = getDb();
+  const existing = db.prepare("SELECT note_id, folder, title, closed_at FROM memory_records WHERE folder = ? AND role = 'overview' AND subject = ? AND owner_id = 'shared'")
+    .get(memoryFolder(area, input.project), ACTIVITY.subject) as SessionRecord | undefined;
+  let note = existing ? inPlace(existing) : null;
+  // Same rule as Agent Now: a trashed log is restored, one the owner moved or renamed is left and a fresh one starts.
+  if (note?.deleted_at != null) note = restoreNote(note.id);
+  else if (existing && !note) db.prepare("DELETE FROM memory_records WHERE note_id = ?").run(existing.note_id);
+  const checkpoint = record ? inPlace(record) : null;
+  const linked = record && checkpoint?.deleted_at == null ? record.title : undefined;
+  const lines = (note?.content ?? "").split("\n");
+  const head = lines.filter(line => !line.startsWith("- ")).join("\n").trim() || "# Activity";
+  const entries = [activityLine(input, linked), ...lines.filter(line => line.startsWith("- "))].slice(0, ACTIVITY.lines);
+  const written = writeMemory(principal, {
+    request_id: `session-activity-${hash([principal.id, input]).slice(0, 40)}`,
+    project: input.project, role: "overview", subject: ACTIVITY.subject, session_id: input.session_id, title: ACTIVITY.title,
+    content: `${head}\n\n${entries.join("\n")}\n`, expected_revision: note ? memoryRevision(note) : null,
+  });
+  if (record && linked) updateNow(principal, area, memoryProject(area, record.folder), input, linked);
+  return { saved: true, request_id: input.request_id, note_id: written.note_id, revision: written.revision, closed: false, retained_note_id: null, joined: false, title: linked ?? null };
 }
 
 /** A link (session or thread) to a checkpoint; a link to a note the owner moved or renamed is dropped. */
@@ -187,6 +230,13 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
         return JSON.parse(previous.receipt_json) as SessionMemoryReceipt;
       }
     }
+    const remember = (receipt: SessionMemoryReceipt) => {
+      db.prepare("INSERT INTO memory_session_requests (actor_id, request_id, fingerprint, receipt_json, created_at) VALUES (?,?,?,?,?)")
+        .run(principal.id, receipt.request_id, hash([area, input]), JSON.stringify(receipt), now());
+      return receipt;
+    };
+    // Activity never resolves a workstream or links the session: it only records what happened.
+    if (input.action === "activity") return remember(recordActivity(principal, area, input, record));
     const matched = input.action === "save" && !record ? matchWorkstream(memoryFolder(area, input.project), input.title) : undefined;
     if (matched) record = matched;
     joined ||= Boolean(matched);
@@ -253,8 +303,6 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
       closed: input.action === "finish", retained_note_id: retainedNoteId,
       joined, title: finalRecord?.title ?? null,
     };
-    db.prepare("INSERT INTO memory_session_requests (actor_id, request_id, fingerprint, receipt_json, created_at) VALUES (?,?,?,?,?)")
-      .run(principal.id, input.request_id, hash([area, input]), JSON.stringify(receipt), now());
-    return receipt;
+    return remember(receipt);
   }).immediate();
 }

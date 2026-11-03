@@ -377,7 +377,7 @@ test("packaged Claude, Codex and Hermes runners survive faults, restarts and a s
     const committed = (request_id: string) => (getDb().prepare("SELECT COUNT(*) AS count FROM memory_session_requests WHERE request_id = ?").get(request_id) as { count: number }).count;
 
     const listed = (await agents.codex.listTools()).tools.find((tool) => tool.name === "memory_session");
-    assert.deepEqual((listed?.inputSchema.properties?.action as { enum?: string[] } | undefined)?.enum, ["read", "save", "finish", "continue"], "the scoped key discovers memory_session actions over loopback");
+    assert.deepEqual((listed?.inputSchema.properties?.action as { enum?: string[] } | undefined)?.enum, ["read", "save", "finish", "continue", "activity"], "the scoped key discovers memory_session actions over loopback");
 
     // Pre-receipt session state from ddfe12c: no receipt or pending failure fields.
     const previousSession = "previous-release-session";

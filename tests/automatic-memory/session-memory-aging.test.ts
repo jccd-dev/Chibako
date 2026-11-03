@@ -30,7 +30,14 @@ const save = (session_id: string, title: string, now_line: string, project?: str
 const nowNote = () => listNotes().find(note => note.title === "Agent Now" && note.folder === "Agent Memory")!;
 const nowContent = () => getNote(nowNote().id)!.content;
 const today = () => new Date().toISOString().slice(0, 10);
-const backdate = (noteId: string, days: number) => getDb().prepare("UPDATE notes SET updated_at = ? WHERE id = ?").run(Math.floor(Date.now() / 1000) - days * 86_400, noteId);
+// A save that happened `days` ago: the checkpoint's update time and its Agent Now line date both move back.
+const backdate = (noteId: string, days: number) => {
+  const seconds = Math.floor(Date.now() / 1000) - days * 86_400;
+  getDb().prepare("UPDATE notes SET updated_at = ? WHERE id = ?").run(seconds, noteId);
+  const title = getNote(noteId)!.title;
+  const date = new Date(seconds * 1000).toISOString().slice(0, 10);
+  getDb().prepare("UPDATE notes SET content = ? WHERE id = ?").run(nowContent().split("\n").map(line => line.startsWith(`- [[${title}]]`) ? line.replace(/· \d{4}-\d{2}-\d{2}$/, `· ${date}`) : line).join("\n"), nowNote().id);
+};
 
 test("Agent Now lines carry their date; stale checkpoints drop out, are marked stale and return on save", () => {
   const old = save("aging-old", "Aging old work", "Old next", "atlas");

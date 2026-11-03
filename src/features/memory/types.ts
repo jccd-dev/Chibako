@@ -27,6 +27,16 @@ export const retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, s
   // Defaults to the session's project; null files cross-project knowledge at the area root.
   project: projectSchema.nullable().optional(),
 });
+// Metadata only, never content: the server formats the Activity line from these validated fields.
+const count = z.number().int().min(0).max(1_000_000);
+// Repo-relative paths only: no absolute, drive, parent or Markdown-breaking characters.
+export const activityFileSchema = z.string().regex(/^(?![/\\]|[A-Za-z]:)(?!(?:.*\/)?\.\.(?:\/|$))[^\x00-\x1f\x7f`[\]|\\]{1,300}$/);
+export const activityEntrySchema = z.object({
+  branch: z.string().regex(/^[\w./+@-]{1,120}$/).optional(),
+  head: z.string().regex(/^[a-f0-9]{7,40}$/).optional(),
+  files: z.array(activityFileSchema).max(10).default([]),
+  files_changed: count.default(0), tool_calls: count, user_turns: count,
+}).strict();
 const nowLine = z.string().trim().min(1).max(140).regex(/^[^\r\n[\]]+$/);
 export const sessionMemorySchema = z.discriminatedUnion("action", [
   sessionIdentity.extend({ action: z.literal("read") }).strict(),
@@ -50,13 +60,15 @@ export const sessionMemorySchema = z.discriminatedUnion("action", [
     action: z.literal("continue"), request_id: identity,
     title: memoryWriteSchema.shape.title,
   }).strict(),
+  // Records a metadata-only line in the project's Activity note; never edits a checkpoint.
+  sessionIdentity.extend({ action: z.literal("activity"), request_id: identity, entry: activityEntrySchema }).strict(),
 ]);
 export type SessionMemoryInput = z.infer<typeof sessionMemorySchema>;
 // MCP discovery serializes a discriminated union as an empty schema, so tools/list advertises this flat
 // contract instead; sessionMemorySchema stays authoritative for each action (no defaults applied here).
 export const sessionMemoryToolSchema = sessionIdentity.extend({
   action: z.enum(sessionMemorySchema.options.map((option) => option.shape.action.value)),
-  request_id: identity.optional().describe("save, finish, continue: stable per operation; reuse it only to retry the same body"),
+  request_id: identity.optional().describe("save, finish, continue, activity: stable per operation; reuse it only to retry the same body"),
   title: memoryWriteSchema.shape.title.optional().describe("save: checkpoint title; continue: the existing checkpoint to join"),
   content: memoryWriteSchema.shape.content.optional().describe("save: full checkpoint content"),
   now_line: nowLine.optional().describe("save: one-line next action for Agent Now"),
@@ -64,6 +76,7 @@ export const sessionMemoryToolSchema = sessionIdentity.extend({
     .describe("save, finish: null or omitted for a new checkpoint, otherwise the revision from action read"),
   reopen: z.literal(true).optional().describe("save: required to save into a finished checkpoint after reading and merging it"),
   retain: retainedMemorySchema.optional().describe("finish: optional wiki/preference knowledge to retain"),
+  entry: activityEntrySchema.optional().describe("activity: metadata only (branch, head, up to 10 repo-relative files, counts); hooks send it"),
 }).strict();
 
 export class MemoryError extends Error {
