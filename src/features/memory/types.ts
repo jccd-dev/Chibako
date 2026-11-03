@@ -17,7 +17,11 @@ export const memoryWriteSchema = z.object({
 export type MemoryWriteInput = z.infer<typeof memoryWriteSchema>;
 export const memoryReadSchema = memoryWriteSchema.pick({ project: true, role: true, subject: true, session_id: true });
 
-const sessionIdentity = z.object({ runtime: z.enum(["codex", "claude", "hermes"]), session_id: identity, project: projectSchema.optional() });
+const sessionIdentity = z.object({
+  runtime: z.enum(["codex", "claude", "hermes"]), session_id: identity, project: projectSchema.optional(),
+  // A runtime-side hash of the host thread; sessions sharing it resume one checkpoint.
+  thread_key: z.string().regex(/^[a-f0-9]{64}$/).optional().describe("all actions: optional 64-hex hash of the host thread; sessions in one thread share its checkpoint"),
+});
 export const retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, session_id: true }).extend({
   role: z.enum(["wiki", "preference"]),
   // Defaults to the session's project; null files cross-project knowledge at the area root.

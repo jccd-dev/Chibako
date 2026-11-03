@@ -3,7 +3,7 @@ import { getDb, now } from "../../lib/db";
 import { applyFrontmatter } from "../../lib/markdown";
 import { deleteNote, getNote, restoreNote, updateNote, type Note } from "../../lib/notes";
 import type { ApiKeyPrincipal } from "../../server/auth/api-key-authorization";
-import { getMemoryStatus, memoryProject, memoryRevision, writeMemory } from "./memory";
+import { getMemoryStatus, memoryFolder, memoryProject, memoryRevision, writeMemory } from "./memory";
 import { MemoryError, sessionMemorySchema, type SessionMemoryInput } from "./types";
 
 interface SessionRecord {
@@ -19,6 +19,9 @@ export interface SessionMemoryReceipt {
   revision: string | null;
   closed: boolean;
   retained_note_id: string | null;
+  /** True when this request linked the session to a checkpoint it did not own (thread or workstream). */
+  joined: boolean;
+  title: string | null;
 }
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
@@ -87,6 +90,34 @@ function updateNow(principal: ApiKeyPrincipal, area: string, project: string | u
   for (const item of legacy) db.prepare("DELETE FROM memory_records WHERE note_id = ?").run(item.note_id);
 }
 
+/** A link (session or thread) to a checkpoint; a link to a note the owner moved or renamed is dropped. */
+function linkedRecord(area: string, ownerId: string, subject: string): SessionRecord | undefined {
+  const db = getDb();
+  const linked = db.prepare(`SELECT r.note_id, r.folder, r.title, r.closed_at FROM memory_session_links l JOIN memory_records r ON r.note_id = l.note_id WHERE l.owner_id = ? AND l.subject = ? AND ${inArea.replaceAll("folder", "r.folder")}`)
+    .get(ownerId, subject, ...areaArgs(area)) as SessionRecord | undefined;
+  if (linked && !inPlace(linked)) {
+    db.prepare("DELETE FROM memory_session_links WHERE owner_id = ? AND subject = ?").run(ownerId, subject);
+    return undefined;
+  }
+  return linked;
+}
+
+function link(ownerId: string, subject: string, noteId: string): void {
+  getDb().prepare("INSERT INTO memory_session_links (owner_id, subject, note_id, created_at) VALUES (?,?,?,?) ON CONFLICT (owner_id, subject) DO UPDATE SET note_id = excluded.note_id, created_at = excluded.created_at")
+    .run(ownerId, subject, noteId, now());
+}
+
+/** Strips any trailing `(runtime-hex)` suffixes earlier releases minted, folds case and collapses whitespace. */
+const workstream = (title: string) => title.replace(/(\s*\([a-z]+-[a-f0-9]+\))+\s*$/i, "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/** The session record in this folder with the same workstream title: active before finished, then most recently updated. */
+function matchWorkstream(folder: string, title: string): SessionRecord | undefined {
+  const rows = getDb().prepare("SELECT r.note_id, r.folder, r.title, r.closed_at FROM memory_records r JOIN notes n ON n.id = r.note_id WHERE r.folder = ? AND r.role = 'session' AND n.folder = r.folder AND n.title = r.title AND n.deleted_at IS NULL ORDER BY r.closed_at IS NOT NULL, n.updated_at DESC")
+    .all(folder) as SessionRecord[];
+  const key = workstream(title);
+  return rows.find(row => workstream(row.title) === key);
+}
+
 /** Links this session to another session's checkpoint (active or finished) so both keep saving into one note. */
 function continueCheckpoint(area: string, current: SessionRecord | undefined, currentNote: Note | null, ownerId: string, subject: string, title: string): string {
   const db = getDb();
@@ -100,8 +131,7 @@ function continueCheckpoint(area: string, current: SessionRecord | undefined, cu
   if (current && current.note_id !== target.note_id && current.closed_at == null && currentNote?.deleted_at == null) {
     throw new MemoryError("This session already has an active checkpoint; finish it before continuing another", 409, "session_active");
   }
-  db.prepare("INSERT INTO memory_session_links (owner_id, subject, note_id, created_at) VALUES (?,?,?,?) ON CONFLICT (owner_id, subject) DO UPDATE SET note_id = excluded.note_id, created_at = excluded.created_at")
-    .run(ownerId, subject, target.note_id, now());
+  link(ownerId, subject, target.note_id);
   return target.note_id;
 }
 
@@ -123,18 +153,17 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
   const db = getDb();
   return db.transaction(() => {
     // Session identity spans the whole area: a checkpoint stays in the project folder where it was created.
-    // A continued checkpoint (shared with the session that created it) takes precedence over this session's own.
+    // Resolution order: this session's link, the thread's link, this session's own record, then (save only) a workstream match.
+    // An explicit continue only weighs this session's own checkpoint, so its active-work guard is unchanged.
     const ownerId = JSON.stringify([principal.id, input.session_id]);
     const subject = `session:${input.runtime}`;
-    let linked = db.prepare(`SELECT r.note_id, r.folder, r.title, r.closed_at FROM memory_session_links l JOIN memory_records r ON r.note_id = l.note_id WHERE l.owner_id = ? AND l.subject = ? AND ${inArea.replaceAll("folder", "r.folder")}`)
-      .get(ownerId, subject, ...areaArgs(area)) as SessionRecord | undefined;
-    // The owner moved or renamed the shared note: drop the link and fall back to this session's own checkpoint.
-    if (linked && !inPlace(linked)) {
-      db.prepare("DELETE FROM memory_session_links WHERE owner_id = ? AND subject = ?").run(ownerId, subject);
-      linked = undefined;
-    }
-    const record = linked ?? db.prepare(`SELECT note_id, folder, title, closed_at FROM memory_records WHERE ${inArea} AND role = 'session' AND subject = ? AND owner_id = ?`)
+    const threadOwner = input.thread_key ? JSON.stringify([principal.id, "thread", input.thread_key]) : null;
+    const sessionLink = linkedRecord(area, ownerId, subject);
+    const threadLink = !sessionLink && threadOwner && input.action !== "continue" ? linkedRecord(area, threadOwner, "thread") : undefined;
+    const own = db.prepare(`SELECT note_id, folder, title, closed_at FROM memory_records WHERE ${inArea} AND role = 'session' AND subject = ? AND owner_id = ?`)
       .get(...areaArgs(area), subject, ownerId) as SessionRecord | undefined;
+    let record = sessionLink ?? threadLink ?? own;
+    let joined = Boolean(threadLink);
     const project = record ? memoryProject(area, record.folder) : input.project;
     if (input.action !== "read") {
       const previous = db.prepare("SELECT fingerprint, receipt_json FROM memory_session_requests WHERE actor_id = ? AND request_id = ?")
@@ -144,6 +173,9 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
         return JSON.parse(previous.receipt_json) as SessionMemoryReceipt;
       }
     }
+    const matched = input.action === "save" && !record ? matchWorkstream(memoryFolder(area, input.project), input.title) : undefined;
+    if (matched) record = matched;
+    joined ||= Boolean(matched);
     const note = record ? registeredNote(record) : null;
     const currentRevision = record && note ? sessionRevision(record, note) : null;
     const closed = record?.closed_at != null || note?.deleted_at != null;
@@ -152,7 +184,8 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
     let noteId = note?.id ?? null;
     let retainedNoteId: string | null = null;
     if (input.action === "continue") noteId = continueCheckpoint(area, record, note, ownerId, subject, input.title);
-    else if (currentRevision !== input.expected_revision) {
+    // A workstream join may come from a session that never read the match; its save carries the merged content.
+    else if (currentRevision !== (matched && input.expected_revision === null ? currentRevision : input.expected_revision)) {
       // Name the expected value: agents otherwise invent placeholder hashes for a new checkpoint.
       throw new MemoryError(currentRevision === null
         ? "No session checkpoint exists yet; use expected_revision null to create it"
@@ -161,14 +194,14 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
     else if (input.action === "save") {
       if (record?.closed_at === null && note?.deleted_at != null) throw new MemoryError("Session checkpoint is in Trash; finish its cleanup or restore it before saving", 409, "ineligible_note");
       // Finished checkpoints are kept records; older clients would overwrite them without merging.
-      if (record?.closed_at != null && note?.deleted_at == null && !input.reopen) {
+      if (record?.closed_at != null && note?.deleted_at == null && !input.reopen && !matched) {
         throw new MemoryError("This checkpoint is finished and kept as a record; read it, merge, and save with reopen", 409, "reopen_required");
       }
       if (record?.closed_at != null && note) restoreNote(note.id);
       // status reuses the vault property dictionary so checkpoints can be filtered with prop_key/prop_value.
       const content = applyFrontmatter(input.content, { status: "active" });
-      const title = record?.title ?? `${input.title.slice(0, 87)} (${input.runtime}-${hash([principal.id, input.session_id]).slice(0, 12)})`;
-      if (linked && note) {
+      const title = record?.title ?? input.title;
+      if (record !== own && note) {
         // Revision already checked above; the record belongs to the session that created it.
         if (note.content !== content) updateNote(note.id, { content });
       } else {
@@ -194,12 +227,15 @@ export function sessionMemory(principal: ApiKeyPrincipal, raw: unknown):
         db.prepare("UPDATE memory_records SET closed_at = COALESCE(closed_at, ?) WHERE note_id = ?").run(now(), note.id);
       }
     }
+    if (joined && noteId) link(ownerId, subject, noteId);
+    if (threadOwner && noteId) link(threadOwner, "thread", noteId);
     const finalRecord = noteId ? db.prepare("SELECT note_id, folder, title, closed_at FROM memory_records WHERE note_id = ?").get(noteId) as SessionRecord : null;
     const finalNote = finalRecord ? registeredNote(finalRecord) : null;
     const receipt: SessionMemoryReceipt = {
       saved: true, request_id: input.request_id, note_id: noteId,
       revision: finalRecord && finalNote ? sessionRevision(finalRecord, finalNote) : null,
       closed: input.action === "finish", retained_note_id: retainedNoteId,
+      joined, title: finalRecord?.title ?? null,
     };
     db.prepare("INSERT INTO memory_session_requests (actor_id, request_id, fingerprint, receipt_json, created_at) VALUES (?,?,?,?,?)")
       .run(principal.id, input.request_id, hash([area, input]), JSON.stringify(receipt), now());
