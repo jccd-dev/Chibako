@@ -54,6 +54,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --import tsx scripts/agent-memory.ts claude",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

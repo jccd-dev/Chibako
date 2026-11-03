@@ -308,3 +308,42 @@ test("Hermes YAML aliases do not add the managed connection to unrelated default
   assert.deepEqual(Object.keys(parsed.defaults), ["other"]);
   assert.ok(parsed.mcp_servers["chibako-memory"]);
 });
+
+test("profiles validate project maps, stay readable without them, and setup keeps and shows them", async () => {
+  const target = input("claude", "projects");
+  const fresh = await applySetup(await prepareSetup(target, stub()));
+  assert.equal("project_paths" in fresh, false, "older shape is unchanged");
+  const base = JSON.parse(readFileSync(join(target.directory, "profile.json"), "utf8"));
+  const write = (extra: object) => writeFileSync(join(target.directory, "profile.json"), JSON.stringify({ ...base, ...extra }));
+  write({ project_paths: { "relative/dir": "x" } });
+  await assert.rejects(() => readProfile(target.directory));
+  write({ project_aliases: { "Bad Slug": "x" } });
+  await assert.rejects(() => readProfile(target.directory));
+  write({ project_paths: { "/work/client": "client" }, project_aliases: { app: "client" } });
+  const status = await runControl(claude, "status", target.directory, "projects") as Record<string, unknown>;
+  assert.deepEqual(status.project_paths, { "/work/client": "client" });
+  assert.deepEqual(status.project_aliases, { app: "client" });
+  const again = await prepareSetup(target, stub());
+  assert.deepEqual((redactedPreview(again) as Record<string, unknown>).project_aliases, { app: "client" });
+  const applied = await applySetup(again);
+  assert.deepEqual(applied.project_paths, { "/work/client": "client" });
+  assert.deepEqual((await readProfile(target.directory))?.project_aliases, { app: "client" });
+});
+
+test("setup and status show the effective staleness window", async () => {
+  const target = input("claude", "stale-window");
+  const previous = process.env.CHIBAKO_MEMORY_STALE_DAYS;
+  try {
+    for (const [value, expected] of [[undefined, 7], ["2.5", 2.5], ["Infinity", 7], ["0", 7], ["bad", 7]] as const) {
+      if (value === undefined) delete process.env.CHIBAKO_MEMORY_STALE_DAYS;
+      else process.env.CHIBAKO_MEMORY_STALE_DAYS = value;
+      const preview = redactedPreview(await prepareSetup(target, stub())) as Record<string, unknown>;
+      const status = await runControl(claude, "status", target.directory, "stale-window") as Record<string, unknown>;
+      assert.equal(preview.stale_days, expected);
+      assert.equal(status.stale_days, expected);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CHIBAKO_MEMORY_STALE_DAYS;
+    else process.env.CHIBAKO_MEMORY_STALE_DAYS = previous;
+  }
+});

@@ -1,8 +1,10 @@
+import { memoryStaleDays } from "../../src/features/memory/staleness";
 import { MemoryClientError } from "./client-error";
 import path from "node:path";
 import { readdir } from "node:fs/promises";
 import { z } from "zod";
 import { privateDirectory, readOptional, atomicPrivateWrite } from "./private-files";
+import { projectSchema } from "../../src/features/memory/types";
 import type { HostAdapter } from "./host-adapter";
 
 export const defaultThresholds = { user_turns: 4, tool_calls: 10 };
@@ -12,6 +14,9 @@ export const profileSchema = z.object({
   endpoint: z.string(), api_key: z.string(), principal_id: z.string(), area: z.string(),
   enabled: z.boolean(), connected_at: z.string(),
   thresholds: z.object({ user_turns: z.number().int().min(1), tool_calls: z.number().int().min(1) }).strict().optional(),
+  // Absolute cwd prefix to project, and project to project; both end in the server's project slug rule.
+  project_paths: z.record(z.string().refine((value) => path.isAbsolute(value), "must be an absolute path"), projectSchema).optional(),
+  project_aliases: z.record(projectSchema, projectSchema).optional(),
   host: z.object({ file: z.string(), digest: z.string() }),
 }).strict();
 export type MemoryProfile = z.infer<typeof profileSchema>;
@@ -60,7 +65,7 @@ export async function localStatus(directory: string): Promise<object> {
   return {
     installed: true, configured: Boolean(profile?.api_key), enabled: profile?.enabled ?? false,
     runtime: profile?.runtime ?? null, profile: profile?.name ?? null, area: profile?.area ?? null,
-    connection_checked_at: profile?.connected_at ?? null, ...(await stateSummary(directory)),
+    connection_checked_at: profile?.connected_at ?? null, project_paths: profile?.project_paths ?? {}, project_aliases: profile?.project_aliases ?? {}, stale_days: memoryStaleDays(), ...(await stateSummary(directory)),
     capture_verified: false, host_verification: "pending actual-host pilot",
   };
 }

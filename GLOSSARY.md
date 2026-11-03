@@ -67,6 +67,42 @@ A trimmed fragment of a note's body shown in Search/Recall results — never the
 full body.
 _Avoid_: Excerpt, preview
 
+### Agent memory
+
+**Thread key**:
+An optional SHA-256 hash of a host thread identifier, sent as `thread_key` to
+resolve one checkpoint across model/runtime switches under the same API-key
+principal. The raw identifier stays local; T3 uses `sha256("t3:" + T3CODE_THREAD_ID)`.
+_Avoid_: Session ID (a runtime session can change within a thread)
+
+**Workstream**:
+Work continued through one checkpoint across sessions. A first save can join a
+same-project checkpoint by normalized title after reading, merging and retrying
+with its revision. Matching ignores case, repeated whitespace and legacy
+`(runtime-hex)` suffixes; open records precede finished records, then newest wins.
+_Avoid_: Per-task session (one session can cover several tasks)
+
+**Activity note**:
+The bounded metadata log in each project's memory folder, with at most 30 entries.
+Hooks record runtime/date, available git metadata and work counts without prompts
+or responses. Capture can link an existing checkpoint and refresh its Agent Now
+date without changing the checkpoint revision.
+_Avoid_: Transcript, checkpoint
+
+**Stale checkpoint**:
+An open checkpoint marked `status: stale` when its Agent Now entry ages out.
+The server uses the later of checkpoint update time and the line date; the window
+is seven days by default, set by `CHIBAKO_MEMORY_STALE_DAYS`. Saving restores
+`active` and its Agent Now entry. This is distinct from Embedding Staleness and
+a rejected stale revision.
+_Avoid_: Finished checkpoint, deleted checkpoint
+
+**Workstation project**:
+The `workstation` project slug used when neither an override, profile path map nor
+git resolves a project. Its records live under `<memory area>/workstation`, subject
+to a configured alias, rather than at the area root.
+_Avoid_: Root memory, unknown project
+
 ### Embeddings
 
 **Embedding**:

@@ -15,6 +15,7 @@ export const memoryStatusSchema = z.object({
   enabled: z.boolean(), area: z.string().nullable(),
   session_lifecycle: z.literal(1).optional(),
   projects: z.literal(1).optional(),
+  continuity: z.literal(1).optional(),
 });
 export type MemoryStatus = z.infer<typeof memoryStatusSchema>;
 export function validateEndpoint(raw: string): string {
@@ -46,8 +47,15 @@ function classify(error: unknown, phase: "connect" | "call", started: number): M
   return { category: "unknown", phase, elapsed_ms };
 }
 
-// Fixed wording plus at most a validated revision: upstream detail never reaches agent or user output.
+/** The checkpoint a workstream match named: a valid title and revision only. */
+export function workstreamConflict(detail: string): { workstream?: { title: string; revision: string } } {
+  const match = /Checkpoint \[\[([^[\]|/\\\x00-\x1f]{1,120})\]\] already holds this workstream at revision ([a-f0-9]{64})\b/.exec(detail);
+  return match ? { workstream: { title: match[1], revision: match[2] } } : {};
+}
+// Fixed wording plus at most a validated revision (and workstream title): upstream detail never reaches agent or user output.
 export function conflictMessage(detail: string): string {
+  const { workstream } = workstreamConflict(detail);
+  if (workstream) return `Session memory conflict: checkpoint [[${workstream.title}]] already holds this workstream at revision ${workstream.revision}. Read that note by its title, merge your content into it, then restage with "expected_revision": "${workstream.revision}" so the save joins it.`;
   const revision = /\brevision ([a-f0-9]{64})\b/.exec(detail)?.[1];
   if (revision) return `Session memory conflict: the checkpoint is at revision ${revision}.`;
   if (detail.includes("No session checkpoint exists yet")) return "Session memory conflict: no session checkpoint exists yet; use expected_revision null to create it.";
@@ -89,7 +97,7 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
       const message = content.success ? content.data.find(item => item.type === "text")?.text : undefined;
       if (typeof message === "string" && message.startsWith("error: ineligible_note:")) throw new MemoryClientError("Registered session memory is trashed, moved or missing. Read its current state; explicitly finish a trashed checkpoint or restore owner-relocated data. Pending content remains private.", { category: "ineligible", phase: "call" });
       if (typeof message === "string" && message.startsWith("error: request_conflict:")) throw new MemoryClientError("This request_id was already used with different content. Restage without a request_id so a fresh one is generated.", { category: "request_conflict", phase: "call" });
-      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`${conflictMessage(message)} Read and merge the current checkpoint, then restage with replaces_request_id identifying the pending request.`, { category: "conflict", phase: "call" });
+      if (typeof message === "string" && message.startsWith("error: revision_conflict:")) throw new MemoryClientError(`${conflictMessage(message)} Read and merge the current checkpoint, then restage with replaces_request_id identifying the pending request.`, { category: "conflict", phase: "call", ...workstreamConflict(message) });
     }
     if (result.isError || !result.structuredContent) throw new MemoryClientError("Memory tool unavailable or denied. Check server version and required scopes.", { category: "denied", phase: "call" });
     return z.record(z.string(), z.unknown()).parse(result.structuredContent);
@@ -102,10 +110,11 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
         if (status.principal_id !== expectedPrincipal || (expectedArea && status.area !== expectedArea)) throw new MemoryClientError("Connection identity changed. Keep pending work with its original profile and run setup again.", { category: "authentication", phase: "connect" });
         verified = true;
       }
+      // The runtime asks for status to detect features; one validated copy per connection serves it.
+      if (name === "memory_status") return status ??= validateMemoryStatus(await invoke(name, {}));
       if (name === "memory_session") {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
-        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.", { category: "unsupported", phase: "connect" });
-      }
+        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.", { category: "unsupported", phase: "connect" });      }
       if ("project" in args) {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
         // Older servers reject the field; their memory stays in the area root.

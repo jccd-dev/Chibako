@@ -4,7 +4,7 @@ import { memoryWriteSchema, retainedMemorySchema, sessionMemorySchema, type Memo
 import { MemoryClientError } from "./client-error";
 import type { MemoryCall, Runtime } from "./runtime";
 
-export type SessionMutation = Exclude<SessionMemoryInput, { action: "read" | "continue" }>;
+export type SessionMutation = Exclude<SessionMemoryInput, { action: "read" | "continue" | "activity" }>;
 export type SessionContinue = Extract<SessionMemoryInput, { action: "continue" }>;
 export const sessionMutationSchema = z.discriminatedUnion("action", [sessionMemorySchema.options[1], sessionMemorySchema.options[2]]);
 const checkpointSchema = memoryWriteSchema.pick({ title: true, content: true }).extend({
@@ -28,7 +28,7 @@ const stageSchema = z.object({
   .refine(value => value.expected_revision === undefined || Boolean(value.checkpoint || value.finish), "expected_revision needs a checkpoint or finish")
   .refine(value => value.expected_revision === undefined || [value.checkpoint?.expected_revision, value.finish?.expected_revision].every(inner => inner === undefined || inner === value.expected_revision), "expected_revision differs between the stage and its checkpoint or finish");
 
-export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, session_id: string, raw: unknown, legacy?: MemoryWriteInput, scope: { project?: string } = {}): Promise<{
+export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, session_id: string, raw: unknown, legacy?: MemoryWriteInput, scope: { project?: string; thread_key?: string; workstream?: boolean } = {}): Promise<{
   checkpoint?: SessionMutation | MemoryWriteInput; skip?: string; replaces_request_id?: string; now_line?: string; continue?: SessionContinue;
 }> {
   if (legacy) {
@@ -49,7 +49,7 @@ export async function prepareSessionStage(call: MemoryCall, runtime: Runtime, se
       : { action: "finish", ...(stage.finish?.retain ? { retain: stage.finish.retain } : {}) }),
   });
   if (expected === undefined) {
-    const current = await call("memory_session", { action: "read", runtime, session_id });
+    const current = await call("memory_session", { action: "read", runtime, session_id, ...scope });
     const revision = memoryWriteSchema.shape.expected_revision.parse(current.revision ?? null);
     if (revision && current.note) {
       throw new MemoryClientError(`This session memory already exists at revision ${revision}. Read memory_session with action read, runtime ${runtime} and the hook session_id, merge the current content, then restage with "expected_revision": "${revision}".`);

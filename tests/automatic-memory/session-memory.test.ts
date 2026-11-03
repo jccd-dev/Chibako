@@ -18,7 +18,8 @@ after(() => { getDb().close(); rmSync(vault, { recursive: true, force: true }); 
 const actor: ApiKeyPrincipal = { id: "fixture-agent", scopes: ["memory:write", "notes:read"] };
 const identity = { runtime: "claude", session_id: "fixture-session" };
 const save = (overrides: Record<string, unknown> = {}) => ({
-  ...identity, action: "save", request_id: randomUUID(), title: "First task", content: "Confirmed decision [[Related]]", expected_revision: null, now_line: "Continue work", ...overrides,
+  // Distinct sessions get distinct default titles so they never share a workstream by accident.
+  ...identity, workstream: true, action: "save", request_id: randomUUID(), title: overrides.session_id ? `Task ${overrides.session_id}` : "First task", content: "Confirmed decision [[Related]]", expected_revision: null, now_line: "Continue work", ...overrides,
 });
 function receipt(raw: unknown) {
   const value = sessionMemory(actor, raw);
@@ -37,7 +38,7 @@ test("task changes and resumed sessions update one stable note; runtimes and act
   const second = receipt(save({ title: "Another task entirely", content: "Changed objective", expected_revision: first.revision }));
   assert.equal(first.note_id, second.note_id);
   const note = read().note!;
-  assert.match(note.title, /^First task \(claude-/);
+  assert.equal(note.title, "First task", "new checkpoints use the plain title");
   assert.equal(stripFrontmatter(note.content), "Changed objective");
   assert.equal(note.properties.status, "active");
   const now = listNotes().find(note => note.title === "Agent Now")!;
@@ -47,9 +48,9 @@ test("task changes and resumed sessions update one stable note; runtimes and act
   assert.deepEqual(read({ runtime: "codex" }), { note: null, revision: null, closed: false });
   assert.deepEqual(read({ session_id: "another-session" }), { note: null, revision: null, closed: false });
   rejected(() => receipt(save({ expected_revision: first.revision })), "revision_conflict");
-  assert.throws(() => receipt(save({ session_id: "fresh-session", expected_revision: "0".repeat(64) })), /expected_revision null/);
+  assert.throws(() => receipt(save({ session_id: "fresh-session", title: "Fresh task", expected_revision: "0".repeat(64) })), /expected_revision null/);
   const omitRevision = (input: Record<string, unknown>) => Object.fromEntries(Object.entries(input).filter(([key]) => key !== "expected_revision"));
-  assert.ok(receipt(omitRevision(save({ session_id: "omitted-revision-session" }))).note_id, "an omitted expected_revision creates a new checkpoint");
+  assert.ok(receipt(omitRevision(save({ session_id: "omitted-revision-session", title: "Omitted revision task" }))).note_id, "an omitted expected_revision creates a new checkpoint");
   rejected(() => receipt(omitRevision(save())), "revision_conflict");
 });
 
@@ -67,8 +68,8 @@ test("completion preserves durable knowledge, removes only this session from Age
   assert.equal(read().closed, true);
   assert.equal(read().note!.id, result.note_id);
   const now = getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content;
-  assert.ok(!now.includes(`[[${current.note!.title}]]`));
-  assert.ok(now.includes(`[[${getNote(another.note_id!)!.title}]]`));
+  assert.ok(!now.includes(`[[${current.note!.folder}/${current.note!.title}]]`));
+  assert.ok(now.includes(`[[Agent Memory/${getNote(another.note_id!)!.title}]]`));
   assert.deepEqual(receipt(finish), result, "lost-response retries return the original receipt");
   rejected(() => receipt({ ...finish, retain: { ...finish.retain, content: "Changed retry" } }), "request_conflict");
   rejected(() => receipt(save({ expected_revision: read().revision, content: "Old client without merge" })), "reopen_required");
@@ -155,7 +156,7 @@ test("manually trashed checkpoints can finish their Now cleanup without reviving
   assert.equal(finished.closed, true);
   assert.equal(getNote(created.note_id!), null);
   const now = getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content;
-  assert.ok(!now.includes(`[[${title}]]`));
+  assert.ok(!now.includes(`[[Agent Memory/${title}]]`));
 });
 
 test("project sessions file checkpoint and retained notes in their project folder; Agent Now stays at the root", () => {
@@ -165,7 +166,7 @@ test("project sessions file checkpoint and retained notes in their project folde
   assert.equal(note.folder, "Agent Memory/atlas");
   assert.deepEqual(listNotes().filter(item => /Now$/.test(item.title)).map(item => item.folder), ["Agent Memory"], "one Agent Now, at the area root");
   const projectNow = listNotes().find(item => item.title === "Agent Now")!;
-  assert.ok(getNote(projectNow.id)!.content.includes(`- [[${note.title}]] (atlas) — Continue work`));
+  assert.ok(getNote(projectNow.id)!.content.includes(`- [[${note.folder}/${note.title}]] (atlas) — Continue work`));
 
   const moved = receipt(save({ session_id, project: "other", content: "Changed directory", expected_revision: read({ session_id }).revision }));
   assert.equal(moved.note_id, created.note_id, "a project change mid-session keeps the same checkpoint");
@@ -175,7 +176,7 @@ test("project sessions file checkpoint and retained notes in their project folde
   const finished = receipt({ ...identity, session_id, action: "finish", request_id: randomUUID(), expected_revision: read({ session_id }).revision,
     retain: { role: "wiki", subject: "atlas-lesson", title: "Atlas lesson", content: "Reusable", expected_revision: null } });
   assert.equal(getNote(finished.retained_note_id!)!.folder, "Agent Memory/atlas");
-  assert.ok(!getNote(projectNow.id)!.content.includes(`[[${note.title}]]`));
+  assert.ok(!getNote(projectNow.id)!.content.includes(`[[${note.folder}/${note.title}]]`));
   const crossProject = receipt({ ...identity, session_id: "project-session-2", project: "atlas", action: "finish", request_id: randomUUID(), expected_revision: null,
     retain: { role: "wiki", subject: "shared-lesson", title: "Shared lesson", content: "Applies everywhere", expected_revision: null, project: null } });
   assert.equal(getNote(crossProject.retained_note_id!)!.folder, "Agent Memory");
@@ -215,7 +216,7 @@ test("another runtime and key can continue one shared checkpoint without duplica
   assert.equal(stripFrontmatter(getNote(created.note_id!)!.content), "Codex progress");
   assert.equal(listNotes().filter(note => note.title.startsWith("Shared handoff")).length, 1);
   const now = getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content;
-  assert.ok(now.includes(`- [[${title}]] (atlas) — Codex next`));
+  assert.ok(now.includes(`- [[Agent Memory/atlas/${title}]] (atlas) — Codex next`));
   rejected(() => receipt(save({ session_id: "handoff-claude", content: "Stale", expected_revision: created.revision })), "revision_conflict");
   const claudeRead = read({ session_id: "handoff-claude" });
   assert.equal(stripFrontmatter(claudeRead.note!.content), "Codex progress", "the original session sees the continued work");
@@ -226,7 +227,7 @@ test("another runtime and key can continue one shared checkpoint without duplica
   assert.ok("note" in shared);
   sessionMemory(codex, { ...codexIdentity, action: "finish", request_id: randomUUID(), expected_revision: shared.revision });
   assert.equal(read({ session_id: "handoff-claude" }).closed, true, "a continuing session's finish closes the shared checkpoint for all");
-  assert.ok(!getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content.includes(`[[${title}]]`));
+  assert.ok(!getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content.includes(`[[Agent Memory/atlas/${title}]]`));
   const late = sessionMemory(codex, { ...codexIdentity, session_id: "late", action: "continue", request_id: randomUUID(), title });
   assert.ok("saved" in late && late.note_id === created.note_id, "a finished record can still be continued");
 });
@@ -253,4 +254,96 @@ test("a continued checkpoint the owner moved drops the link instead of locking t
   assert.deepEqual(sessionMemory(actor, { ...other, action: "read" }), { note: null, revision: null, closed: false });
   const own = receipt(save({ ...other, title: "Fresh own work" }));
   assert.notEqual(own.note_id, created.note_id);
+});
+
+/** A save matching a workstream unread is refused with the match's title and revision, links nothing, and joins on retry. */
+function joinWorkstream(input: Record<string, unknown>, title: string) {
+  let message = "";
+  assert.throws(() => receipt(input), error => error instanceof MemoryError && error.code === "revision_conflict" && Boolean(message = error.message));
+  assert.ok(message.includes(`[[${title}]]`), "the conflict names the matched checkpoint");
+  const revision = /revision ([a-f0-9]{64})/.exec(message)?.[1];
+  assert.ok(revision, "the conflict carries the current revision");
+  const { runtime, session_id, thread_key } = input;
+  assert.equal(read({ runtime, session_id }).note, null, "a refused join links no session");
+  if (thread_key) assert.equal(read({ runtime, session_id: `${session_id}-probe`, thread_key }).note, null, "a refused join links no thread");
+  return receipt({ ...input, request_id: randomUUID(), expected_revision: revision });
+}
+
+const threadKey = "a1".repeat(32);
+test("a thread key resumes one checkpoint across sessions and runtimes", () => {
+  const claude = { runtime: "claude", session_id: "thread-claude", project: "thread-proj", thread_key: threadKey };
+  const created = receipt(save({ ...claude, workstream: undefined, title: "Thread task" }));
+  assert.equal(created.title, "Thread task", "new checkpoints use the plain title");
+  assert.equal(created.joined, false);
+  const codex = { runtime: "codex", session_id: "thread-codex", project: "thread-proj", thread_key: threadKey };
+  const current = read(codex);
+  assert.equal(current.note!.id, created.note_id, "read resolves through the thread");
+  const resumed = receipt(save({ ...codex, title: "Whatever the new model calls it", content: "Codex continues", expected_revision: current.revision }));
+  assert.deepEqual([resumed.note_id, resumed.joined, resumed.title], [created.note_id, true, "Thread task"]);
+  assert.equal(read({ runtime: "codex", session_id: "thread-codex" }).note!.id, created.note_id, "joining links the session itself");
+  assert.equal(read({ session_id: "thread-stranger" }).note, null, "other sessions without the key stay isolated");
+  assert.equal(listNotes().filter(note => note.title.startsWith("Thread task")).length, 1);
+});
+
+test("a save under an existing workstream title joins it, ignoring suffixes and case", () => {
+  const db = getDb();
+  const legacy = (session_id: string, title: string) => receipt(save({ session_id, project: "ws", title }));
+  const active = legacy("ws-b", "Spec work (claude-f428b26a1259) (claude-4217bbe024e8)");
+  const older = legacy("ws-a", "Spec work old");
+  db.prepare("UPDATE notes SET title = ? WHERE id = ?").run("Spec work (claude-f428b26a1259)", older.note_id);
+  db.prepare("UPDATE memory_records SET title = ? WHERE note_id = ?").run("Spec work (claude-f428b26a1259)", older.note_id);
+  receipt({ ...identity, session_id: "ws-a", action: "finish", request_id: randomUUID(), expected_revision: read({ session_id: "ws-a" }).revision });
+  const joined = joinWorkstream(save({ runtime: "codex", session_id: "ws-c", project: "ws", title: "spec   WORK", content: "Merged progress" }), "Spec work (claude-f428b26a1259) (claude-4217bbe024e8)");
+  assert.equal(stripFrontmatter(getNote(active.note_id!)!.content), "Merged progress");
+  assert.deepEqual([joined.note_id, joined.joined, joined.title], [active.note_id, true, "Spec work (claude-f428b26a1259) (claude-4217bbe024e8)"], "an active match beats a more recently finished one");
+  assert.equal(read({ runtime: "codex", session_id: "ws-c" }).note!.id, active.note_id);
+  const other = receipt(save({ runtime: "codex", session_id: "ws-d", project: "elsewhere", title: "Spec work" }));
+  assert.notEqual(other.note_id, active.note_id, "matches stay within the project folder");
+  assert.equal(other.joined, false);
+});
+
+test("a finished workstream reopens on join and an ambiguous match takes the most recent", () => {
+  const db = getDb();
+  const done = receipt(save({ session_id: "reopen-a", project: "ws2", title: "Done task" }));
+  receipt({ ...identity, session_id: "reopen-a", action: "finish", request_id: randomUUID(), expected_revision: read({ session_id: "reopen-a" }).revision });
+  const reopened = joinWorkstream(save({ session_id: "reopen-b", project: "ws2", title: "Done task", content: "Picked up again" }), "Done task");
+  assert.deepEqual([reopened.note_id, reopened.joined, reopened.closed], [done.note_id, true, false]);
+  assert.equal(getNote(done.note_id!)!.properties.status, "active");
+  assert.equal(read({ session_id: "reopen-a" }).closed, false, "the original session sees it active again");
+
+  const first = receipt(save({ session_id: "dup-a", project: "ws2", title: "Dup task" }));
+  const second = joinWorkstream(save({ session_id: "dup-b", project: "ws2", title: "Dup task (codex-abc123)" }), "Dup task");
+  assert.equal(second.note_id, first.note_id, "a plain-title collision with a session record joins it");
+  const legacyDup = receipt(save({ session_id: "dup-c", project: "ws2", title: "Unrelated" }));
+  db.prepare("UPDATE notes SET title = ?, updated_at = updated_at + 100000 WHERE id = ?").run("Dup task (claude-0123456789ab)", legacyDup.note_id);
+  db.prepare("UPDATE memory_records SET title = ? WHERE note_id = ?").run("Dup task (claude-0123456789ab)", legacyDup.note_id);
+  const picked = joinWorkstream(save({ session_id: "dup-d", project: "ws2", title: "Dup task" }), "Dup task (claude-0123456789ab)");
+  assert.equal(picked.note_id, legacyDup.note_id, "the most recently updated active match wins");
+});
+
+test("thread and workstream guards: collisions, malformed keys and stale revisions write nothing", () => {
+  createNote({ folder: "Agent Memory/coll", title: "Human page", content: "Owner text" });
+  const before = listNotes().length;
+  rejected(() => receipt(save({ session_id: "coll-a", project: "coll", title: "Human page" })), "ineligible_note");
+  for (const thread_key of ["short", "A1".repeat(32), "g".repeat(64)]) {
+    rejected(() => receipt(save({ session_id: "bad-thread", project: "coll", title: "Bad key", thread_key })), "invalid_input");
+    rejected(() => read({ session_id: "bad-thread", thread_key }), "invalid_input");
+  }
+  assert.equal(listNotes().length, before);
+  const base = receipt(save({ session_id: "stale-a", project: "coll", title: "Stale guard" }));
+  rejected(() => receipt(save({ session_id: "stale-b", project: "coll", title: "Stale guard", expected_revision: "0".repeat(64) })), "revision_conflict");
+  const joined = joinWorkstream(save({ session_id: "stale-c", project: "coll", title: "Stale guard", thread_key: "b2".repeat(32) }), "Stale guard");
+  assert.equal(joined.note_id, base.note_id);
+  const replay = save({ session_id: "stale-c", project: "coll", title: "Ignored", content: "Next", expected_revision: joined.revision });
+  const again = receipt(replay);
+  assert.deepEqual(receipt(replay), again, "replays return the original receipt");
+  assert.equal(read({ session_id: "stale-fresh", thread_key: "b2".repeat(32) }).note!.id, base.note_id, "a join also links the thread");
+});
+
+test("older plugins create unique checkpoints without joining an existing workstream", () => {
+  const first = receipt(save({ session_id: "legacy-first", workstream: undefined, project: "compat", title: "Same old task" }));
+  const next = receipt(save({ session_id: "legacy-next", workstream: undefined, project: "compat", title: "Same old task" }));
+  assert.notEqual(first.note_id, next.note_id);
+  assert.equal(next.joined, false);
+  assert.match(next.title!, /^Same old task \(claude-[a-f0-9]{12}\)$/);
 });

@@ -1,4 +1,5 @@
 import { MemoryClientError } from "./client-error";
+import { memoryStaleDays } from "../../src/features/memory/staleness";
 import { mkdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -60,6 +61,8 @@ export async function applySetup(preview: SetupPreview): Promise<MemoryProfile> 
         version: 1, runtime: input.host.runtime, name: input.name, endpoint: input.endpoint, api_key: input.key,
         principal_id: status.principal_id, area: status.area!, enabled: false,
         connected_at: new Date().toISOString(), host: { file: hostFile, digest: rendered.digest },
+        ...(current?.project_paths ? { project_paths: current.project_paths } : {}),
+        ...(current?.project_aliases ? { project_aliases: current.project_aliases } : {}),
       };
       await atomicPrivateWrite(hostFile, rendered.text);
       try { await saveProfile(input.directory, profile); }
@@ -120,6 +123,8 @@ export async function writeConnectionCheck(call: MemoryCall): Promise<object> {
 export function redactedPreview(preview: SetupPreview): object {
   return { runtime: preview.input.host.runtime, profile: preview.input.name, endpoint: preview.input.endpoint,
     area: preview.status.area, scopes: preview.status.scopes, host_file: preview.hostFile,
+    project_paths: preview.previous?.project_paths ?? {}, project_aliases: preview.previous?.project_aliases ?? {},
+    stale_days: memoryStaleDays(),
     private_profile: path.join(preview.input.directory, "profile.json"), credentials: "hidden; private files (0600)",
     host_config_changed: digest(preview.original || "") !== digest(preview.rendered.text),
     automatic_memory: "off until enabled; native hook trust required", capture_verified: false,

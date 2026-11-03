@@ -43,7 +43,7 @@ export const targets = {
     install: "/plugin install chibako --marketplace jccd-dev/Chibako",
     async native(directory, manifest, version) {
       await mkdir(join(directory, "hooks"), { recursive: true });
-      await writeFile(join(directory, "hooks/hooks.json"), json(nativeHooks("claude", "CLAUDE_PLUGIN_ROOT", ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact"])));
+      await writeFile(join(directory, "hooks/hooks.json"), json(nativeHooks("claude", "CLAUDE_PLUGIN_ROOT", ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "SessionEnd"])));
       await mkdir(join(directory, ".claude-plugin"), { recursive: true });
       await writeFile(join(directory, ".claude-plugin/plugin.json"), json({ name: manifest.name, version, description: manifest.description, author: manifest.author, license: manifest.license, skills: "./skills/", hooks: "./hooks/hooks.json", mcpServers: {} }));
       await writeFile(join(directory, ".claude-plugin/marketplace.json"), json({ name: "chibako-plugins", owner: manifest.author, plugins: [{ name: manifest.name, source: "./", version }] }));

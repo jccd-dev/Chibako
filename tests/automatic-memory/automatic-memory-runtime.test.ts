@@ -47,19 +47,44 @@ async function tools(directory: string, call: MemoryCall, count = 10, runtime: "
   for (let i = 0; i < count; i++) await runMemoryEvent({ runtime, directory, enabled: true, call, input: event("PostToolUse") });
 }
 
+test("subagent events produce nothing, leave the parent counters unchanged and cannot stage", async () => withPrivateDirectory(async (directory) => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const call = caller(calls);
+  await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1", prompt: "Work" }) });
+  await tools(directory, call, 3, "claude");
+  const before = await readState(directory);
+  const seen = calls.length;
+  for (const hook_event_name of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact"]) {
+    const result = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event(hook_event_name, { subagent: true, turn_id: "t2", prompt: "Child" }) });
+    assert.deepEqual(result, {}, hook_event_name);
+  }
+  assert.deepEqual(await readState(directory), before);
+  assert.equal(calls.length, seen, "no remote calls");
+  await assert.rejects(() => runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("PostToolUse", { subagent: true }), stage: { checkpoint: checkpoint() } }),
+    /subagent/i);
+  assert.deepEqual(await readState(directory), before);
+}));
+
+test("a subagent event alone creates no private state", async () => withPrivateDirectory(async (directory) => {
+  const state = join(directory, "state");
+  const result = await runMemoryEvent({ runtime: "codex", directory: state, enabled: true, call: caller([]), input: event("PostToolUse", { subagent: true }) });
+  assert.deepEqual(result, {});
+  await assert.rejects(() => stat(state));
+}));
+
 test("loads the Now index and first prompt recall once, from private state", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const call = caller(calls);
   const start = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart", { prompt: "Resume the memory work" }) });
   assert.equal(calls.filter(({ name }) => name === "get_knowledge_schema").length, 0, "schema is fetched only when a checkpoint is due");
-  assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } });
+  assert.deepEqual(calls.find(({ name }) => name === "memory_read"), { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } });
   assert.equal(calls.filter(({ name }) => name === "recall").length, 1);
   assert.match(String(start.context), /Automatic memory:/);
   assert.equal((await stat(directory)).mode & 0o077, 0);
 
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-2", prompt: "Another prompt" }) });
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-3", prompt: "Again" }) });
-  assert.deepEqual(calls.map(({ name }) => name), ["memory_read", "recall"]);
+  assert.deepEqual(calls.map(({ name }) => name), ["memory_status", "memory_read", "recall"], "feature detection, then Now and recall, once");
 }));
 
 test("Now is injected capped, and the instruction block appears once per session", async () => withPrivateDirectory(async (directory) => {
@@ -77,7 +102,8 @@ test("a trivial session makes no extra calls, receives no block, and PostToolUse
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("SessionStart") });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1", prompt: "quick question" }) });
   const before = calls.length;
-  await tools(directory, call, 3, "claude");
+  // Below the activity fallback threshold of three tool calls.
+  await tools(directory, call, 2, "claude");
   assert.deepEqual(await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Stop") }), {});
   assert.equal(calls.length, before, "counting and Stop add no memory calls");
   assert.equal(calls.some(({ name }) => name === "memory_write" || name === "get_knowledge_schema"), false);
@@ -153,7 +179,8 @@ test("legacy pending saves from two runtimes recover their capped Now index", as
   await save(join(directory, "claude"), call, "Beta", "review", "session-2", "claude");
   await save(join(directory, "codex"), call, "Alpha", "done");
   const lines = store.content!.split("\n").filter((line) => line.startsWith("- [["));
-  assert.deepEqual(lines, ["- [[Alpha]] — done", "- [[Beta]] — review"]);
+  const date = new Date().toISOString().slice(0, 10);
+  assert.deepEqual(lines, [`- [[Alpha]] — done · ${date}`, `- [[Beta]] — review · ${date}`]);
   assert.match(store.content!, /^# Agent Now\n/);
   for (let i = 0; i < 20; i++) await save(join(directory, "codex"), call, `Thread ${i}`, "x");
   assert.equal(store.content!.split("\n").filter((line) => line.startsWith("- [[")).length, 15);
@@ -165,6 +192,20 @@ test("the Agent Now briefing lists the current project's entries first", async (
   const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject: () => "atlas", input: event("SessionStart", { cwd: "/work/atlas" }) });
   const context = String(start.context);
   assert.ok(context.indexOf("[[Mine]]") < context.indexOf("[[Other]]") && context.indexOf("[[Mine]]") < context.indexOf("[[Root]]"));
+}));
+
+test("the Agent Now briefing hides lines older than the staleness window and keeps undated ones", async () => withPrivateDirectory(async (directory) => {
+  const day = (ago: number) => new Date(Date.now() - ago * 86_400_000).toISOString().slice(0, 10);
+  const content = `# Agent Now\n\n- [[Fresh]] (atlas) — a · ${day(6)}\n- [[Old]] (atlas) — b · ${day(8)}\n- [[Legacy]] — c\n`;
+  const call = caller([], async (name) => name === "memory_read" ? { note: { content }, revision: "a".repeat(64) } : {});
+  const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("SessionStart", { cwd: "/work/atlas" }) });
+  const context = String(start.context);
+  assert.ok(context.includes("[[Fresh]]") && context.includes("[[Legacy]]") && !context.includes("[[Old]]"));
+  process.env.CHIBAKO_MEMORY_STALE_DAYS = "3";
+  try {
+    const narrow = await runMemoryEvent({ runtime: "claude", directory: join(directory, "narrow"), enabled: true, call, input: event("SessionStart", { cwd: "/work/atlas" }) });
+    assert.ok(!String(narrow.context).includes("[[Fresh]]") && String(narrow.context).includes("[[Legacy]]"));
+  } finally { delete process.env.CHIBAKO_MEMORY_STALE_DAYS; }
 }));
 
 test("a stale Now revision is re-read and merged, never blindly replaced", async () => withPrivateDirectory(async (directory) => {
@@ -468,7 +509,7 @@ test("the project resolves once per session and scopes Agent Now order, recall a
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("SessionStart", { cwd: "/work/atlas", prompt: "Resume" }) });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("UserPromptSubmit", { cwd: "/elsewhere", turn_id: "turn-1" }) });
   assert.equal(resolved, 1);
-  assert.deepEqual(calls[0], { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } }, "Agent Now is global; the project only orders it");
+  assert.deepEqual(calls.find(({ name }) => name === "memory_read"), { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } }, "Agent Now is global; the project only orders it");
   assert.match(String(calls.find(({ name }) => name === "recall")!.args.query), /^atlas Resume/);
   const result = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("Checkpoint"),
     stage: { checkpoint: { title: "Atlas", content: "Progress", expected_revision: null } } });

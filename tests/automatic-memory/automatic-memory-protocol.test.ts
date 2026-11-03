@@ -86,10 +86,10 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   assert.ok(tool, "memory_session is listed");
   const advertised = tool.inputSchema;
   assert.equal(advertised.type, "object");
-  for (const field of ["action", "runtime", "session_id", "project", "request_id", "title", "content", "now_line", "expected_revision", "reopen", "retain"]) {
+  for (const field of ["action", "runtime", "session_id", "project", "request_id", "title", "content", "now_line", "expected_revision", "reopen", "retain", "thread_key", "workstream", "entry"]) {
     assert.ok(field in advertised.properties, `memory_session advertises ${field}`);
   }
-  assert.deepEqual(advertised.properties.action.enum, ["read", "save", "finish", "continue"]);
+  assert.deepEqual(advertised.properties.action.enum, ["read", "save", "finish", "continue", "activity"]);
   assert.deepEqual(advertised.properties.runtime.enum, ["codex", "claude", "hermes"]);
   assert.deepEqual([...(advertised.required ?? [])].sort(), ["action", "runtime", "session_id"]);
   const input = { action: "save", runtime: "codex", session_id: "fixture-session", request_id: randomUUID(), title: "Protocol session", content: "Useful work", now_line: "Continue", expected_revision: null };
@@ -130,4 +130,45 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   const { title } = (await rpc(key.key, "tools/call", "memory_session", freshRead)).structuredContent.note;
   const joined = (await rpc(other.key, "tools/call", "memory_session", { action: "continue", runtime: "hermes", session_id: "joiner", request_id: randomUUID(), title })).structuredContent;
   assert.equal(joined.note_id, created.note_id, "continue joins the checkpoint through the advertised contract");
+
+  // A thread key saved over REST resumes the same checkpoint from another runtime over MCP.
+  const thread_key = "c3".repeat(32);
+  const threaded = { action: "save", runtime: "claude", session_id: "thread-rest", thread_key, request_id: randomUUID(), title: "Threaded work", content: "REST", now_line: "Next" };
+  const restReceipt = await (await postMemory(rest(key.key, "POST", threaded))).json();
+  assert.deepEqual([restReceipt.joined, restReceipt.title], [false, "Threaded work"]);
+  const mcpRead = (await rpc(key.key, "tools/call", "memory_session", { action: "read", runtime: "codex", session_id: "thread-mcp", thread_key })).structuredContent;
+  assert.equal(mcpRead.note.id, restReceipt.note_id);
+  const mcpSave = (await rpc(key.key, "tools/call", "memory_session", { ...threaded, runtime: "codex", session_id: "thread-mcp", request_id: randomUUID(), content: "MCP", expected_revision: mcpRead.revision })).structuredContent;
+  assert.deepEqual([mcpSave.note_id, mcpSave.joined, mcpSave.title], [restReceipt.note_id, true, "Threaded work"]);
+  const badKey = await rpc(key.key, "tools/call", "memory_session", { action: "read", runtime: "codex", session_id: "thread-mcp", thread_key: "nope" });
+  assert.equal(badKey.isError, true);
+  assert.equal((await postMemory(rest(key.key, "POST", { ...threaded, request_id: randomUUID(), thread_key: "nope" }))).status, 400);
+
+  // Activity: REST records the line, the same request over MCP replays its receipt, and both reject a bad entry.
+  const activity = { action: "activity", runtime: "codex", session_id: "thread-mcp", thread_key, request_id: randomUUID(), entry: { head: "abc1234", files: ["a.ts"], files_changed: 1, tool_calls: 4, user_turns: 1 } };
+  const logged = await (await postMemory(rest(key.key, "POST", activity))).json();
+  assert.deepEqual([logged.saved, logged.title], [true, "Threaded work"]);
+  assert.deepEqual((await rpc(key.key, "tools/call", "memory_session", activity)).structuredContent, logged);
+  const badEntry = { ...activity, request_id: randomUUID(), entry: { ...activity.entry, files: ["/abs.ts"] } };
+  assert.equal((await postMemory(rest(key.key, "POST", badEntry))).status, 400);
+  assert.equal((await rpc(key.key, "tools/call", "memory_session", badEntry)).isError, true);
+});
+
+test("REST and MCP share workstream opt-in and preserve older saves", async () => {
+  const { key } = createApiKey("Compatibility fixture", ["memory:write", "notes:read"]);
+  const input = { action: "save", runtime: "codex", project: "compat", title: "Shared work", content: "Base", now_line: "Next" };
+  const first = await (await postMemory(rest(key, "POST", { ...input, session_id: "modern", workstream: true, request_id: randomUUID() }))).json();
+  const legacy = (await rpc(key, "tools/call", "memory_session", { ...input, session_id: "older", request_id: randomUUID() })).structuredContent;
+  assert.equal(legacy.saved, true);
+  assert.equal(legacy.joined, false);
+  assert.notEqual(legacy.note_id, first.note_id);
+  assert.match(legacy.title, /^Shared work \(codex-[a-f0-9]{12}\)$/);
+  const join = { ...input, session_id: "modern-mcp", workstream: true, request_id: randomUUID() };
+  assert.equal((await postMemory(rest(key, "POST", join))).status, 409);
+  assert.equal((await rpc(key, "tools/call", "memory_session", join)).isError, true);
+  const merged = { ...join, request_id: randomUUID(), content: "Merged", expected_revision: first.revision };
+  const joined = (await rpc(key, "tools/call", "memory_session", merged)).structuredContent;
+  assert.equal(joined.joined, true);
+  assert.equal(joined.note_id, first.note_id);
+  assert.deepEqual(await (await postMemory(rest(key, "POST", merged))).json(), joined);
 });

@@ -131,7 +131,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       HOME: root,
       CODEX_HOME: hostHome,
       CHIBAKO_DATA_DIR: process.env.CHIBAKO_DATA_DIR,
-      CHIBAKO_MEMORY_PROFILE_DIR: undefined,
+      CHIBAKO_MEMORY_PROFILE_DIR: undefined, T3CODE_THREAD_ID: undefined,
     } satisfies NodeJS.ProcessEnv;
     const invoke = (input: object, action = "hook", extra: string[] = [], allowFailure = false) =>
       run([runner, "codex", action, "--profile-dir", profileDirectory, ...extra], input, environment, allowFailure);
@@ -165,7 +165,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       assert.deepEqual([result.saved, result.pending], [true, false]);
     }
     const now = getDb().prepare("SELECT content FROM notes WHERE folder = ? AND title = ?").get("Agent Memory Test", "Agent Now") as { content: string } | undefined;
-    assert.equal(now?.content, `- [[${note.title}]] — verifying transport\n`, "a task change and replay keep one session entry");
+    assert.equal(now?.content, `- [[${note.folder}/${note.title}]] (workstation) — verifying transport · ${new Date().toISOString().slice(0, 10)}\n`, "a task change and replay keep one session entry");
     const status = JSON.parse((await invoke({}, "status")).stdout) as { pending: number; last_verified_save: string | null };
     assert.equal(status.pending, 0);
     assert.ok(status.last_verified_save);
@@ -173,8 +173,9 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
     const replay = JSON.parse((await invoke({ session_id: "bundle-session", hook_event_name: "PostToolUse", checkpoint }, "stage")).stdout) as { saved: boolean; pending: boolean };
     assert.equal(replay.saved, true, "the same request identity returns its original verified receipt");
     assert.equal(replay.pending, false);
+    // Sessions outside a repository file under the workstation project folder.
     const count = (getDb().prepare("SELECT COUNT(*) AS count FROM memory_records WHERE folder = ? AND role = 'session'")
-      .get("Agent Memory Test") as { count: number }).count;
+      .get("Agent Memory Test/workstation") as { count: number }).count;
     assert.equal(count, 1, "a repeated Stop must not create a duplicate note");
     const latest = sessionMemory(principal, { action: "read", runtime: "codex", session_id: "bundle-session" });
     assert.ok("note" in latest);
@@ -318,7 +319,7 @@ test("packaged Claude, Codex and Hermes runners survive faults, restarts and a s
     const environment = {
       ...process.env, HOME: root, CHIBAKO_DATA_DIR: process.env.CHIBAKO_DATA_DIR,
       CODEX_HOME: path.join(root, "lifecycle", "codex-home"), CLAUDE_CONFIG_DIR: path.join(root, "lifecycle", "claude-home"), HERMES_HOME: path.join(root, "lifecycle", "hermes-home"),
-      CHIBAKO_MEMORY_PROFILE_DIR: undefined, CHIBAKO_MEMORY_PROFILE: undefined, CHIBAKO_MEMORY_ENABLED: undefined,
+      CHIBAKO_MEMORY_PROFILE_DIR: undefined, CHIBAKO_MEMORY_PROFILE: undefined, CHIBAKO_MEMORY_ENABLED: undefined, T3CODE_THREAD_ID: undefined,
     } satisfies NodeJS.ProcessEnv;
     const invoke = async (args: string[], input: object) => {
       const output = await run(args, input, environment);
@@ -376,7 +377,7 @@ test("packaged Claude, Codex and Hermes runners survive faults, restarts and a s
     const committed = (request_id: string) => (getDb().prepare("SELECT COUNT(*) AS count FROM memory_session_requests WHERE request_id = ?").get(request_id) as { count: number }).count;
 
     const listed = (await agents.codex.listTools()).tools.find((tool) => tool.name === "memory_session");
-    assert.deepEqual((listed?.inputSchema.properties?.action as { enum?: string[] } | undefined)?.enum, ["read", "save", "finish", "continue"], "the scoped key discovers memory_session actions over loopback");
+    assert.deepEqual((listed?.inputSchema.properties?.action as { enum?: string[] } | undefined)?.enum, ["read", "save", "finish", "continue", "activity"], "the scoped key discovers memory_session actions over loopback");
 
     // Pre-receipt session state from ddfe12c: no receipt or pending failure fields.
     const previousSession = "previous-release-session";
