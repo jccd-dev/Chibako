@@ -11,7 +11,7 @@ type Results = Record<string, { status: string; version: string; reason?: string
 // A disposable repository with the real build/release scripts and sources; tests are fixtures that pass or fail on demand.
 async function fixtureRepository() {
   const repository = await mkdtemp(path.join(tmpdir(), "chibako-release-"));
-  for (const entry of ["scripts", "skills", "integrations/agent-memory", "src/features/memory/types.ts", "LICENSE", "plugin.json", ".claude-plugin", ".agents"]) {
+  for (const entry of ["scripts", "skills", "integrations/agent-memory", "src/features/memory/types.ts", "src/features/memory/staleness.ts", "LICENSE", "plugin.json", ".claude-plugin", ".agents"]) {
     await cp(path.join(root, entry), path.join(repository, entry), { recursive: true });
   }
   // A fixed baseline: the repository's own versions move with every release this test gates.

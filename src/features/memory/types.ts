@@ -21,6 +21,7 @@ const sessionIdentity = z.object({
   runtime: z.enum(["codex", "claude", "hermes"]), session_id: identity, project: projectSchema.optional(),
   // A runtime-side hash of the host thread; sessions sharing it resume one checkpoint.
   thread_key: z.string().regex(/^[a-f0-9]{64}$/).optional().describe("all actions: optional 64-hex hash of the host thread; sessions in one thread share its checkpoint"),
+  workstream: z.boolean().optional().describe("opt in to plain checkpoint titles and automatic workstream joins; thread_key also opts in"),
 });
 export const retainedMemorySchema = memoryWriteSchema.omit({ request_id: true, session_id: true }).extend({
   role: z.enum(["wiki", "preference"]),

@@ -67,7 +67,7 @@ test("against a server without continuity, no thread key is sent and no checkpoi
   await run("Checkpoint", {}, { stage: { checkpoint: { title: "Task", content: "Progress" } } });
   await run("Checkpoint");
   assert.ok(sessionCalls(calls).length >= 2);
-  assert.equal(sessionCalls(calls).some(({ args }) => "thread_key" in args), false);
+  assert.equal(sessionCalls(calls).some(({ args }) => "thread_key" in args || "workstream" in args), false);
 }));
 
 test("a start resumes the thread's checkpoint with bounded content ahead of Agent Now, and the instructions name it", async () => withPrivateDirectory(async (directory) => {
@@ -145,3 +145,15 @@ test("workstream conflict details keep only a valid title and revision", () => {
   assert.equal(conflictMessage(detail).includes("SECRET"), false);
   assert.deepEqual(workstreamConflict(`Session memory is at revision ${hex("a")}`), {});
 });
+
+test("new runtime opts in to workstreams even without a host thread", async () => withPrivateDirectory(async (directory) => {
+  const { calls, call } = server();
+  const run = runner(directory, call);
+  await run("UserPromptSubmit", { turn_id: "t1" });
+  await run("Checkpoint", {}, { stage: { checkpoint: { title: "Task", content: "Progress" } } });
+  await run("Checkpoint");
+  const saves = sessionCalls(calls).filter(({ args }) => args.action === "save");
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].args.workstream, true);
+  assert.equal(saves[0].args.thread_key, undefined);
+}));

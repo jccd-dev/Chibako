@@ -1,3 +1,4 @@
+import { memoryStaleDays } from "../../src/features/memory/staleness";
 import { MemoryClientError } from "./client-error";
 import path from "node:path";
 import { readdir } from "node:fs/promises";
@@ -64,7 +65,7 @@ export async function localStatus(directory: string): Promise<object> {
   return {
     installed: true, configured: Boolean(profile?.api_key), enabled: profile?.enabled ?? false,
     runtime: profile?.runtime ?? null, profile: profile?.name ?? null, area: profile?.area ?? null,
-    connection_checked_at: profile?.connected_at ?? null, project_paths: profile?.project_paths ?? {}, project_aliases: profile?.project_aliases ?? {},...(await stateSummary(directory)),
+    connection_checked_at: profile?.connected_at ?? null, project_paths: profile?.project_paths ?? {}, project_aliases: profile?.project_aliases ?? {}, stale_days: memoryStaleDays(), ...(await stateSummary(directory)),
     capture_verified: false, host_verification: "pending actual-host pilot",
   };
 }

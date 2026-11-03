@@ -7,7 +7,7 @@ import { after, test } from "node:test";
 import { sessionMemory } from "../../src/features/memory/session-memory";
 import { MemoryError } from "../../src/features/memory/types";
 import { getDb } from "../../src/lib/db";
-import { getNote, listNotes, updateNote } from "../../src/lib/notes";
+import { getNote, getOutlinks, listNotes, updateNote } from "../../src/lib/notes";
 import type { ApiKeyPrincipal } from "../../src/server/auth/api-key-authorization";
 
 const vault = mkdtempSync(join(tmpdir(), "chibako-session-activity-"));
@@ -59,16 +59,17 @@ test("activity replays by request_id and rejects malformed entries without writi
 
 test("a linked session wikilinks its checkpoint and refreshes its Agent Now date without editing the checkpoint", () => {
   const identity = { runtime: "claude", session_id: "linked", project: "atlas" };
-  const saved = receipt({ ...identity, action: "save", request_id: randomUUID(), title: "Linked work", content: "Body", now_line: "Keep going" });
+  const saved = receipt({ ...identity, action: "save", workstream: true, request_id: randomUUID(), title: "Linked work", content: "Body", now_line: "Keep going" });
   const nowNote = note("Agent Memory", "Agent Now")!;
   updateNote(nowNote.id, { content: nowContent().replace(/(Linked work\]\] \(atlas\) — Keep going) · \d{4}-\d{2}-\d{2}/, "$1 · 2020-01-01") });
   const checkpointBefore = getNote(saved.note_id!)!;
   // Backdate the checkpoint so only the refreshed line date keeps it out of the staleness pruning.
   getDb().prepare("UPDATE notes SET updated_at = ? WHERE id = ?").run(Math.floor(Date.now() / 1000) - 30 * 86_400, saved.note_id);
   receipt({ ...identity, action: "activity", request_id: randomUUID(), entry });
-  assert.match(lines()[0], /· claude · .* · \[\[Linked work\]\]$/);
+  assert.match(lines()[0], /· claude · .* · \[\[Agent Memory\/atlas\/Linked work\]\]$/);
+  assert.ok(getOutlinks(note("Agent Memory/atlas", "Activity")!.id).some(link => link.target_id === saved.note_id));
   const today = new Date().toISOString().slice(0, 10);
-  assert.ok(nowContent().includes(`- [[Linked work]] (atlas) — Keep going · ${today}`), "date refreshed, next action unchanged");
+  assert.ok(nowContent().includes(`- [[Agent Memory/atlas/Linked work]] (atlas) — Keep going · ${today}`), "date refreshed, next action unchanged");
   const checkpointAfter = getNote(saved.note_id!)!;
   assert.equal(checkpointAfter.content, checkpointBefore.content);
   assert.equal(checkpointAfter.properties.status, "active", "never marked stale by its own refresh");
@@ -80,11 +81,26 @@ test("a linked session wikilinks its checkpoint and refreshes its Agent Now date
 
 test("a thread-linked session links the thread's checkpoint; an unlinked session gets no link", () => {
   const thread_key = "ab".repeat(32);
-  receipt({ runtime: "claude", session_id: "thread-owner", project: "atlas", thread_key, action: "save", request_id: randomUUID(), title: "Thread work", content: "Body", now_line: "Next" });
+  receipt({ runtime: "claude", session_id: "thread-owner", project: "atlas", thread_key, action: "save", workstream: true, request_id: randomUUID(), title: "Thread work", content: "Body", now_line: "Next" });
   receipt(activity("thread-other", { thread_key }));
-  assert.match(lines()[0], /\[\[Thread work\]\]$/);
+  assert.match(lines()[0], /\[\[Agent Memory\/atlas\/Thread work\]\]$/);
   receipt(activity("nobody"));
   assert.doesNotMatch(lines()[0], /\[\[/);
   const read = sessionMemory(actor, { runtime: "codex", session_id: "thread-other", action: "read" });
   assert.ok("note" in read && read.note === null, "activity never links the session to a checkpoint");
+});
+
+test("maximal Activity entries remain below the memory write content limit", () => {
+  const entry = { branch: "b".repeat(120), head: "f".repeat(40), files: Array.from({ length: 10 }, (_, i) => `${i}${"x".repeat(299)}`), files_changed: 1_000_000, tool_calls: 1_000_000, user_turns: 1_000_000 };
+  for (let i = 0; i < 35; i++) {
+    const result = receipt(activity(`max-${i}`, { project: "maximal", entry }));
+    assert.ok(getNote(result.note_id!)!.content.length <= 64_000);
+  }
+  assert.ok(lines("Agent Memory/maximal").length < 30, "oldest entries are dropped to fit the character budget");
+  assert.match(lines("Agent Memory/maximal")[0], /1000000 tool calls/);
+  const log = note("Agent Memory/maximal", "Activity")!;
+  updateNote(log.id, { content: "H".repeat(64_000) });
+  receipt(activity("max-with-header", { project: "maximal", entry }));
+  assert.ok(getNote(log.id)!.content.length <= 64_000);
+  assert.equal(lines("Agent Memory/maximal").length, 1, "the newest capture survives an oversized header");
 });

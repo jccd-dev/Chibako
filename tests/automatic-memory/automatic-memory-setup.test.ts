@@ -329,3 +329,21 @@ test("profiles validate project maps, stay readable without them, and setup keep
   assert.deepEqual(applied.project_paths, { "/work/client": "client" });
   assert.deepEqual((await readProfile(target.directory))?.project_aliases, { app: "client" });
 });
+
+test("setup and status show the effective staleness window", async () => {
+  const target = input("claude", "stale-window");
+  const previous = process.env.CHIBAKO_MEMORY_STALE_DAYS;
+  try {
+    for (const [value, expected] of [[undefined, 7], ["2.5", 2.5], ["Infinity", 7], ["0", 7], ["bad", 7]] as const) {
+      if (value === undefined) delete process.env.CHIBAKO_MEMORY_STALE_DAYS;
+      else process.env.CHIBAKO_MEMORY_STALE_DAYS = value;
+      const preview = redactedPreview(await prepareSetup(target, stub())) as Record<string, unknown>;
+      const status = await runControl(claude, "status", target.directory, "stale-window") as Record<string, unknown>;
+      assert.equal(preview.stale_days, expected);
+      assert.equal(status.stale_days, expected);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CHIBAKO_MEMORY_STALE_DAYS;
+    else process.env.CHIBAKO_MEMORY_STALE_DAYS = previous;
+  }
+});

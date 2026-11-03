@@ -47,7 +47,12 @@ test("Codex Stop captures activity once above the fallback threshold, then count
   await h.tools(3);
   await h.run("Stop");
   assert.equal(h.activity().length, 2);
+  assert.notEqual(h.activity()[1].args.request_id, args.request_id, "new capture in the same turn has a new identity");
   assert.equal((h.activity()[1].args.entry as { tool_calls: number }).tool_calls, 3, "counted since the last capture");
+  await h.tools(3);
+  await h.run("Stop");
+  assert.deepEqual(h.activity()[2].args.entry, h.activity()[1].args.entry);
+  assert.notEqual(h.activity()[2].args.request_id, h.activity()[1].args.request_id, "identical metadata in one turn is a new capture");
 }));
 
 test("Hermes Stop captures too, unless it is asking the agent to save", async () => withPrivateDirectory(async (directory) => {
@@ -141,4 +146,22 @@ test("inside git, the entry carries branch, short head and up to 10 repo-relativ
   assert.equal(entry.files_changed, 13);
   assert.ok(entry.files.includes("README.md") || entry.files.every((file) => file.startsWith("src/")), "paths are relative to the repository root");
   assert.ok(entry.files.every((file) => !file.startsWith("/")));
+}));
+
+test("a failed capture retries its persisted identity and metadata after restart", async () => withPrivateDirectory(async (directory) => {
+  let fail = true;
+  const response: MemoryCall = async (name, args) => {
+    if (args.action === "activity" && fail) throw new MemoryClientError("timeout", { category: "timeout", phase: "call" });
+    return receipts(name, args);
+  };
+  const first = harness(directory, "codex", response);
+  await first.tools(3);
+  await first.run("Stop");
+  const attempted = first.activity()[0].args;
+  fail = false;
+  const restarted = harness(directory, "codex", response);
+  await restarted.run("Stop");
+  assert.deepEqual(restarted.activity()[0]?.args, attempted, "retry sends the exact capture even without more work");
+  await restarted.run("Stop");
+  assert.equal(restarted.activity().length, 1, "verified capture is not resent");
 }));
