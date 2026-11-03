@@ -395,17 +395,16 @@ export async function runMemoryEvent(options: {
     // Hook-side capture for unsaved work: metadata only, once per unit of work, never blocking.
     // A Stop that asks the agent to checkpoint leaves this unit of work to the agent.
     const since = { tools: state.tools - (state.captured?.tools ?? 0), users: state.users - (state.captured?.users ?? 0) };
-    if ((event === "SessionEnd" || (event === "Stop" && !output.request)) && !state.pending && since.tools >= ACTIVITY_TOOL_CALLS) {
+    // An older server without `continuity: 1` is skipped silently.
+    if ((event === "SessionEnd" || (event === "Stop" && !output.request)) && !state.pending && since.tools >= ACTIVITY_TOOL_CALLS && await continuity()) {
       state.captured = { tools: state.tools, users: state.users };
       try {
         const entry = { ...gitActivity(input.cwd), tool_calls: since.tools, user_turns: since.users };
         const request_id = `activity-${createHash("sha256").update(JSON.stringify([runtime, input.session_id, state.turn, entry])).digest("hex").slice(0, 32)}`;
-        const receipt = await call("memory_session", { action: "activity", runtime, session_id: input.session_id, request_id, entry, ...scope });
+        const receipt = await call("memory_session", { action: "activity", runtime, session_id: input.session_id, request_id, entry, ...project, ...(await threaded()) });
         if (!verified(receipt, request_id)) throw new Error("Unverified activity receipt");
-      } catch (error) {
-        // An older server without `continuity: 1` is skipped silently.
-        const unsupported = error instanceof MemoryClientError && error.failure?.category === "unsupported";
-        if (!unsupported && !state.activityWarned) {
+      } catch {
+        if (!state.activityWarned) {
           state.activityWarned = true;
           warning ||= "Memory activity capture failed; this session's work was not recorded in the Activity note. Further capture failures this session are not reported.";
         }

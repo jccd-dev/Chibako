@@ -15,7 +15,7 @@ async function withPrivateDirectory<T>(run: (directory: string) => Promise<T>): 
   try { return await run(directory); }
   finally { await rm(directory, { recursive: true, force: true }); }
 }
-const receipts: MemoryCall = async (name, args) => name === "memory_session" && args.action !== "read"
+const receipts: MemoryCall = async (name, args) => name === "memory_status" ? { continuity: 1 } : name === "memory_session" && args.action !== "read"
   ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64), closed: args.action === "finish" } : {};
 function harness(directory: string, runtime: Runtime, response: MemoryCall = receipts, cwd?: string) {
   const calls: Calls = [];
@@ -115,12 +115,10 @@ test("capture failures warn once and never block; an older server is skipped sil
   assert.deepEqual(await failing.run("Stop"), {}, "warned once per session");
   assert.equal(failing.activity().length, 2);
 
-  const older = harness(join(directory, "b"), "codex", async (name, args) => {
-    if (args.action === "activity") throw new MemoryClientError("Server lacks continuity", { category: "unsupported", phase: "connect" });
-    return receipts(name, args);
-  });
+  const older = harness(join(directory, "b"), "codex", async (name, args) => name === "memory_status" ? { contract_version: 1 } : receipts(name, args));
   await older.tools(3);
   assert.deepEqual(await older.run("Stop"), {});
+  assert.equal(older.activity().length, 0, "a server without continuity: 1 gets no activity call");
 }));
 
 test("inside git, the entry carries branch, short head and up to 10 repo-relative changed files", async () => withPrivateDirectory(async (directory) => {
