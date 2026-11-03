@@ -173,6 +173,8 @@ export interface HookInput {
   turn_id?: string;
   prompt?: string;
   stop_hook_active?: boolean;
+  /** The host marked this event as coming from a subagent; memory ignores it. */
+  subagent?: boolean;
 }
 /**
  * Host-neutral engine result. Adapters decide how `context` (model-visible), `request` (ask the agent
@@ -189,6 +191,10 @@ export async function runMemoryEvent(options: {
 }): Promise<MemoryResult> {
   if (!options.enabled) return {};
   const { runtime, input, directory, call } = options;
+  if (input.subagent) {
+    if (options.stage !== undefined) throw new MemoryClientError("Memory cannot be staged from a subagent session. Stage from the parent session.");
+    return {};
+  }
   checkLocation(directory, input.session_id);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await checkPrivate(directory);

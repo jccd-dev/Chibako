@@ -47,6 +47,31 @@ async function tools(directory: string, call: MemoryCall, count = 10, runtime: "
   for (let i = 0; i < count; i++) await runMemoryEvent({ runtime, directory, enabled: true, call, input: event("PostToolUse") });
 }
 
+test("subagent events produce nothing, leave the parent counters unchanged and cannot stage", async () => withPrivateDirectory(async (directory) => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const call = caller(calls);
+  await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1", prompt: "Work" }) });
+  await tools(directory, call, 3, "claude");
+  const before = await readState(directory);
+  const seen = calls.length;
+  for (const hook_event_name of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact"]) {
+    const result = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event(hook_event_name, { subagent: true, turn_id: "t2", prompt: "Child" }) });
+    assert.deepEqual(result, {}, hook_event_name);
+  }
+  assert.deepEqual(await readState(directory), before);
+  assert.equal(calls.length, seen, "no remote calls");
+  await assert.rejects(() => runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("PostToolUse", { subagent: true }), stage: { checkpoint: checkpoint() } }),
+    /subagent/i);
+  assert.deepEqual(await readState(directory), before);
+}));
+
+test("a subagent event alone creates no private state", async () => withPrivateDirectory(async (directory) => {
+  const state = join(directory, "state");
+  const result = await runMemoryEvent({ runtime: "codex", directory: state, enabled: true, call: caller([]), input: event("PostToolUse", { subagent: true }) });
+  assert.deepEqual(result, {});
+  await assert.rejects(() => stat(state));
+}));
+
 test("loads the Now index and first prompt recall once, from private state", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const call = caller(calls);

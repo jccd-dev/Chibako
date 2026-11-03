@@ -1,5 +1,6 @@
 import { MemoryClientError } from "../client-error";
 import { execFile } from "node:child_process";
+import { closeSync, openSync, readSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -16,7 +17,22 @@ const hookSchema = z.object({
   session_id: z.string().min(1).max(200),
   hook_event_name: z.enum(["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "Interrupt"]),
   cwd: z.string().max(4096).optional(), turn_id: z.string().optional(), prompt: z.string().optional(), stop_hook_active: z.boolean().optional(),
+  transcript_path: z.string().nullish(),
 });
+// session_meta is line one of a Codex transcript. Any read or parse problem means "not a subagent".
+function transcriptSubagent(file: string | null | undefined): boolean {
+  if (!file) return false;
+  try {
+    const fd = openSync(file, "r");
+    try {
+      const buffer = Buffer.alloc(262_144);
+      const text = buffer.toString("utf8", 0, readSync(fd, buffer, 0, buffer.length, 0));
+      const line = text.slice(0, text.indexOf("\n") < 0 ? undefined : text.indexOf("\n"));
+      const meta = z.object({ type: z.literal("session_meta"), payload: z.object({ source: z.object({ subagent: z.object({}).passthrough() }).passthrough() }).passthrough() }).safeParse(JSON.parse(line));
+      return meta.success;
+    } finally { closeSync(fd); }
+  } catch { return false; }
+}
 
 export const codex: HostAdapter = {
   runtime: "codex",
@@ -57,7 +73,10 @@ export const codex: HostAdapter = {
     }
     return matches;
   },
-  hookInput: (payload) => hookSchema.parse(payload),
+  hookInput(payload) {
+    const { transcript_path, ...input } = hookSchema.parse(payload);
+    return { ...input, ...(transcriptSubagent(transcript_path) ? { subagent: true } : {}) };
+  },
   hookOutput(input, { context, warning }) {
     return {
       ...(context && ["SessionStart", "UserPromptSubmit", "PostToolUse"].includes(input.hook_event_name)
