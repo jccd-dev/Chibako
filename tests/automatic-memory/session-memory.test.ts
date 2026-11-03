@@ -19,7 +19,7 @@ const actor: ApiKeyPrincipal = { id: "fixture-agent", scopes: ["memory:write", "
 const identity = { runtime: "claude", session_id: "fixture-session" };
 const save = (overrides: Record<string, unknown> = {}) => ({
   // Distinct sessions get distinct default titles so they never share a workstream by accident.
-  ...identity, action: "save", request_id: randomUUID(), title: overrides.session_id ? `Task ${overrides.session_id}` : "First task", content: "Confirmed decision [[Related]]", expected_revision: null, now_line: "Continue work", ...overrides,
+  ...identity, workstream: true, action: "save", request_id: randomUUID(), title: overrides.session_id ? `Task ${overrides.session_id}` : "First task", content: "Confirmed decision [[Related]]", expected_revision: null, now_line: "Continue work", ...overrides,
 });
 function receipt(raw: unknown) {
   const value = sessionMemory(actor, raw);
@@ -68,8 +68,8 @@ test("completion preserves durable knowledge, removes only this session from Age
   assert.equal(read().closed, true);
   assert.equal(read().note!.id, result.note_id);
   const now = getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content;
-  assert.ok(!now.includes(`[[${current.note!.title}]]`));
-  assert.ok(now.includes(`[[${getNote(another.note_id!)!.title}]]`));
+  assert.ok(!now.includes(`[[${current.note!.folder}/${current.note!.title}]]`));
+  assert.ok(now.includes(`[[Agent Memory/${getNote(another.note_id!)!.title}]]`));
   assert.deepEqual(receipt(finish), result, "lost-response retries return the original receipt");
   rejected(() => receipt({ ...finish, retain: { ...finish.retain, content: "Changed retry" } }), "request_conflict");
   rejected(() => receipt(save({ expected_revision: read().revision, content: "Old client without merge" })), "reopen_required");
@@ -156,7 +156,7 @@ test("manually trashed checkpoints can finish their Now cleanup without reviving
   assert.equal(finished.closed, true);
   assert.equal(getNote(created.note_id!), null);
   const now = getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content;
-  assert.ok(!now.includes(`[[${title}]]`));
+  assert.ok(!now.includes(`[[Agent Memory/${title}]]`));
 });
 
 test("project sessions file checkpoint and retained notes in their project folder; Agent Now stays at the root", () => {
@@ -166,7 +166,7 @@ test("project sessions file checkpoint and retained notes in their project folde
   assert.equal(note.folder, "Agent Memory/atlas");
   assert.deepEqual(listNotes().filter(item => /Now$/.test(item.title)).map(item => item.folder), ["Agent Memory"], "one Agent Now, at the area root");
   const projectNow = listNotes().find(item => item.title === "Agent Now")!;
-  assert.ok(getNote(projectNow.id)!.content.includes(`- [[${note.title}]] (atlas) — Continue work`));
+  assert.ok(getNote(projectNow.id)!.content.includes(`- [[${note.folder}/${note.title}]] (atlas) — Continue work`));
 
   const moved = receipt(save({ session_id, project: "other", content: "Changed directory", expected_revision: read({ session_id }).revision }));
   assert.equal(moved.note_id, created.note_id, "a project change mid-session keeps the same checkpoint");
@@ -176,7 +176,7 @@ test("project sessions file checkpoint and retained notes in their project folde
   const finished = receipt({ ...identity, session_id, action: "finish", request_id: randomUUID(), expected_revision: read({ session_id }).revision,
     retain: { role: "wiki", subject: "atlas-lesson", title: "Atlas lesson", content: "Reusable", expected_revision: null } });
   assert.equal(getNote(finished.retained_note_id!)!.folder, "Agent Memory/atlas");
-  assert.ok(!getNote(projectNow.id)!.content.includes(`[[${note.title}]]`));
+  assert.ok(!getNote(projectNow.id)!.content.includes(`[[${note.folder}/${note.title}]]`));
   const crossProject = receipt({ ...identity, session_id: "project-session-2", project: "atlas", action: "finish", request_id: randomUUID(), expected_revision: null,
     retain: { role: "wiki", subject: "shared-lesson", title: "Shared lesson", content: "Applies everywhere", expected_revision: null, project: null } });
   assert.equal(getNote(crossProject.retained_note_id!)!.folder, "Agent Memory");
@@ -216,7 +216,7 @@ test("another runtime and key can continue one shared checkpoint without duplica
   assert.equal(stripFrontmatter(getNote(created.note_id!)!.content), "Codex progress");
   assert.equal(listNotes().filter(note => note.title.startsWith("Shared handoff")).length, 1);
   const now = getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content;
-  assert.ok(now.includes(`- [[${title}]] (atlas) — Codex next`));
+  assert.ok(now.includes(`- [[Agent Memory/atlas/${title}]] (atlas) — Codex next`));
   rejected(() => receipt(save({ session_id: "handoff-claude", content: "Stale", expected_revision: created.revision })), "revision_conflict");
   const claudeRead = read({ session_id: "handoff-claude" });
   assert.equal(stripFrontmatter(claudeRead.note!.content), "Codex progress", "the original session sees the continued work");
@@ -227,7 +227,7 @@ test("another runtime and key can continue one shared checkpoint without duplica
   assert.ok("note" in shared);
   sessionMemory(codex, { ...codexIdentity, action: "finish", request_id: randomUUID(), expected_revision: shared.revision });
   assert.equal(read({ session_id: "handoff-claude" }).closed, true, "a continuing session's finish closes the shared checkpoint for all");
-  assert.ok(!getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content.includes(`[[${title}]]`));
+  assert.ok(!getNote(listNotes().find(note => note.title === "Agent Now")!.id)!.content.includes(`[[Agent Memory/atlas/${title}]]`));
   const late = sessionMemory(codex, { ...codexIdentity, session_id: "late", action: "continue", request_id: randomUUID(), title });
   assert.ok("saved" in late && late.note_id === created.note_id, "a finished record can still be continued");
 });
@@ -272,7 +272,7 @@ function joinWorkstream(input: Record<string, unknown>, title: string) {
 const threadKey = "a1".repeat(32);
 test("a thread key resumes one checkpoint across sessions and runtimes", () => {
   const claude = { runtime: "claude", session_id: "thread-claude", project: "thread-proj", thread_key: threadKey };
-  const created = receipt(save({ ...claude, title: "Thread task" }));
+  const created = receipt(save({ ...claude, workstream: undefined, title: "Thread task" }));
   assert.equal(created.title, "Thread task", "new checkpoints use the plain title");
   assert.equal(created.joined, false);
   const codex = { runtime: "codex", session_id: "thread-codex", project: "thread-proj", thread_key: threadKey };
@@ -338,4 +338,12 @@ test("thread and workstream guards: collisions, malformed keys and stale revisio
   const again = receipt(replay);
   assert.deepEqual(receipt(replay), again, "replays return the original receipt");
   assert.equal(read({ session_id: "stale-fresh", thread_key: "b2".repeat(32) }).note!.id, base.note_id, "a join also links the thread");
+});
+
+test("older plugins create unique checkpoints without joining an existing workstream", () => {
+  const first = receipt(save({ session_id: "legacy-first", workstream: undefined, project: "compat", title: "Same old task" }));
+  const next = receipt(save({ session_id: "legacy-next", workstream: undefined, project: "compat", title: "Same old task" }));
+  assert.notEqual(first.note_id, next.note_id);
+  assert.equal(next.joined, false);
+  assert.match(next.title!, /^Same old task \(claude-[a-f0-9]{12}\)$/);
 });

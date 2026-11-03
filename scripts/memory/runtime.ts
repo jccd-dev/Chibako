@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, rename } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { memoryWriteSchema } from "../../src/features/memory/types";
+import { memoryWriteSchema, sessionMemorySchema } from "../../src/features/memory/types";
+import { memoryStaleDays } from "../../src/features/memory/staleness";
 import { failureCategories, MemoryClientError } from "./client-error";
 import { acquirePrivateLock, readOptional, withPrivateLock } from "./private-files";
 import { prepareSessionStage, sessionMutationSchema } from "./session-stage";
@@ -47,6 +48,9 @@ const stateSchema = z.object({
   nowUpdate: z.object({ thread: z.string(), line: z.string() }).optional(),
   // Counts at the last activity capture; cleared with the counters by a save, skip or finish.
   captured: z.object({ tools: z.number().int().min(0), users: z.number().int().min(0) }).optional(),
+  activityCapture: z.object({
+    request: sessionMemorySchema.options[4], tools: z.number().int().min(0), users: z.number().int().min(0),
+  }).optional(),
   activityWarned: z.boolean().default(false),
 }).strict();
 // Tool calls since the last save, skip, finish or capture that make a Stop or SessionEnd record activity.
@@ -114,7 +118,7 @@ function mergeNow(content: string, thread: string, line: string): string {
 function briefNow(content: string, project: string | null | undefined): string {
   const lines = content.split("\n");
   // Lines dated past the window are hidden; undated (older) lines stay. The server prunes them on its next write.
-  const days = Number(process.env.CHIBAKO_MEMORY_STALE_DAYS) > 0 ? Number(process.env.CHIBAKO_MEMORY_STALE_DAYS) : 7;
+  const days = memoryStaleDays();
   const fresh = (value: string) => {
     const date = /· (\d{4}-\d{2}-\d{2})$/.exec(value)?.[1];
     return !date || Date.parse(`${date}T00:00:00Z`) >= Date.now() - days * 86_400_000;
@@ -159,7 +163,7 @@ async function loadState(file: string, binding?: { endpoint: string; principal_i
     if (Buffer.byteLength(text) > 320_000) throw new Error("Memory state exceeds limit");
     state = stateSchema.parse(JSON.parse(text));
   }
-  if (binding && ((state.binding && JSON.stringify(state.binding) !== JSON.stringify(binding)) || (!state.binding && state.pending))) {
+  if (binding && ((state.binding && JSON.stringify(state.binding) !== JSON.stringify(binding)) || (!state.binding && (state.pending || state.activityCapture)))) {
     throw new MemoryClientError("Pending state is unbound or belongs to another connection; preserve it for owner review.");
   }
   return state;
@@ -233,7 +237,7 @@ export async function runMemoryEvent(options: {
       }
       return state.continuity;
     };
-    const threaded = async () => thread_key && await continuity() ? { thread_key } : {};
+    const threaded = async () => await continuity() ? { workstream: true, ...(thread_key ? { thread_key } : {}) } : {};
     const save = async () => {
       const temporary = `${file}.${randomUUID()}.tmp`;
       const handle = await open(temporary, "wx", 0o600);
@@ -284,6 +288,7 @@ export async function runMemoryEvent(options: {
         state.acknowledged = state.turn;
         state.users = state.tools = 0;
         state.captured = undefined;
+        state.activityCapture = undefined;
         state.dueRequested = false;
       }
       await save();
@@ -330,6 +335,7 @@ export async function runMemoryEvent(options: {
         state.last_saved_at = new Date().toISOString();
         state.users = state.tools = 0;
         state.captured = undefined;
+        state.activityCapture = undefined;
         state.dueRequested = false;
         if ("action" in checkpoint) {
           state.lastCheckpoint = checkpoint.action === "save" ? { hash: checkpointHash(checkpoint), revision: String(receipt.revision) } : undefined;
@@ -351,7 +357,7 @@ export async function runMemoryEvent(options: {
       let resumed: string | undefined;
       try {
         if (!state.nowLoaded && await continuity() && (thread_key || state.topic)) {
-          const current = await call("memory_session", { action: "read", runtime, session_id: input.session_id, ...(thread_key ? { thread_key } : {}) });
+          const current = await call("memory_session", { action: "read", runtime, session_id: input.session_id, ...(await threaded()) });
           const note = z.object({ title: memoryWriteSchema.shape.title, content: z.string() }).passthrough().nullish().parse(current.note);
           if (note) {
             resumed = note.title;
@@ -396,13 +402,23 @@ export async function runMemoryEvent(options: {
     // A Stop that asks the agent to checkpoint leaves this unit of work to the agent.
     const since = { tools: state.tools - (state.captured?.tools ?? 0), users: state.users - (state.captured?.users ?? 0) };
     // An older server without `continuity: 1` is skipped silently.
-    if ((event === "SessionEnd" || (event === "Stop" && !output.request)) && !state.pending && since.tools >= ACTIVITY_TOOL_CALLS && await continuity()) {
-      state.captured = { tools: state.tools, users: state.users };
+    if ((event === "SessionEnd" || (event === "Stop" && !output.request)) && !state.pending && (state.activityCapture || since.tools >= ACTIVITY_TOOL_CALLS) && await continuity()) {
       try {
-        const entry = { ...gitActivity(input.cwd), tool_calls: since.tools, user_turns: since.users };
-        const request_id = `activity-${createHash("sha256").update(JSON.stringify([runtime, input.session_id, state.turn, entry])).digest("hex").slice(0, 32)}`;
-        const receipt = await call("memory_session", { action: "activity", runtime, session_id: input.session_id, request_id, entry, ...project, ...(await threaded()) });
-        if (!verified(receipt, request_id)) throw new Error("Unverified activity receipt");
+        if (!state.activityCapture) {
+          const entry = { ...gitActivity(input.cwd), tool_calls: since.tools, user_turns: since.users };
+          state.activityCapture = {
+            request: sessionMemorySchema.options[4].parse({ action: "activity", runtime, session_id: input.session_id,
+              request_id: `activity-${randomUUID().replaceAll("-", "")}`, entry, ...project, ...(await threaded()) }),
+            tools: state.tools, users: state.users,
+          };
+          // Persist the exact capture before sending: a crash or timeout retries the same operation.
+          await save();
+        }
+        const capture = state.activityCapture;
+        const receipt = await call("memory_session", capture.request);
+        if (!verified(receipt, capture.request.request_id)) throw new Error("Unverified activity receipt");
+        state.captured = { tools: capture.tools, users: capture.users };
+        state.activityCapture = undefined;
       } catch {
         if (!state.activityWarned) {
           state.activityWarned = true;

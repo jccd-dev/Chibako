@@ -86,7 +86,7 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   assert.ok(tool, "memory_session is listed");
   const advertised = tool.inputSchema;
   assert.equal(advertised.type, "object");
-  for (const field of ["action", "runtime", "session_id", "project", "request_id", "title", "content", "now_line", "expected_revision", "reopen", "retain", "thread_key", "entry"]) {
+  for (const field of ["action", "runtime", "session_id", "project", "request_id", "title", "content", "now_line", "expected_revision", "reopen", "retain", "thread_key", "workstream", "entry"]) {
     assert.ok(field in advertised.properties, `memory_session advertises ${field}`);
   }
   assert.deepEqual(advertised.properties.action.enum, ["read", "save", "finish", "continue", "activity"]);
@@ -152,4 +152,23 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   const badEntry = { ...activity, request_id: randomUUID(), entry: { ...activity.entry, files: ["/abs.ts"] } };
   assert.equal((await postMemory(rest(key.key, "POST", badEntry))).status, 400);
   assert.equal((await rpc(key.key, "tools/call", "memory_session", badEntry)).isError, true);
+});
+
+test("REST and MCP share workstream opt-in and preserve older saves", async () => {
+  const { key } = createApiKey("Compatibility fixture", ["memory:write", "notes:read"]);
+  const input = { action: "save", runtime: "codex", project: "compat", title: "Shared work", content: "Base", now_line: "Next" };
+  const first = await (await postMemory(rest(key, "POST", { ...input, session_id: "modern", workstream: true, request_id: randomUUID() }))).json();
+  const legacy = (await rpc(key, "tools/call", "memory_session", { ...input, session_id: "older", request_id: randomUUID() })).structuredContent;
+  assert.equal(legacy.saved, true);
+  assert.equal(legacy.joined, false);
+  assert.notEqual(legacy.note_id, first.note_id);
+  assert.match(legacy.title, /^Shared work \(codex-[a-f0-9]{12}\)$/);
+  const join = { ...input, session_id: "modern-mcp", workstream: true, request_id: randomUUID() };
+  assert.equal((await postMemory(rest(key, "POST", join))).status, 409);
+  assert.equal((await rpc(key, "tools/call", "memory_session", join)).isError, true);
+  const merged = { ...join, request_id: randomUUID(), content: "Merged", expected_revision: first.revision };
+  const joined = (await rpc(key, "tools/call", "memory_session", merged)).structuredContent;
+  assert.equal(joined.joined, true);
+  assert.equal(joined.note_id, first.note_id);
+  assert.deepEqual(await (await postMemory(rest(key, "POST", merged))).json(), joined);
 });
