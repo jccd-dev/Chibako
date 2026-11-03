@@ -18,14 +18,14 @@ export interface MemoryReceipt {
 }
 
 export function getMemoryStatus(principal: ApiKeyPrincipal): {
-  contract_version: 1; session_lifecycle: 1; projects: 1; principal_id: string; scopes: string[]; enabled: boolean; area: string | null;
+  contract_version: 1; session_lifecycle: 1; projects: 1; continuity: 1; principal_id: string; scopes: string[]; enabled: boolean; area: string | null;
 } {
   if (!principal.id || !principal.scopes.includes("memory:write")) {
     throw new MemoryError("Forbidden: missing memory:write scope", 403, "forbidden");
   }
   const configured = process.env.CHIBAKO_MEMORY_FOLDER;
   const area = configured ? normalizeFolder(configured) : null;
-  return { contract_version: 1, session_lifecycle: 1, projects: 1, principal_id: principal.id, scopes: [...principal.scopes], enabled: Boolean(area), area: area || null };
+  return { contract_version: 1, session_lifecycle: 1, projects: 1, continuity: 1, principal_id: principal.id, scopes: [...principal.scopes], enabled: Boolean(area), area: area || null };
 }
 
 function authorize(principal: ApiKeyPrincipal): string {
