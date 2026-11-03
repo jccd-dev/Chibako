@@ -110,7 +110,8 @@ while keeping its cost low:
   returned content/revision. A session with another active checkpoint must finish
   it first. Revision checks protect concurrent contributions.
 - **Agent Now:** one index at the area root keeps at most 15 entries, newest saves
-  first: `- [[Title]] (project) — next action · YYYY-MM-DD`. Earlier per-project
+  first: `- [[Agent Memory/project/Title]] (project) — next action · YYYY-MM-DD`.
+  Entries use folder-qualified links; older plain links still parse. Earlier per-project
   Now indexes are folded into it on the next save; fully migrated ones go to Trash.
 - **Activity capture:** hooks record metadata when at least three tool calls have
   accumulated since the last save, skip, finish or capture and nothing is pending.
@@ -118,13 +119,15 @@ while keeping its cost low:
   (mapped to Stop). A Stop asking for a checkpoint defers capture. SessionEnd also
   flushes pending data and never finishes a checkpoint; Hermes `on_session_end`
   only flushes. The fixed threshold of three is independent of save thresholds.
-  One Activity note per project holds the newest 30 entries: UTC date, runtime,
+  One Activity note per project holds up to 30 entries within 64,000 characters,
+  newest first: UTC date, runtime,
   optional branch/short commit, up to ten repo-relative changed paths, total changed
   files, and tool/prompt counts. No prompts, responses or transcript content are
   uploaded. Outside git, only runtime/date/count metadata remains. Capture links
   an already-resolved checkpoint, refreshes its existing Agent Now date, and
   preserves its next action and checkpoint revision. It never joins a workstream.
-  Each attempt advances capture counts, even on failure; the first failure per
+  Each capture persists its unique request before sending; failures retry the same
+  metadata and ID. Counts advance after a verified receipt; the first failure per
   session warns without blocking work.
 - **Kept records:** finish closes the checkpoint and removes its Agent Now line;
   the note remains and can be continued. Stop or app closure is not completion.
@@ -167,7 +170,8 @@ redacted preview and `status` show them. Changes apply to new sessions.
 
 `CHIBAKO_MEMORY_STALE_DAYS` accepts a positive number of days, default 7. Set it
 in the server environment for pruning and hook environments for briefing filtering.
-It is not a profile field and setup/status do not display it.
+Setup and status show the effective local `stale_days` beside aliases and path
+mappings. It is not a profile field; the server environment is configured separately.
 
 On Agent Now writes, the server ages entries by the later of checkpoint update
 time and the line's UTC date, so Activity can keep an entry fresh. Old entries
@@ -192,7 +196,9 @@ workstream title instead.
 session and refreshes it at SessionStart. Against older servers without it, the
 previous session workflow remains: no thread keys, resumed-checkpoint briefing,
 Activity or SessionEnd capture. SessionEnd can still flush already-staged data.
-Servers continue accepting older clients without thread keys or Activity. These
+New runtimes send `workstream: true` even without a host thread. A `thread_key`
+also opts in to workstream joins and plain titles. Older requests without either
+field keep creating session-suffixed titles without automatic joins. These
 continuity changes add no vault schema migration.
 
 Codex hook inheritance of `T3CODE_THREAD_ID`, Claude SessionEnd delivery and Hermes

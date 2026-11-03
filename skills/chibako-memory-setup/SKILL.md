@@ -82,7 +82,8 @@ folders stay fixed. `status` and the setup preview show both maps.
 
 `CHIBAKO_MEMORY_STALE_DAYS` is a positive number of days, default 7. Set it in
 the server environment for Agent Now pruning and in hook environments for briefing
-filtering; it is not a profile field and status/setup do not display it. On Agent
+filtering. Setup/status show the effective local `stale_days` beside the maps;
+it is not a profile field. Configure the server environment separately. On Agent
 Now writes, entries age by the later of checkpoint update time and their dated
 line. Active checkpoints that age out become `stale`, remain open, and return to
 `active` on save. Briefings hide old dated lines; undated legacy lines stay visible.
@@ -121,7 +122,7 @@ API-key principal when `T3CODE_THREAD_ID` reaches the hook. Its SHA-256 hash
 (`t3:` plus the identifier) is sent as `thread_key`; the raw ID stays local.
 Task/label changes update the same note. `now_line` is plain status text
 (one line, at most 140 characters, no brackets); the runtime renders and upserts
-`- [[Session title]] (project) — status · YYYY-MM-DD` in "Agent Now" at the memory area root.
+`- [[Memory area/project/Session title]] (project) — status · YYYY-MM-DD` in "Agent Now" at the memory area root.
 Titles must not contain `[`, `]` or `|`.
 Use a plain task title, without a runtime/session suffix or redundant project
 prefix. The first title stays stable; later labels do not rename the note.
@@ -192,13 +193,15 @@ to Stop. A Stop requesting a checkpoint defers capture to a later eligible event
 Claude SessionEnd also flushes staged data; it never finishes the checkpoint.
 Hermes `on_session_end` maps to a flush-only event, not Activity capture.
 
-One Activity note per project keeps at most 30 entries, newest first: UTC date,
+One Activity note per project keeps at most 30 entries within 64,000 characters,
+newest first: UTC date,
 runtime, branch/short commit when available, up to ten repo-relative changed paths,
 file count and tool/prompt counts. It links an already-resolved checkpoint and
 refreshes an existing Agent Now line's date without changing its next action or
 checkpoint revision. It never joins a workstream. The capture threshold is fixed
-at three; profile save thresholds do not change it. Counts advance after each
-attempt, including failure; only the first capture failure per session warns.
+at three; profile save thresholds do not change it. Each capture persists its
+unique request before sending; retries reuse the same metadata and ID. Counts
+advance after a verified receipt; only the first capture failure per session warns.
 No prompts, responses or transcript content are uploaded.
 
 Host-marked subagents produce no memory counts, reads, instructions or writes:
@@ -210,7 +213,10 @@ has no detector. Unmarked T3 delegated children have separate thread IDs and can
 join a workstream by title using the same revision-conflict recovery.
 
 The runtime checks `memory_status.continuity === 1`, caches it per session and
-checks again at SessionStart. Older servers without that signal keep the previous
+checks again at SessionStart. It sends `workstream: true` to opt in to plain titles
+and automatic joins, including without a host thread; `thread_key` also opts in.
+Older requests without either keep session-suffixed titles and create their own
+checkpoints without joining. Older servers without that signal keep the previous
 session workflow: no thread keys, resumed-checkpoint briefing, Activity or
 SessionEnd capture. Pending staged data can still flush at SessionEnd. Codex hook
 thread-ID inheritance, Claude SessionEnd delivery and Hermes host behavior need

@@ -280,17 +280,20 @@ With nothing pending, three unsaved tool calls since the last save/skip/finish o
 capture trigger a metadata-only Activity attempt at Claude Stop/SessionEnd, Codex
 Stop or Hermes `pre_verify` (mapped to Stop). A Stop requesting a checkpoint defers
 capture. Hermes `on_session_end` only flushes. The threshold is fixed at three;
-profile save thresholds do not change it. Each attempt advances capture counts;
-only the first failure per session warns, without blocking work.
+profile save thresholds do not change it. Each capture persists its unique request
+before sending. Retries reuse its metadata and ID; counts advance after a verified
+receipt. Only the first failure per session warns, without blocking work.
 
-One Activity note per project holds the newest 30 entries: UTC date, runtime,
+One Activity note per project holds up to 30 entries within 64,000 characters,
+newest first: UTC date, runtime,
 optional branch/short commit, up to ten repo-relative changed paths, total changed
 files and tool/prompt counts. It links only an already-resolved checkpoint and
 refreshes an existing Agent Now date without changing its next action or checkpoint
 revision. It never joins a workstream and uploads no prompts or responses.
 
 `CHIBAKO_MEMORY_STALE_DAYS` sets a positive day window, default 7, separately in the
-server and hook environments. It is not a profile field or shown in setup/status.
+server and hook environments. Setup/status show the effective local `stale_days`
+beside aliases and path mappings; it is not a profile field.
 Server Agent Now writes prune by the later of checkpoint update time and line date,
 marking active checkpoints `stale` without closing/deleting them. Saves restore
 `active` and the entry. Briefings hide old dated lines; undated legacy lines stay.
@@ -302,8 +305,11 @@ parent. Hermes has no detector, and unmarked T3 children can join by workstream
 title. See [subagent and compatibility limits](../../docs/AGENT-MEMORY.md#subagents-and-server-compatibility).
 
 The new behavior is gated by `memory_status.continuity === 1`, cached per session
-and refreshed at SessionStart. Older servers retain the prior workflow with no
-thread keys, resumed-checkpoint briefing, Activity or SessionEnd capture; pending
+and refreshed at SessionStart. New runtimes send `workstream: true` to opt in to
+plain titles and automatic joins, including without a host thread; `thread_key`
+also opts in. Older requests without either keep session-suffixed titles and
+create their own checkpoints without joining. Older servers retain the prior
+workflow with no thread keys, resumed-checkpoint briefing, Activity or SessionEnd capture; pending
 staged data can still flush at SessionEnd. No new schema migration is required.
 
 Metrics on stderr report MCP calls and elapsed milliseconds without checkpoint
@@ -320,8 +326,7 @@ need real pilot measurement; no cost or reliability claim is made from fixtures.
 
 Packaged plugins register these events. The `*-hooks.example.json` and
 `hermes.example.yaml` files are for manual integration only; the Claude example
-does not yet register SessionEnd. Preserve unrelated
-hooks when editing native settings. Use actual runtime session IDs, never display
+includes SessionEnd. Preserve unrelated hooks when editing native settings. Use actual runtime session IDs, never display
 names. Ordinary Claude Desktop Chat does not inherit Claude Code hooks; T3 Code
 and Hermes gateway routes require their own host verification.
 

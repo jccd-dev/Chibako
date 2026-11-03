@@ -175,8 +175,8 @@ command. Setup preserves and previews them, and `status` shows them. See the
 bundled setup skill for resolution order and examples. Non-project sessions use
 `workstation` under the memory area. `CHIBAKO_MEMORY_STALE_DAYS` sets the day window
 (default 7) separately in server and hook environments; it is not a profile field
-and is not shown in setup/status. Aged-out active checkpoints become `stale` and
-return to Agent Now on save.
+and setup/status show the effective local `stale_days` beside the maps.
+Aged-out active checkpoints become `stale` and return to Agent Now on save.
 
 After three unsaved tool calls, hooks can capture metadata-only entries in a
 bounded per-project Activity note: Claude at Stop/SessionEnd, Codex at Stop, Hermes
