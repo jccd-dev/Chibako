@@ -9,6 +9,8 @@ const hookSchema = z.object({
   session_id: z.string().min(1).max(200),
   hook_event_name: z.enum(["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "SessionEnd"]),
   cwd: z.string().max(4096).optional(), turn_id: z.string().optional(), prompt: z.string().optional(), stop_hook_active: z.boolean().optional(),
+  // Present only when the hook fires inside a subagent.
+  agent_id: z.string().optional(),
 });
 
 export const claude: HostAdapter = {
@@ -28,7 +30,10 @@ export const claude: HostAdapter = {
     }
     return matches;
   },
-  hookInput: (payload) => hookSchema.parse(payload),
+  hookInput(payload) {
+    const { agent_id, ...input } = hookSchema.parse(payload);
+    return { ...input, ...(agent_id ? { subagent: true } : {}) };
+  },
   hookOutput(input, { context, request, warning }) {
     return {
       ...(request ? { decision: "block", reason: request } : {}),
