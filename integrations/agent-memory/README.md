@@ -81,14 +81,18 @@ it cannot determine whether the author's claim is truthful.
 Session identity is `(API key, runtime session, subject)`; shared records use
 `(role, subject)` within their folder. An optional `project` (`^[a-z0-9][a-z0-9._-]{0,63}$`)
 places a record in `<area>/<project>`; without it the record stays in the area root.
-Hooks resolve the project once per session from `CHIBAKO_MEMORY_PROJECT`, else the
-`origin` remote's repository name, else the git checkout folder name. Only the slug
-is sent; the path never leaves the machine. Hermes does not report a working
-directory, so it uses the override or the area root. A session checkpoint stays in
-the folder where it was created, and servers without `projects` support in
-`memory_status` keep everything in the root. Include runtime/session identity in
-session titles to avoid collisions. Use a stable topic name for a shared canonical
-wiki. Overview content links the current session handoffs; do not duplicate their
+Hooks resolve the project once per session: usable `CHIBAKO_MEMORY_PROJECT`,
+longest profile `project_paths` cwd prefix, origin repository name, `.git` common-dir
+parent (collapsing worktrees), git top-level name, then `workstation`. Profile
+`project_aliases` maps the result once. Only the slug is sent; absolute mappings
+stay local. Hermes supplies no cwd, so it uses an override or `workstation`, then
+an alias. The user hand-edits maps in private `profile.json`; setup preserves and
+previews them, and status displays them. See [project resolution](../../docs/AGENT-MEMORY.md#project-resolution-and-private-profile-maps).
+A checkpoint stays in its original folder. Servers without `projects` support in
+`memory_status` keep records in the root. The low-level `memory_write` example
+above retains its caller-supplied identity; `memory_session` creates plain task
+titles and can join an existing workstream as described below. Use a stable topic
+name for a shared canonical wiki. Overview content links the current session handoffs; do not duplicate their
 state into separate handoff notes. Search before choosing canonical subjects.
 
 `memory_read` / `GET /api/memory?role=wiki&subject=project&session_id=runtime-session`
@@ -118,7 +122,9 @@ Run from this checkout with its existing Node dependencies installed. Use an
 absolute script path and an approved working directory in installed hook commands.
 The runner reuses the configured Chibako endpoint over the MCP SDK; it adds no
 model/extraction service. At session start it injects the capped "Agent Now" index
-(`memory_read`, about 500 tokens, current project first) and one short instruction, then recall on the first
+(`memory_read`, about 500 tokens, current project first), preceded by a resolved
+checkpoint's revision and up to 1,500 characters of content when available, then
+one short instruction and recall on the first
 known request. Checkpoint requests carry no schema; the agent fetches it only before
 retaining knowledge or writing other notes. The agent
 retrieves again on meaningful topic changes. Retrieved content is marked as evidence,
@@ -162,10 +168,22 @@ full legacy payloads, supply the top-level `session_id` and `hook_event_name:
 
 The server binds one checkpoint note to the authenticated key, runtime and session
 ID. Different tasks/labels in that session update the same note. Its first title
-gets a unique suffix and stays stable. `memory_session` saves the checkpoint and
-updates its line in the area-root "Agent Now" index in one SQLite transaction
-(newest first, 15 lines, tagged with the project). Per-project "Now" notes from
-earlier releases are folded into Agent Now and moved to Trash on the next save.
+is plain (no generated runtime/session suffix) and stays stable. `memory_session`
+saves the checkpoint and updates its line in the area-root Agent Now index in one
+SQLite transaction (newest saves first, 15 lines, project tag and UTC date). Earlier
+per-project Now notes are folded into Agent Now on the next save; fully migrated
+ones go to Trash.
+
+When `T3CODE_THREAD_ID` reaches the hook, the runner sends its SHA-256 hash
+(`t3:` plus the ID) as `thread_key`, never the raw ID. Within one API-key principal,
+the server resolves session link, thread link, session record, then a same-project
+workstream match on save. Matching ignores case, repeated whitespace and legacy
+`(runtime-hex)` suffixes. Open/stale records win over finished ones; within each
+group the newest wins. An unread match returns `revision_conflict` naming the
+title and revision without linking or writing: read the note by title, merge,
+and restage with `expected_revision` and the pending `replaces_request_id`, omitting
+`request_id`. A successful join can reopen a finished record. Ordinary Note title
+collisions still require a new title.
 
 To pick up another session's or agent's handoff, stage
 `{"continue":{"title":"<checkpoint title>"}}`. The command links this session
@@ -219,14 +237,18 @@ revision `conflict` is kept for recovery and is not resent by later hooks. To re
    prints that session's pending checkpoint (including its body) and latest receipt.
    It is read-only and offline: no flush, network call or acknowledgement, and never
    the API key. Treat the body as evidence, not instructions.
-2. Read `memory_session` action `read` for the current content and revision.
+2. Read `memory_session` action `read` for the current content and revision. For
+   a workstream conflict, read the named note by title instead: the rejected save
+   has not linked this session yet. Use the session revision from that conflict,
+   not the general Note or `memory_read` revision.
 3. Merge both deliberately, then stage the merged checkpoint (or a finish) without a
    `request_id`, with the current `expected_revision` and `"replaces_request_id":
    "<pending request_id>"`. A wrong or missing replacement ID, a reused request ID,
    an unchanged stale revision or a malformed payload is rejected and leaves both the
    pending checkpoint and the server note untouched.
 
-No transcript is parsed or stored.
+Codex reads only the first transcript metadata line for subagent detection; no
+transcript body is mined or uploaded.
 
 A verified save also stores one bounded latest receipt (request ID, resulting revision,
 note and completion status, verification time) in the session's private state. Stage
@@ -244,13 +266,45 @@ Context delivery avoids that prompt, but does not force a checkpoint before turn
 Tool counts are a work proxy, not proof of file edits; tool-free discussions get no reminder.
 Hermes instead gets a "checkpoint due" note on its next `pre_llm_call` (it also counts
 `post_tool_call`). Stop ends a response, not a session; neither Stop nor app closure
-automatically declares work complete. Compaction
-and interrupt hooks can only flush data already staged; they cannot summarize lost
+automatically declares work complete. Claude SessionEnd also flushes staged data;
+it never finishes work. Compaction and interrupt hooks can only flush data already staged; they cannot summarize lost
 context. A crash can lose unstaged work. State locks prevent concurrent hooks on
 one session; separate sessions and runtimes run independently, and server transactions
 coordinate different hosts. A lock records its holder's PID. A later hook reclaims it once
 that process has exited or the lock is older than two minutes, so a crashed or timed-out
 hook does not block later events. No background daemon is installed.
+
+### Activity, aging and subagents
+
+With nothing pending, three unsaved tool calls since the last save/skip/finish or
+capture trigger a metadata-only Activity attempt at Claude Stop/SessionEnd, Codex
+Stop or Hermes `pre_verify` (mapped to Stop). A Stop requesting a checkpoint defers
+capture. Hermes `on_session_end` only flushes. The threshold is fixed at three;
+profile save thresholds do not change it. Each attempt advances capture counts;
+only the first failure per session warns, without blocking work.
+
+One Activity note per project holds the newest 30 entries: UTC date, runtime,
+optional branch/short commit, up to ten repo-relative changed paths, total changed
+files and tool/prompt counts. It links only an already-resolved checkpoint and
+refreshes an existing Agent Now date without changing its next action or checkpoint
+revision. It never joins a workstream and uploads no prompts or responses.
+
+`CHIBAKO_MEMORY_STALE_DAYS` sets a positive day window, default 7, separately in the
+server and hook environments. It is not a profile field or shown in setup/status.
+Server Agent Now writes prune by the later of checkpoint update time and line date,
+marking active checkpoints `stale` without closing/deleting them. Saves restore
+`active` and the entry. Briefings hide old dated lines; undated legacy lines stay.
+
+Claude `agent_id` and Codex's first transcript metadata line can mark subagents;
+marked events produce no counts, memory calls or instructions. The engine rejects
+marked staging, but CLI `stage` cannot detect subagents; leave staging to the
+parent. Hermes has no detector, and unmarked T3 children can join by workstream
+title. See [subagent and compatibility limits](../../docs/AGENT-MEMORY.md#subagents-and-server-compatibility).
+
+The new behavior is gated by `memory_status.continuity === 1`, cached per session
+and refreshed at SessionStart. Older servers retain the prior workflow with no
+thread keys, resumed-checkpoint briefing, Activity or SessionEnd capture; pending
+staged data can still flush at SessionEnd. No new schema migration is required.
 
 Metrics on stderr report MCP calls and elapsed milliseconds without checkpoint
 content or credentials. Added model usage/context tokens and summary quality still
@@ -261,11 +315,12 @@ need real pilot measurement; no cost or reliability claim is made from fixtures.
 | Runtime | Retrieval | Checkpoint request | Flush staged data |
 | --- | --- | --- | --- |
 | Codex | SessionStart, UserPromptSubmit | PostToolUse or UserPromptSubmit additionalContext, after tool threshold | Stage, Stop, PreCompact, Interrupt |
-| Claude Code | SessionStart, UserPromptSubmit | Stop, after activity threshold | Stage, Stop, PreCompact |
+| Claude Code | SessionStart, UserPromptSubmit | Stop, after activity threshold | Stage, Stop, PreCompact, SessionEnd |
 | Hermes | pre_llm_call | pre_llm_call; pre_verify for edited-code turns | Stage, on_session_end, agent_loop_stopped, post_compaction |
 
 Packaged plugins register these events. The `*-hooks.example.json` and
-`hermes.example.yaml` files are for manual integration only. Preserve unrelated
+`hermes.example.yaml` files are for manual integration only; the Claude example
+does not yet register SessionEnd. Preserve unrelated
 hooks when editing native settings. Use actual runtime session IDs, never display
 names. Ordinary Claude Desktop Chat does not inherit Claude Code hooks; T3 Code
 and Hermes gateway routes require their own host verification.

@@ -21,9 +21,10 @@ flowchart LR
     I --> A
 ```
 
-The chat itself is not copied into Chibako. Memory becomes reusable only when
-an agent or person saves a note or observation. A later chat can access it when
-its MCP connection points to the same `brain.db` vault.
+The chat itself is not copied into Chibako. Reusable knowledge comes from saved
+notes and observations; hooks can also save a bounded metadata-only Activity
+record. A later chat can access it when its MCP connection points to the same
+`brain.db` vault.
 
 The three stored forms have different jobs:
 
@@ -75,35 +76,128 @@ For Codex, Claude Code and Hermes, the
 [hook plugins](../integrations/agent-memory/README.md) make memory automatic
 while keeping its cost low:
 
-- **Project folders:** each session files its checkpoint and retained notes
-  under `<memory area>/<project>`, with the project taken from the session's
-  git repository. Sessions outside a repository use the area root.
-- **One Agent Now:** a single "Agent Now" index at the memory area root lists
-  active checkpoints across projects as `- [[Thread]] (project) — status`.
-  Releases that kept a "Now" per project folder fold those into Agent Now and
-  move them to Trash on the next save.
-- **Session start:** one capped read of "Agent Now", with the current project's
-  entries first (about 500 tokens), a one-time short instruction, and `recall`
-  on the first prompt.
-- **No schema in save prompts:** a due-checkpoint prompt carries only the
-  checkpoint format (about 300 tokens, down from about 1,650). Agents fetch the Knowledge Schema only
-  before retaining knowledge or writing other notes.
-- **Activity gate:** hooks count user turns and tool calls locally. Trivial
-  sessions cost nothing extra. After 10 tool calls for Codex (chat turns alone never qualify), or 4 user turns or 10 tool calls for other hosts since the
-  last save (configurable per profile), the agent is asked once to save.
-- **Session-centric saves:** the agent updates one checkpoint per session plus a
-  short status line. The server upserts its line into "Agent Now"
-  (newest first, at most 15 lines), so the next session in any runtime knows
-  where work stopped.
-- **Shared handoffs:** when an Agent Now entry is the same task, another agent
-  or session stages `{"continue": {"title": "<entry title>"}}` and then saves
-  into that same checkpoint instead of creating its own. Revision checks keep
-  concurrent sessions from overwriting each other.
-- **Kept session records:** finishing closes a checkpoint and removes its
-  Agent Now line; the note stays in its project folder as a session record and
-  can be continued later. Automatic memory never deletes notes. Run the
-  `chibako-memory-cleanup` skill to review records and remove only what you
-  approve.
+- **One folder rule:** checkpoints, Activity and retained agent facts stay under
+  `<memory area>/<project>`. Reader-facing notes reuse the existing project/topic
+  branch found by search, with properties from `get_property_defs` and a wikilink
+  to the project overview. A new top-level folder needs a user request.
+- **Thread resume:** when `T3CODE_THREAD_ID` reaches the hook, the runner sends
+  `thread_key = sha256("t3:" + id)`, never the raw identifier. Under the same
+  API-key principal, model/runtime switches within that thread resolve the same
+  checkpoint. Server lookup order is session link, thread link, session record,
+  then (save only, when none exists) workstream title match.
+- **Plain titles and workstreams:** the first task title stays stable, without an
+  added session suffix. A first save can join a checkpoint with the same title in
+  the same project, ignoring case, repeated whitespace and trailing legacy
+  `(runtime-hex)` suffixes. Open records (including stale ones) win over finished
+  records; the newest update wins within each group. Trashed records are excluded.
+  An unread match returns `revision_conflict` naming the target and revision,
+  without linking or writing. Read that note by title, merge, and retry with the
+  revision. For a staged conflict, omit `request_id` and include the pending
+  `replaces_request_id` supplied by recovery. A successful match can reopen a
+  finished workstream. A title collision with an ordinary Note still needs a new title.
+- **Session start:** a linked checkpoint's revision and up to 1,500 characters of
+  content can precede the capped Agent Now read (current project first, about 500
+  tokens). Read the note by title for the rest; a direct MCP session read without
+  the thread key cannot resolve a thread-only link. First-prompt recall adds
+  relevant snippets. Checkpoint prompts need no Knowledge Schema; fetch it before
+  retention or general Note writes.
+- **Save gate:** defaults are 10 tool calls for Codex (chat turns alone never
+  qualify), or 4 user turns or 10 tool calls for other hosts. Profile thresholds
+  can override those counts. One reminder requests a checkpoint; save/skip/finish
+  resets the counts. Task changes update the same session checkpoint.
+- **Shared handoffs:** explicitly stage `{"continue":{"title":"<entry title>"}}`
+  to join a known checkpoint, including one in another thread. Read and merge its
+  returned content/revision. A session with another active checkpoint must finish
+  it first. Revision checks protect concurrent contributions.
+- **Agent Now:** one index at the area root keeps at most 15 entries, newest saves
+  first: `- [[Title]] (project) — next action · YYYY-MM-DD`. Earlier per-project
+  Now indexes are folded into it on the next save; fully migrated ones go to Trash.
+- **Activity capture:** hooks record metadata when at least three tool calls have
+  accumulated since the last save, skip, finish or capture and nothing is pending.
+  Claude captures at Stop and SessionEnd, Codex at Stop, and Hermes at `pre_verify`
+  (mapped to Stop). A Stop asking for a checkpoint defers capture. SessionEnd also
+  flushes pending data and never finishes a checkpoint; Hermes `on_session_end`
+  only flushes. The fixed threshold of three is independent of save thresholds.
+  One Activity note per project holds the newest 30 entries: UTC date, runtime,
+  optional branch/short commit, up to ten repo-relative changed paths, total changed
+  files, and tool/prompt counts. No prompts, responses or transcript content are
+  uploaded. Outside git, only runtime/date/count metadata remains. Capture links
+  an already-resolved checkpoint, refreshes its existing Agent Now date, and
+  preserves its next action and checkpoint revision. It never joins a workstream.
+  Each attempt advances capture counts, even on failure; the first failure per
+  session warns without blocking work.
+- **Kept records:** finish closes the checkpoint and removes its Agent Now line;
+  the note remains and can be continued. Stop or app closure is not completion.
+  Automatic memory never deletes checkpoints. Use the explicit-only
+  `chibako-memory-cleanup` skill for authorized removal.
+
+### Project resolution and private profile maps
+
+The runner resolves the project once per session, then keeps the checkpoint in
+its original folder:
+
+1. A usable `CHIBAKO_MEMORY_PROJECT` override.
+2. The longest matching absolute cwd prefix in profile `project_paths`, at folder boundaries.
+3. The git origin repository name.
+4. The git common-directory parent, only when the common directory is `.git`, so worktrees share their main project.
+5. The git top-level folder name.
+6. `workstation`, including non-git sessions and hosts without a cwd.
+
+Then `project_aliases` applies once, without chaining, to any resolved slug.
+Only the slug leaves the machine; mappings do not resolve symlinks. Slugs match
+`^[a-z0-9][a-z0-9._-]{0,63}$`. The `workstation` project is an ordinary folder under
+the memory area; the root holds Agent Now and explicitly cross-project retained
+facts (`retain.project: null`). These rules do not move existing records.
+
+The user hand-edits optional fields in private `profile.json` in the runner
+profile directory shown by setup (see [profile locations](../integrations/agent-memory/INSTALL.md#run-private-setup)):
+
+```json
+{
+  "project_aliases": { "old-repo": "current-repo" },
+  "project_paths": { "/absolute/path/to/non-git-project": "writing" }
+}
+```
+
+Merge these fields into the existing profile; it contains credentials and must
+stay private. There is no map-editing command. Setup preserves the maps; its
+redacted preview and `status` show them. Changes apply to new sessions.
+
+### Aging and stale checkpoints
+
+`CHIBAKO_MEMORY_STALE_DAYS` accepts a positive number of days, default 7. Set it
+in the server environment for pruning and hook environments for briefing filtering.
+It is not a profile field and setup/status do not display it.
+
+On Agent Now writes, the server ages entries by the later of checkpoint update
+time and the line's UTC date, so Activity can keep an entry fresh. Old entries
+drop out; only checkpoints with `status: active` become `status: stale`. They stay
+open and a later save restores `active` and the index entry. The runtime also
+hides old dated lines from briefings before the server next writes the index.
+Undated legacy lines stay in briefings; the server can age them by checkpoint
+update time, and keeps them when neither date is available.
+
+### Subagents and server compatibility
+
+Host-marked subagents skip counting, state writes, retrieval, instructions and
+capture. Claude uses hook `agent_id`; Codex reads only the first transcript line
+(up to 256 KiB) for `session_meta.payload.source.subagent`. Read/parse failures
+mean no detection. No transcript body is mined or uploaded. The engine rejects
+staging with a subagent marker, but CLI `stage` has no marker and cannot enforce
+that guard. Subagents should leave memory staging to their parent. Hermes has no
+detector; unmarked T3 delegated children have separate thread IDs and can join by
+workstream title instead.
+
+`memory_status` advertises `continuity: 1`; the runtime caches that capability per
+session and refreshes it at SessionStart. Against older servers without it, the
+previous session workflow remains: no thread keys, resumed-checkpoint briefing,
+Activity or SessionEnd capture. SessionEnd can still flush already-staged data.
+Servers continue accepting older clients without thread keys or Activity. These
+continuity changes add no vault schema migration.
+
+Codex hook inheritance of `T3CODE_THREAD_ID`, Claude SessionEnd delivery and Hermes
+host behavior still need live verification. Package/runtime fixtures do not prove
+that a desktop host or gateway delivers hooks.
 
 ## Why retrieval uses fewer context tokens
 
@@ -125,10 +219,10 @@ flowchart TD
 
 Evidence in the implementation:
 
-- [`list_notes`](../src/mcp/server.ts#L89) returns note metadata instead of
-  note bodies. [`get_links`](../src/mcp/server.ts#L194) returns compact link
+- [`list_notes`](../src/mcp/create-server.ts#L150) returns note metadata instead of
+  note bodies. [`get_links`](../src/mcp/create-server.ts#L267) returns compact link
   targets and backlink identities.
-- [`recall`](../src/lib/recall.ts#L107) always ranks candidates with SQLite
+- [`recall`](../src/lib/recall.ts#L123) always ranks candidates with SQLite
   full-text search and returns titles plus trimmed snippets. Recall matches
   any query term, so natural sentences find notes. If embeddings are
   configured, it fuses vector and keyword rankings, weighting keywords at half
@@ -136,9 +230,9 @@ Evidence in the implementation:
   local and uses BM25 alone.
 - The caller supplies a retrieval budget. Chibako estimates token use from
   character count and stops adding results near that budget
-  ([implementation](../src/lib/recall.ts#L140),
+  ([implementation](../src/lib/recall.ts#L167),
   [test](../tests/recall/recall.test.ts#L7)).
-- [`ingest_note`](../src/mcp/server.ts#L311) combines a note, its outlinks,
+- [`ingest_note`](../src/mcp/create-server.ts#L397) combines a note, its outlinks,
   backlinks, and the Knowledge Schema in one MCP call. This saves round trips;
   its full note body can still be large.
 
