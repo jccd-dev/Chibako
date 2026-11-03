@@ -165,7 +165,7 @@ test("compiled runner saves through authenticated MCP HTTP transport and acknowl
       assert.deepEqual([result.saved, result.pending], [true, false]);
     }
     const now = getDb().prepare("SELECT content FROM notes WHERE folder = ? AND title = ?").get("Agent Memory Test", "Agent Now") as { content: string } | undefined;
-    assert.equal(now?.content, `- [[${note.title}]] (workstation) — verifying transport\n`, "a task change and replay keep one session entry");
+    assert.equal(now?.content, `- [[${note.title}]] (workstation) — verifying transport · ${new Date().toISOString().slice(0, 10)}\n`, "a task change and replay keep one session entry");
     const status = JSON.parse((await invoke({}, "status")).stdout) as { pending: number; last_verified_save: string | null };
     assert.equal(status.pending, 0);
     assert.ok(status.last_verified_save);

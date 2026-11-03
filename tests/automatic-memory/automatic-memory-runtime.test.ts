@@ -153,7 +153,8 @@ test("legacy pending saves from two runtimes recover their capped Now index", as
   await save(join(directory, "claude"), call, "Beta", "review", "session-2", "claude");
   await save(join(directory, "codex"), call, "Alpha", "done");
   const lines = store.content!.split("\n").filter((line) => line.startsWith("- [["));
-  assert.deepEqual(lines, ["- [[Alpha]] — done", "- [[Beta]] — review"]);
+  const date = new Date().toISOString().slice(0, 10);
+  assert.deepEqual(lines, [`- [[Alpha]] — done · ${date}`, `- [[Beta]] — review · ${date}`]);
   assert.match(store.content!, /^# Agent Now\n/);
   for (let i = 0; i < 20; i++) await save(join(directory, "codex"), call, `Thread ${i}`, "x");
   assert.equal(store.content!.split("\n").filter((line) => line.startsWith("- [[")).length, 15);
@@ -165,6 +166,20 @@ test("the Agent Now briefing lists the current project's entries first", async (
   const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject: () => "atlas", input: event("SessionStart", { cwd: "/work/atlas" }) });
   const context = String(start.context);
   assert.ok(context.indexOf("[[Mine]]") < context.indexOf("[[Other]]") && context.indexOf("[[Mine]]") < context.indexOf("[[Root]]"));
+}));
+
+test("the Agent Now briefing hides lines older than the staleness window and keeps undated ones", async () => withPrivateDirectory(async (directory) => {
+  const day = (ago: number) => new Date(Date.now() - ago * 86_400_000).toISOString().slice(0, 10);
+  const content = `# Agent Now\n\n- [[Fresh]] (atlas) — a · ${day(6)}\n- [[Old]] (atlas) — b · ${day(8)}\n- [[Legacy]] — c\n`;
+  const call = caller([], async (name) => name === "memory_read" ? { note: { content }, revision: "a".repeat(64) } : {});
+  const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("SessionStart", { cwd: "/work/atlas" }) });
+  const context = String(start.context);
+  assert.ok(context.includes("[[Fresh]]") && context.includes("[[Legacy]]") && !context.includes("[[Old]]"));
+  process.env.CHIBAKO_MEMORY_STALE_DAYS = "3";
+  try {
+    const narrow = await runMemoryEvent({ runtime: "claude", directory: join(directory, "narrow"), enabled: true, call, input: event("SessionStart", { cwd: "/work/atlas" }) });
+    assert.ok(!String(narrow.context).includes("[[Fresh]]") && String(narrow.context).includes("[[Legacy]]"));
+  } finally { delete process.env.CHIBAKO_MEMORY_STALE_DAYS; }
 }));
 
 test("a stale Now revision is re-read and merged, never blindly replaced", async () => withPrivateDirectory(async (directory) => {
