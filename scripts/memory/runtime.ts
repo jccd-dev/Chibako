@@ -95,7 +95,13 @@ function mergeNow(content: string, thread: string, line: string): string {
 // The current project's entries lead the briefing so the read cap cuts other projects first.
 function briefNow(content: string, project: string | null | undefined): string {
   const lines = content.split("\n");
-  const entries = lines.filter((value) => value.startsWith("- [["));
+  // Lines dated past the window are hidden; undated (older) lines stay. The server prunes them on its next write.
+  const days = Number(process.env.CHIBAKO_MEMORY_STALE_DAYS) > 0 ? Number(process.env.CHIBAKO_MEMORY_STALE_DAYS) : 7;
+  const fresh = (value: string) => {
+    const date = /· (\d{4}-\d{2}-\d{2})$/.exec(value)?.[1];
+    return !date || Date.parse(`${date}T00:00:00Z`) >= Date.now() - days * 86_400_000;
+  };
+  const entries = lines.filter((value) => value.startsWith("- [[") && fresh(value));
   const own = (value: string) => Boolean(project) && value.includes(`]] (${project}) — `);
   return [...lines.filter((value) => !value.startsWith("- [[")), ...entries.filter(own), ...entries.filter((value) => !own(value))].join("\n");
 }
@@ -287,7 +293,7 @@ export async function runMemoryEvent(options: {
         state.dueRequested = false;
         if ("action" in checkpoint) {
           state.lastCheckpoint = checkpoint.action === "save" ? { hash: checkpointHash(checkpoint), revision: String(receipt.revision) } : undefined;
-        } else if (state.pending.now_line) state.nowUpdate = { thread: checkpoint.title, line: `- [[${checkpoint.title}]]${checkpoint.project ? ` (${checkpoint.project})` : ""} — ${state.pending.now_line}` };
+        } else if (state.pending.now_line) state.nowUpdate = { thread: checkpoint.title, line: `- [[${checkpoint.title}]]${checkpoint.project ? ` (${checkpoint.project})` : ""} — ${state.pending.now_line} · ${new Date().toISOString().slice(0, 10)}` };
         state.pending = undefined;
       } catch (error) {
         pending.failure = { ...(error instanceof MemoryClientError && error.failure ? error.failure : { category: "unknown" }), announced: false };
