@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { runMemoryEvent, type MemoryCall, type Runtime } from "../../scripts/memory/runtime";
 import { codex } from "../../scripts/memory/codex/adapter";
+import { claude } from "../../scripts/memory/claude/adapter";
+import { hermes } from "../../scripts/memory/hermes/adapter";
 
 // Codex event contracts: https://learn.chatgpt.com/docs/hooks#event-reference
 // Wire schemas: openai/codex e75e4af22938c8715b2a1e0d3fc142836ab4d962, codex-rs/hooks/schema/generated.
@@ -46,6 +48,33 @@ test("Codex accepts its native payload fields and rejects malformed engine input
     assert.throws(() => codex.hookInput(invalid));
   }
 });
+
+test("Claude marks hook events carrying agent_id as subagent", () => {
+  const base = { session_id: "s1", hook_event_name: "PostToolUse", cwd: "/fixture" };
+  assert.equal(claude.hookInput({ ...base, agent_id: "agent-1", agent_type: "Explore" }).subagent, true);
+  assert.equal("subagent" in claude.hookInput(base), false);
+  assert.equal("subagent" in hermes.hookInput({ session_id: "s1", hook_event_name: "post_tool_call", agent_id: "x" }), false, "Hermes has no subagent marker");
+});
+
+test("Codex marks a subagent only from the first transcript line and treats read errors as top-level", async () => withPrivateDirectory(async (directory) => {
+  const payload = (transcript_path: unknown) => ({ session_id: "s1", hook_event_name: "PostToolUse", transcript_path });
+  const write = async (name: string, first: unknown, rest = "") => {
+    const file = join(directory, name);
+    await writeFile(file, (typeof first === "string" ? first : JSON.stringify(first)) + "\n" + rest);
+    return file;
+  };
+  const meta = (source: unknown) => ({ type: "session_meta", payload: { id: "s1", source } });
+  assert.equal(codex.hookInput(payload(await write("guardian.jsonl", meta({ subagent: { other: "guardian" } })))).subagent, true);
+  assert.equal(codex.hookInput(payload(await write("spawn.jsonl", meta({ subagent: { thread_spawn: { parent_thread_id: "p" } } })))).subagent, true);
+  for (const source of ["cli", "exec", { subagent: "x" }, undefined]) {
+    assert.equal("subagent" in codex.hookInput(payload(await write("top.jsonl", meta(source)))), false);
+  }
+  // Only line one counts: a later subagent-looking line must not mark the session.
+  assert.equal("subagent" in codex.hookInput(payload(await write("later.jsonl", meta("cli"), JSON.stringify(meta({ subagent: { other: "x" } })) + "\n"))), false);
+  for (const bad of [join(directory, "missing.jsonl"), directory, null, undefined, await write("junk.jsonl", "not json"), await write("huge.jsonl", "x".repeat(300_000))]) {
+    assert.equal("subagent" in codex.hookInput(payload(bad)), false);
+  }
+}));
 
 async function withPrivateDirectory<T>(run: (directory: string) => Promise<T>): Promise<T> {
   const directory = await mkdtemp(join(tmpdir(), "chibako-memory-hooks-"));
