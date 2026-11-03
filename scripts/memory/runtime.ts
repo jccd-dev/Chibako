@@ -7,6 +7,7 @@ import { failureCategories, MemoryClientError } from "./client-error";
 import { acquirePrivateLock, readOptional, withPrivateLock } from "./private-files";
 import { prepareSessionStage, sessionMutationSchema } from "./session-stage";
 import { defaultThresholds, type ActivityThresholds } from "./profile";
+import { gitActivity } from "./project";
 
 export type Runtime = "codex" | "claude" | "hermes";
 export type MemoryCall = (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -44,7 +45,12 @@ const stateSchema = z.object({
     joined: z.boolean().optional(), title: z.string().nullable().optional(),
   }).optional(),
   nowUpdate: z.object({ thread: z.string(), line: z.string() }).optional(),
+  // Counts at the last activity capture; cleared with the counters by a save, skip or finish.
+  captured: z.object({ tools: z.number().int().min(0), users: z.number().int().min(0) }).optional(),
+  activityWarned: z.boolean().default(false),
 }).strict();
+// Tool calls since the last save, skip, finish or capture that make a Stop or SessionEnd record activity.
+const ACTIVITY_TOOL_CALLS = 3;
 const checkpointHash = (checkpoint: { content: string; now_line: string }) =>
   createHash("sha256").update(JSON.stringify([checkpoint.content, checkpoint.now_line])).digest("hex");
 const NOW = { subject: "Agent Now", lines: 15, read: 1800 };
@@ -277,6 +283,7 @@ export async function runMemoryEvent(options: {
         // An explicit skip means nothing durable: restart the activity count.
         state.acknowledged = state.turn;
         state.users = state.tools = 0;
+        state.captured = undefined;
         state.dueRequested = false;
       }
       await save();
@@ -322,6 +329,7 @@ export async function runMemoryEvent(options: {
         state.acknowledged = state.pending.turn;
         state.last_saved_at = new Date().toISOString();
         state.users = state.tools = 0;
+        state.captured = undefined;
         state.dueRequested = false;
         if ("action" in checkpoint) {
           state.lastCheckpoint = checkpoint.action === "save" ? { hash: checkpointHash(checkpoint), revision: String(receipt.revision) } : undefined;
@@ -384,6 +392,24 @@ export async function runMemoryEvent(options: {
     let output: MemoryResult = {};
     if (event === "Stop" && !(runtime === "codex" && options.promptRequests) && !state.pending && !input.stop_hook_active && !state.dueRequested && due()) output.request = await dueNote();
     if (context) output.context = context;
+    // Hook-side capture for unsaved work: metadata only, once per unit of work, never blocking.
+    // A Stop that asks the agent to checkpoint leaves this unit of work to the agent.
+    const since = { tools: state.tools - (state.captured?.tools ?? 0), users: state.users - (state.captured?.users ?? 0) };
+    // An older server without `continuity: 1` is skipped silently.
+    if ((event === "SessionEnd" || (event === "Stop" && !output.request)) && !state.pending && since.tools >= ACTIVITY_TOOL_CALLS && await continuity()) {
+      state.captured = { tools: state.tools, users: state.users };
+      try {
+        const entry = { ...gitActivity(input.cwd), tool_calls: since.tools, user_turns: since.users };
+        const request_id = `activity-${createHash("sha256").update(JSON.stringify([runtime, input.session_id, state.turn, entry])).digest("hex").slice(0, 32)}`;
+        const receipt = await call("memory_session", { action: "activity", runtime, session_id: input.session_id, request_id, entry, ...project, ...(await threaded()) });
+        if (!verified(receipt, request_id)) throw new Error("Unverified activity receipt");
+      } catch {
+        if (!state.activityWarned) {
+          state.activityWarned = true;
+          warning ||= "Memory activity capture failed; this session's work was not recorded in the Activity note. Further capture failures this session are not reported.";
+        }
+      }
+    }
     if (["PreCompact", "Interrupt"].includes(event) && !state.pending && due()) {
       warning = "No checkpoint is staged for recent work; only previously saved work is retained.";
     }

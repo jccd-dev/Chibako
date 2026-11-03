@@ -102,7 +102,8 @@ test("a trivial session makes no extra calls, receives no block, and PostToolUse
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("SessionStart") });
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1", prompt: "quick question" }) });
   const before = calls.length;
-  await tools(directory, call, 3, "claude");
+  // Below the activity fallback threshold of three tool calls.
+  await tools(directory, call, 2, "claude");
   assert.deepEqual(await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("Stop") }), {});
   assert.equal(calls.length, before, "counting and Stop add no memory calls");
   assert.equal(calls.some(({ name }) => name === "memory_write" || name === "get_knowledge_schema"), false);

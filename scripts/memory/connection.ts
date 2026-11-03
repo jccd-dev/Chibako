@@ -114,8 +114,7 @@ export function connectMemory(endpoint: string, key: string, expectedPrincipal?:
       if (name === "memory_status") return status ??= validateMemoryStatus(await invoke(name, {}));
       if (name === "memory_session") {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
-        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.", { category: "unsupported", phase: "connect" });
-      }
+        if (status.session_lifecycle !== 1) throw new MemoryClientError("Server does not support session memory. Upgrade the Chibako server before plugin 0.3.0; pending memory is retained.", { category: "unsupported", phase: "connect" });      }
       if ("project" in args) {
         status ??= validateMemoryStatus(await invoke("memory_status", {}));
         // Older servers reject the field; their memory stays in the area root.

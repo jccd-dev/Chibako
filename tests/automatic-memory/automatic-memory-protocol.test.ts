@@ -86,10 +86,10 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   assert.ok(tool, "memory_session is listed");
   const advertised = tool.inputSchema;
   assert.equal(advertised.type, "object");
-  for (const field of ["action", "runtime", "session_id", "project", "request_id", "title", "content", "now_line", "expected_revision", "reopen", "retain", "thread_key"]) {
+  for (const field of ["action", "runtime", "session_id", "project", "request_id", "title", "content", "now_line", "expected_revision", "reopen", "retain", "thread_key", "entry"]) {
     assert.ok(field in advertised.properties, `memory_session advertises ${field}`);
   }
-  assert.deepEqual(advertised.properties.action.enum, ["read", "save", "finish", "continue"]);
+  assert.deepEqual(advertised.properties.action.enum, ["read", "save", "finish", "continue", "activity"]);
   assert.deepEqual(advertised.properties.runtime.enum, ["codex", "claude", "hermes"]);
   assert.deepEqual([...(advertised.required ?? [])].sort(), ["action", "runtime", "session_id"]);
   const input = { action: "save", runtime: "codex", session_id: "fixture-session", request_id: randomUUID(), title: "Protocol session", content: "Useful work", now_line: "Continue", expected_revision: null };
@@ -143,4 +143,13 @@ test("REST and MCP session lifecycle share identity, completion and scope reject
   const badKey = await rpc(key.key, "tools/call", "memory_session", { action: "read", runtime: "codex", session_id: "thread-mcp", thread_key: "nope" });
   assert.equal(badKey.isError, true);
   assert.equal((await postMemory(rest(key.key, "POST", { ...threaded, request_id: randomUUID(), thread_key: "nope" }))).status, 400);
+
+  // Activity: REST records the line, the same request over MCP replays its receipt, and both reject a bad entry.
+  const activity = { action: "activity", runtime: "codex", session_id: "thread-mcp", thread_key, request_id: randomUUID(), entry: { head: "abc1234", files: ["a.ts"], files_changed: 1, tool_calls: 4, user_turns: 1 } };
+  const logged = await (await postMemory(rest(key.key, "POST", activity))).json();
+  assert.deepEqual([logged.saved, logged.title], [true, "Threaded work"]);
+  assert.deepEqual((await rpc(key.key, "tools/call", "memory_session", activity)).structuredContent, logged);
+  const badEntry = { ...activity, request_id: randomUUID(), entry: { ...activity.entry, files: ["/abs.ts"] } };
+  assert.equal((await postMemory(rest(key.key, "POST", badEntry))).status, 400);
+  assert.equal((await rpc(key.key, "tools/call", "memory_session", badEntry)).isError, true);
 });
