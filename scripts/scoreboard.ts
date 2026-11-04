@@ -3,6 +3,7 @@
 //   npm run scoreboard -- --data-dir <tmp copy> --questions <file> [--final] [--label x] [--compare prev.json]
 //   npm run scoreboard -- --source-dir <real vault> --questions <file> ...   backs the Vault up to a temp copy, runs, deletes the copy
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { backupVaultToTemp } from "./scoreboard/backup";
 import { createFixtureVault, FIXTURE_QUESTIONS } from "./scoreboard/fixture/vault";
@@ -26,12 +27,20 @@ if (!values.fixture && !values["data-dir"] && !values["source-dir"]) {
   process.exit(2);
 }
 
+if (values["source-dir"] && values["data-dir"]) {
+  process.stderr.write("Pass only one of --source-dir and --data-dir.\n");
+  process.exit(2);
+}
+
 async function main() {
-  // Embedding provider settings come from the environment; load local env files (existing variables win).
-  if (!values.fixture) for (const file of [".env.local", ".env"]) if (existsSync(file)) process.loadEnvFile(file);
-  const fixture = values.fixture ? await createFixtureVault() : values["source-dir"] ? await backupVaultToTemp(values["source-dir"]) : null;
+  // Embedding provider settings come from the environment; load the repo's env files (existing variables win).
+  const repoRoot = join(import.meta.dirname, "..");
+  if (!values.fixture) for (const file of [".env.local", ".env"]) if (existsSync(join(repoRoot, file))) process.loadEnvFile(join(repoRoot, file));
+  const tempVault = values.fixture ? await createFixtureVault() : values["source-dir"] ? await backupVaultToTemp(values["source-dir"]) : null;
+  // A Ctrl-C or kill must not leave a private Vault copy in the temp dir.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { tempVault?.cleanup(); process.exit(130); });
   try {
-    const dir = fixture?.dir ?? values["data-dir"]!;
+    const dir = tempVault?.dir ?? values["data-dir"]!;
     if (!values.fixture) {
       process.env.CHIBAKO_DATA_DIR = dir;
       assertTemporaryDataDir(dir);
@@ -45,7 +54,7 @@ async function main() {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   } finally {
-    fixture?.cleanup();
+    tempVault?.cleanup();
   }
 }
 

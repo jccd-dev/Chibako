@@ -6,6 +6,7 @@ const DEFAULT_TIMEOUT_MS = 6000;
 const MAX_TIMEOUT_MS = 30000;
 export const QUERY_CACHE_MAX = 200;
 export const QUERY_CACHE_TTL_MS = 60 * 60 * 1000;
+export const QUERY_CACHE_MAX_CHARS = 1000; // longer queries are embedded but not cached, so keys stay small
 
 export class QueryEmbedTimeout extends Error {
   constructor() {
@@ -28,8 +29,9 @@ export function clearQueryEmbeddingCache(): void {
   cache.clear();
 }
 
-function cacheKey(p: EmbeddingProvider, text: string): string {
-  return [p.id, p.model, p.dim, text.trim().replace(/\s+/g, " ")].join("\0");
+function cacheKey(p: EmbeddingProvider, text: string): string | null {
+  const normalized = text.trim().replace(/\s+/g, " ");
+  return normalized.length > QUERY_CACHE_MAX_CHARS ? null : [p.id, p.model, p.dim, normalized].join("\0");
 }
 
 /**
@@ -38,13 +40,13 @@ function cacheKey(p: EmbeddingProvider, text: string): string {
  */
 export async function embedQuery(provider: EmbeddingProvider, text: string): Promise<number[] | undefined> {
   const key = cacheKey(provider, text);
-  const hit = cache.get(key);
-  if (hit) {
+  const hit = key === null ? undefined : cache.get(key);
+  if (key !== null && hit) {
     if (Date.now() - hit.at < QUERY_CACHE_TTL_MS) return hit.vec;
     cache.delete(key);
   }
   const call = provider.embed([text]).then(([vec]) => {
-    if (vec) {
+    if (vec && key !== null) {
       cache.delete(key);
       cache.set(key, { vec, at: Date.now() });
       if (cache.size > QUERY_CACHE_MAX) cache.delete(cache.keys().next().value as string);

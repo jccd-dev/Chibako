@@ -111,7 +111,7 @@ function countingProvider(model = 'm'): EmbeddingProvider & { calls: number } {
 }
 
 test('the cache is keyed by provider, model and text, bounded, and expires', async () => {
-  const { embedQuery, QUERY_CACHE_MAX, QUERY_CACHE_TTL_MS } = await import('../../src/lib/query-embedding');
+  const { embedQuery, QUERY_CACHE_MAX, QUERY_CACHE_MAX_CHARS, QUERY_CACHE_TTL_MS } = await import('../../src/lib/query-embedding');
   const a = countingProvider('a');
   const b = countingProvider('b');
   await embedQuery(a, 'q');
@@ -119,6 +119,12 @@ test('the cache is keyed by provider, model and text, bounded, and expires', asy
   await embedQuery(b, 'q');
   assert.equal(a.calls, 1);
   assert.equal(b.calls, 1, 'a different model does not share entries');
+
+  const c = countingProvider('c');
+  const long = 'x'.repeat(QUERY_CACHE_MAX_CHARS + 1);
+  await embedQuery(c, long);
+  await embedQuery(c, long);
+  assert.equal(c.calls, 2, 'queries over the length cap are embedded but never cached');
 
   for (let i = 0; i < QUERY_CACHE_MAX; i++) await embedQuery(a, `fill ${i}`);
   await embedQuery(a, 'q');

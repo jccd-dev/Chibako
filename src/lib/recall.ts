@@ -8,8 +8,7 @@ import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, typ
 
 // ---------- vector search ----------
 
-// The query embedding limit (CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS, default 6s) and cache live in ./query-embedding.
-// Measured provider latency was 1.4-12.5s, so the old 1.5s limit made nearly every query fall back to keywords.
+// The query embedding time limit is configurable (CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS); see ./query-embedding.
 // A slow provider still falls back to keyword results once the limit passes.
 
 function cosine(a: number[], b: number[]): number {

@@ -146,8 +146,12 @@ test("--source-dir style backup copies the database into a temp dir and cleanup 
   const copy = await backupVaultToTemp(vault.dir);
   try {
     assertTemporaryDataDir(copy.dir);
-    const titles = new Database(join(copy.dir, "brain.db"), { readonly: true }).prepare("SELECT title FROM notes WHERE title = 'Hosting Decision'").all();
-    assert.equal(titles.length, 1);
+    const db = new Database(join(copy.dir, "brain.db"), { readonly: true });
+    try {
+      assert.equal(db.prepare("SELECT title FROM notes WHERE title = 'Hosting Decision'").all().length, 1);
+    } finally {
+      db.close();
+    }
   } finally {
     copy.cleanup();
   }

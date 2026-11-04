@@ -14,9 +14,13 @@ const PASSES = 4; // bounded work per tick: at most BATCH * PASSES Notes
 
 const runner = globalThis as typeof globalThis & { embeddingRepairTimer?: ReturnType<typeof setInterval> };
 
-/** Reindex stale Notes in bounded batches. Resolves with the total embedded; never throws. */
+let running = false;
+
+/** Reindex stale Notes in bounded batches. Resolves with the total embedded; never throws. A call while a run is in flight is skipped (indexed 0). */
 export async function runEmbeddingRepair(opts: { batch?: number; passes?: number } = {}): Promise<{ indexed: number }> {
+  if (running) return { indexed: 0 };
   let indexed = 0;
+  running = true;
   try {
     for (let pass = 0; pass < (opts.passes ?? PASSES); pass++) {
       const result = await reindexEmbeddings({ max: opts.batch ?? BATCH });
@@ -25,6 +29,8 @@ export async function runEmbeddingRepair(opts: { batch?: number; passes?: number
     }
   } catch (error) {
     if (!(error instanceof MaintenanceError)) console.error(`Embedding repair failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+  } finally {
+    running = false;
   }
   return { indexed };
 }

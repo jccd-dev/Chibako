@@ -1,4 +1,4 @@
-import { now } from "./db";
+import { MaintenanceError, now } from "./db";
 import { listNotes, getNote, type Note } from "./notes";
 import {
   getEmbeddingProvider,
@@ -140,7 +140,7 @@ function syncMeta(provider: EmbeddingProvider): void {
   }
 }
 
-/** Embed the given note ids. Never throws; records failure state instead. */
+/** Embed the given note ids. Provider failures are recorded, not thrown; a maintenance fence (MaintenanceError) propagates. */
 export async function refreshNotes(ids: string[]): Promise<number> {
   const provider = getEmbeddingProvider();
   if (!provider || ids.length === 0) return 0;
@@ -182,6 +182,7 @@ export async function refreshNotes(ids: string[]): Promise<number> {
       consecutiveFailures = 0;
       setMeta({ last_error: null, last_indexed_at: now() });
     } catch (e) {
+      if (e instanceof MaintenanceError) throw e; // a maintenance fence is not a provider failure
       consecutiveFailures++;
       const message = e instanceof Error ? e.message : String(e);
       setMeta({ last_error: message.slice(0, 300) });
