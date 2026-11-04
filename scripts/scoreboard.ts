@@ -27,8 +27,8 @@ if (!values.fixture && !values["data-dir"] && !values["source-dir"]) {
 }
 
 async function main() {
-  // Embedding provider settings come from the environment; load them from a local env file when present.
-  if (!values.fixture && existsSync(".env.local")) process.loadEnvFile(".env.local");
+  // Embedding provider settings come from the environment; load local env files (existing variables win).
+  if (!values.fixture) for (const file of [".env.local", ".env"]) if (existsSync(file)) process.loadEnvFile(file);
   const fixture = values.fixture ? await createFixtureVault() : values["source-dir"] ? await backupVaultToTemp(values["source-dir"]) : null;
   try {
     const dir = fixture?.dir ?? values["data-dir"]!;
