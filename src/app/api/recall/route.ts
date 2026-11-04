@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { withAuthAny } from "@/lib/api";
-import { recall } from "@/lib/recall";
+import { recallDetailed } from "@/lib/recall";
 import { reindexEmbeddings, embeddingStatus } from "@/lib/embedding-index";
 
 export const GET = withAuthAny(["notes:read", "search:read"], async (req: NextRequest) => {
@@ -8,8 +8,8 @@ export const GET = withAuthAny(["notes:read", "search:read"], async (req: NextRe
   const limit = Math.max(1, Math.min(50, Number(req.nextUrl.searchParams.get("limit") ?? 8)));
   const budget = Math.max(100, Math.min(20000, Number(req.nextUrl.searchParams.get("budget") ?? 2000)));
   try {
-    const results = await recall({ query: q, limit, budget });
-    return Response.json({ query: q, budget, count: results.length, results });
+    const { results, mode, fallback_reason } = await recallDetailed({ query: q, limit, budget });
+    return Response.json({ query: q, budget, count: results.length, results, mode, fallback_reason });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "recall failed" }, { status: 500 });
   }

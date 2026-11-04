@@ -3,12 +3,18 @@ import { listNotes, searchNotes, getNote, type NoteSummary } from "./notes";
 import { stripFrontmatter } from "./markdown";
 import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
 import { listEmbeddings } from "./embedding-store";
-import { freshEmbeddingIds, staleNoteIds, refreshNotes } from "./embedding-index";
+import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, type QueryFallbackReason } from "./embedding-index";
 
 // ---------- vector search ----------
 
 // MCP clients budget ~2s per call; a slow provider must fall back to keyword results instead.
 const QUERY_EMBED_TIMEOUT_MS = 1500;
+
+class QueryEmbedTimeout extends Error {
+  constructor() {
+    super("Query embedding timed out");
+  }
+}
 
 function cosine(a: number[], b: number[]): number {
   let dot = 0, na = 0, nb = 0;
@@ -31,7 +37,7 @@ async function vectorSearch(query: string, limit: number): Promise<Array<{ id: s
     [qvec] = await Promise.race([
       provider.embed([query]),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Query embedding timed out")), QUERY_EMBED_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new QueryEmbedTimeout()), QUERY_EMBED_TIMEOUT_MS);
       }),
     ]);
   } finally {
@@ -105,6 +111,16 @@ export interface RecallOptions {
   refreshStale?: boolean;
 }
 
+export type RecallMode = "hybrid" | "keyword";
+export type RecallFallbackReason = "timeout" | "provider_error" | "disabled" | "no_vectors";
+
+export interface RecallResponse {
+  results: RecallItem[];
+  /** `keyword` means the vector half did not contribute; see `fallback_reason`. */
+  mode: RecallMode;
+  fallback_reason: RecallFallbackReason | null;
+}
+
 export interface RecallItem {
   id: string;
   title: string;
@@ -121,8 +137,13 @@ export interface RecallItem {
  * snippets only — never full note bodies — so the payload stays small.
  */
 export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
+  return (await recallDetailed(opts)).results;
+}
+
+/** Same ranking as `recall`, plus whether the vector half contributed and why not. */
+export async function recallDetailed(opts: RecallOptions): Promise<RecallResponse> {
   const query = opts.query.trim();
-  if (!query) return [];
+  if (!query) return { results: [], mode: "keyword", fallback_reason: "disabled" };
   const limit = opts.limit ?? 8;
   const budget = opts.budget ?? 2000;
   const includeVectors = opts.includeVectors ?? true;
@@ -131,6 +152,7 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
 
   let rankings = [bm25];
   let vectorScores: Map<string, number> | null = null;
+  let fallback: RecallFallbackReason | null = "disabled";
   if (includeVectors && embeddingsEnabled()) {
     // Lazy self-heal: queue a few stale notes for background refresh. This is
     // the process-agnostic backstop for edits made by the other process, and it
@@ -144,10 +166,15 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
       if (vec.length) {
         rankings = [bm25, vec.map((v) => ({ id: v.id }))];
         vectorScores = new Map(vec.map((v) => [v.id, v.score]));
+        fallback = null;
+      } else {
+        fallback = "no_vectors";
       }
-    } catch {
-      // Provider failed: fall back to keyword-only results.
+    } catch (e) {
+      // Provider failed: fall back to keyword-only results, and say so.
+      fallback = e instanceof QueryEmbedTimeout ? "timeout" : "provider_error";
     }
+    if (fallback) recordFallbackBestEffort(fallback);
   }
 
   // Any-term keyword hits are broad in large vaults: let them boost semantic
@@ -179,7 +206,16 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
     items.push(buildItem(summary, snippet, score, vectorScores, terms));
   }
 
-  return items;
+  return { results: items, mode: fallback ? "keyword" : "hybrid", fallback_reason: fallback };
+}
+
+/** Counters must never break a read-only Recall. */
+function recordFallbackBestEffort(reason: QueryFallbackReason): void {
+  try {
+    recordQueryFallback(reason);
+  } catch {
+    // Metrics are advisory.
+  }
 }
 
 function buildItem(
