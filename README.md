@@ -125,7 +125,9 @@ Chibako keeps your notes and agent memory together on your own server.
   `CHIBAKO_EMBEDDING_API_KEY` (any OpenAI-compatible `/v1/embeddings` endpoint)
   to fuse vector search with BM25 via RRF. Embeddings refresh on note changes
   and can be repaired from **Settings → Recall**. Disabled by default, zero
-  network calls when off.
+  network calls when off. `CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS` (default 6000,
+  max 30000) is how long a recall waits for the provider before falling back
+  to keyword results; query embeddings are cached in memory for an hour.
 - **Single admin auth** — password login + DB-backed sessions; one-time setup
 - **Light / dark theme**, keyboard-driven UI, responsive mobile drawer
 - **One file to back up** — the whole vault is `data/brain.db`

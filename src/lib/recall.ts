@@ -2,19 +2,15 @@ import { getDb, now, uid } from "./db";
 import { listNotes, searchNotes, getNote, type NoteSummary } from "./notes";
 import { stripFrontmatter } from "./markdown";
 import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
+import { embedQuery, QueryEmbedTimeout } from "./query-embedding";
 import { listEmbeddings } from "./embedding-store";
 import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, type QueryFallbackReason } from "./embedding-index";
 
 // ---------- vector search ----------
 
-// MCP clients budget ~2s per call; a slow provider must fall back to keyword results instead.
-const QUERY_EMBED_TIMEOUT_MS = 1500;
-
-class QueryEmbedTimeout extends Error {
-  constructor() {
-    super("Query embedding timed out");
-  }
-}
+// The query embedding limit (CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS, default 6s) and cache live in ./query-embedding.
+// Measured provider latency was 1.4-12.5s, so the old 1.5s limit made nearly every query fall back to keywords.
+// A slow provider still falls back to keyword results once the limit passes.
 
 function cosine(a: number[], b: number[]): number {
   let dot = 0, na = 0, nb = 0;
@@ -31,18 +27,7 @@ function cosine(a: number[], b: number[]): number {
 async function vectorSearch(query: string, limit: number): Promise<Array<{ id: string; score: number }>> {
   const provider = getEmbeddingProvider();
   if (!provider) return [];
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let qvec: number[] | undefined;
-  try {
-    [qvec] = await Promise.race([
-      provider.embed([query]),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new QueryEmbedTimeout()), QUERY_EMBED_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+  const qvec = await embedQuery(provider, query);
   if (!qvec) return [];
   const fresh = freshEmbeddingIds();
   const scored: Array<{ id: string; score: number }> = [];

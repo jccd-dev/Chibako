@@ -65,6 +65,7 @@ test('a provider error returns keyword results with reason provider_error and is
 
 test('a provider timeout returns keyword results with reason timeout and is counted', async () => {
   useOpenAi(hangingUrl);
+  process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS = '300';
   const { recallDetailed } = await import('../../src/lib/recall');
   const { embeddingStatus } = await import('../../src/lib/embedding-index');
   const res = await recallDetailed({ query: SECRET_QUERY, refreshStale: false });
