@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import Database from "better-sqlite3";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -138,4 +139,18 @@ test("results are saved and compared with earlier runs", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("--source-dir style backup copies the database into a temp dir and cleanup removes it", async () => {
+  const { backupVaultToTemp } = await import("../scripts/scoreboard/backup");
+  const copy = await backupVaultToTemp(vault.dir);
+  try {
+    assertTemporaryDataDir(copy.dir);
+    const titles = new Database(join(copy.dir, "brain.db"), { readonly: true }).prepare("SELECT title FROM notes WHERE title = 'Hosting Decision'").all();
+    assert.equal(titles.length, 1);
+  } finally {
+    copy.cleanup();
+  }
+  assert.equal(existsSync(copy.dir), false);
+  await assert.rejects(backupVaultToTemp(join(tmpdir(), "does-not-exist-chibako")));
 });
