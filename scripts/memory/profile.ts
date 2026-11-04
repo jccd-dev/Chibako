@@ -5,6 +5,7 @@ import { readdir } from "node:fs/promises";
 import { z } from "zod";
 import { privateDirectory, readOptional, atomicPrivateWrite } from "./private-files";
 import { projectSchema } from "../../src/features/memory/types";
+import { costSchema, sumCost, type Cost } from "./cost";
 import type { HostAdapter } from "./host-adapter";
 
 export const defaultThresholds = { user_turns: 4, tool_calls: 10 };
@@ -39,23 +40,25 @@ export async function saveProfile(directory: string, profile: MemoryProfile): Pr
   await privateDirectory(directory);
   await atomicPrivateWrite(path.join(directory, "profile.json"), JSON.stringify(profileSchema.parse(profile), null, 2) + "\n");
 }
-async function stateSummary(directory: string): Promise<{ pending: number; last_verified_save: string | null }> {
+async function stateSummary(directory: string): Promise<{ pending: number; last_verified_save: string | null; cost: { sessions: Cost[]; totals: Cost } }> {
   const state = path.join(directory, "state");
   let files: string[];
   try { files = await readdir(state); }
   catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return { pending: 0, last_verified_save: null };
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return { pending: 0, last_verified_save: null, cost: { sessions: [], totals: sumCost([]) } };
     throw error;
   }
   let count = 0;
   let last: string | null = null;
+  const sessions: Cost[] = [];
   for (const file of files.filter((value) => value.endsWith(".json"))) {
     const text = await readOptional(path.join(state, file));
-    const record = z.object({ pending: z.unknown().optional(), last_saved_at: z.string().datetime().optional() }).passthrough().parse(JSON.parse(text || "null"));
+    const record = z.object({ pending: z.unknown().optional(), last_saved_at: z.string().datetime().optional(), stats: z.unknown().optional() }).passthrough().parse(JSON.parse(text || "null"));
     if (record.pending) count++;
+    sessions.push(costSchema.parse(record.stats));
     if (record.last_saved_at && (!last || record.last_saved_at > last)) last = record.last_saved_at;
   }
-  return { pending: count, last_verified_save: last };
+  return { pending: count, last_verified_save: last, cost: { sessions, totals: sumCost(sessions) } };
 }
 export async function pendingCount(directory: string): Promise<number> {
   return (await stateSummary(directory)).pending;
