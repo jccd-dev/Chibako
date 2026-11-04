@@ -103,6 +103,7 @@ async function scoreQuestion(q: Question): Promise<QuestionResult> {
     hit_rank: hit === -1 ? null : hit + 1,
     hit_source: hit === -1 ? null : isCheckpoint(items[hit].id) ? "checkpoint" : "canonical",
     canonical_rank: canonical === -1 ? null : canonical + 1,
+    // Same ceil(chars / 4) estimate Recall budgets with; recall.ts does not expose its running total.
     tokens: items.reduce((sum, it) => sum + Math.ceil((it.title.length + it.snippet.length) / 4), 0),
     latency_ms,
     fallback_reason,
@@ -184,6 +185,7 @@ export function formatReport(r: ScoreboardResult): string {
   lines.push(`  recall tokens  total ${s.tokens.total}  mean ${pad(s.tokens.mean, 1)}`);
   lines.push(`  latency ms  p50 ${pad(s.latency_ms.p50, 1)}  p95 ${pad(s.latency_ms.p95, 1)}`);
   lines.push(`  keyword fallback  ${pad(s.keyword_fallback_rate, 2)}`);
+  for (const q of r.questions) lines.push(`  ${q.id}  ${q.group}/${q.split}  ${q.hit_rank === null ? "miss" : `hit @${q.hit_rank} in ${q.hit_source}`}`);
   return lines.join("\n");
 }
 

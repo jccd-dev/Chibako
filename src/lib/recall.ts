@@ -143,39 +143,14 @@ export async function recall(opts: RecallOptions): Promise<RecallItem[]> {
 /** Same ranking as `recall`, plus whether the vector half contributed and why not. */
 export async function recallDetailed(opts: RecallOptions): Promise<RecallResponse> {
   const query = opts.query.trim();
-  if (!query) return { results: [], mode: "keyword", fallback_reason: "disabled" };
+  if (!query) return { results: [], mode: "keyword", fallback_reason: null };
   const limit = opts.limit ?? 8;
   const budget = opts.budget ?? 2000;
-  const includeVectors = opts.includeVectors ?? true;
 
   const bm25 = searchNotes(query, [], { anyTerm: true }).slice(0, 50).map((r) => ({ id: r.id }));
-
-  let rankings = [bm25];
-  let vectorScores: Map<string, number> | null = null;
-  let fallback: RecallFallbackReason | null = "disabled";
-  if (includeVectors && embeddingsEnabled()) {
-    // Lazy self-heal: queue a few stale notes for background refresh. This is
-    // the process-agnostic backstop for edits made by the other process, and it
-    // must never block or fail the recall response.
-    if (opts.refreshStale !== false) {
-      const stale = staleNoteIds(20);
-      if (stale.length) void refreshNotes(stale);
-    }
-    try {
-      const vec = await vectorSearch(query, 50);
-      if (vec.length) {
-        rankings = [bm25, vec.map((v) => ({ id: v.id }))];
-        vectorScores = new Map(vec.map((v) => [v.id, v.score]));
-        fallback = null;
-      } else {
-        fallback = "no_vectors";
-      }
-    } catch (e) {
-      // Provider failed: fall back to keyword-only results, and say so.
-      fallback = e instanceof QueryEmbedTimeout ? "timeout" : "provider_error";
-    }
-    if (fallback) recordFallbackBestEffort(fallback);
-  }
+  const { vec, fallback } = await vectorHalf(query, opts);
+  const rankings = vec ? [bm25, vec.map((v) => ({ id: v.id }))] : [bm25];
+  const vectorScores = vec ? new Map(vec.map((v) => [v.id, v.score])) : null;
 
   // Any-term keyword hits are broad in large vaults: let them boost semantic
   // matches, not displace them. shortcut: fixed 0.5 weight, tune from pilot recall samples.
@@ -206,12 +181,43 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
     items.push(buildItem(summary, snippet, score, vectorScores, terms));
   }
 
-  return { results: items, mode: fallback ? "keyword" : "hybrid", fallback_reason: fallback };
+  return { results: items, mode: vec ? "hybrid" : "keyword", fallback_reason: fallback };
+}
+
+/**
+ * Runs the vector half and classifies why it did not contribute. `disabled` means embeddings are off;
+ * a caller that opted out with `includeVectors: false` gets no reason.
+ */
+async function vectorHalf(
+  query: string,
+  opts: RecallOptions,
+): Promise<{ vec: Array<{ id: string; score: number }> | null; fallback: RecallFallbackReason | null }> {
+  if (!embeddingsEnabled()) return { vec: null, fallback: "disabled" };
+  if (opts.includeVectors === false) return { vec: null, fallback: null };
+  // Lazy self-heal: queue a few stale notes for background refresh. This is
+  // the process-agnostic backstop for edits made by the other process, and it
+  // must never block or fail the recall response.
+  if (opts.refreshStale !== false) {
+    const stale = staleNoteIds(20);
+    if (stale.length) void refreshNotes(stale);
+  }
+  let fallback: QueryFallbackReason;
+  try {
+    const vec = await vectorSearch(query, 50);
+    if (vec.length) return { vec, fallback: null };
+    fallback = "no_vectors";
+  } catch (e) {
+    // Provider failed: fall back to keyword-only results, and say so.
+    fallback = e instanceof QueryEmbedTimeout ? "timeout" : "provider_error";
+  }
+  recordFallbackBestEffort(fallback);
+  return { vec: null, fallback };
 }
 
 /** Counters must never break a read-only Recall. */
 function recordFallbackBestEffort(reason: QueryFallbackReason): void {
   try {
+    // The one write on this read path: a settings counter that never touches notes, embeddings, the store version or scan cache, so results are unaffected.
     recordQueryFallback(reason);
   } catch {
     // Metrics are advisory.

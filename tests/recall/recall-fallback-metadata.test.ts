@@ -49,7 +49,10 @@ test('a provider error returns keyword results with reason provider_error and is
   useOpenAi('http://127.0.0.1:9/v1');
   const { recallDetailed } = await import('../../src/lib/recall');
   const { embeddingStatus } = await import('../../src/lib/embedding-index');
+  const { embedStoreVersion } = await import('../../src/lib/embedding-store');
+  const version = embedStoreVersion();
   const res = await recallDetailed({ query: SECRET_QUERY, refreshStale: false });
+  assert.equal(embedStoreVersion(), version, 'counting a fallback does not invalidate the embedding scan cache');
   assert.equal(res.mode, 'keyword');
   assert.equal(res.fallback_reason, 'provider_error');
   assert(res.results.some((r) => r.title === 'Zebracorn'));
@@ -95,6 +98,19 @@ test('with fresh vectors recall is hybrid with no fallback reason', async () => 
   assert.equal(res.mode, 'hybrid');
   assert.equal(res.fallback_reason, null);
   assert.deepEqual(embeddingStatus().query_fallbacks, before.query_fallbacks);
+});
+
+test('an empty query or includeVectors:false is not reported as disabled while embeddings are on', async () => {
+  const { recallDetailed } = await import('../../src/lib/recall');
+  const { embeddingStatus } = await import('../../src/lib/embedding-index');
+  const before = embeddingStatus().query_fallbacks;
+  const empty = await recallDetailed({ query: '  ' });
+  assert.deepEqual(empty, { results: [], mode: 'keyword', fallback_reason: null });
+  const optedOut = await recallDetailed({ query: SECRET_QUERY, includeVectors: false, refreshStale: false });
+  assert.equal(optedOut.mode, 'keyword');
+  assert.equal(optedOut.fallback_reason, null);
+  assert(optedOut.results.some((r) => r.title === 'Zebracorn'));
+  assert.deepEqual(embeddingStatus().query_fallbacks, before, 'neither is counted as a fallback');
 });
 
 test('query text is never stored', async () => {

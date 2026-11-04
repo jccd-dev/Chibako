@@ -239,6 +239,7 @@ export function embeddingStatus(): EmbeddingStatus {
   const provider = getEmbeddingProvider();
   const meta = getMeta();
   const current = provider ? cachedScan() : { total: listNotes().length, indexed: 0, staleIds: [] as string[] };
+  const query_failures = { timeout: meta.query_timeouts, provider_error: meta.query_provider_errors };
   return {
     enabled: Boolean(provider),
     provider: provider?.id ?? "disabled",
@@ -251,8 +252,8 @@ export function embeddingStatus(): EmbeddingStatus {
     rows: countEmbeddings(),
     last_error: meta.last_error,
     last_indexed_at: meta.last_indexed_at,
-    query_failures: { timeout: meta.query_timeouts, provider_error: meta.query_provider_errors },
-    query_fallbacks: { timeout: meta.query_timeouts, provider_error: meta.query_provider_errors, no_vectors: meta.query_no_vectors },
+    query_failures,
+    query_fallbacks: { ...query_failures, no_vectors: meta.query_no_vectors },
     last_query_failure_reason: meta.last_query_failure_reason,
     last_query_failure_at: meta.last_query_failure_at,
   };

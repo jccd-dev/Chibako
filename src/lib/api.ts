@@ -14,10 +14,8 @@ export function withAuth(required: string, handler: ApiHandler) {
 /** Like withAuth but grants access when ANY of the listed scopes is present. */
 export function withAuthAny(required: string[], handler: ApiHandler) {
   return async (req: NextRequest, ctx: { params: Promise<Record<string, string>> }) => {
-    const authorization = req.headers.get("authorization");
-    // A Bearer key never consults the session cookie, so skip the request-scoped cookie read.
-    const sessionToken = authorization?.startsWith("Bearer ") ? null : await getCookieToken();
-    const scopes = authenticateRequest(authorization, sessionToken);
+    const sessionToken = await getCookieToken();
+    const scopes = authenticateRequest(req.headers.get("authorization"), sessionToken);
     if (!scopes) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!hasAnyScope(scopes, required)) return NextResponse.json({ error: "Forbidden: missing scope" }, { status: 403 });
     try {

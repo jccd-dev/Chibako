@@ -9,7 +9,7 @@ import { acquirePrivateLock, readOptional, withPrivateLock } from "./private-fil
 import { prepareSessionStage, sessionMutationSchema } from "./session-stage";
 import { defaultThresholds, type ActivityThresholds } from "./profile";
 import { gitActivity } from "./project";
-import { costSchema, countCost, type Cost } from "./cost";
+import { costSchema, countCapture, countCheckpointRequest, countInjected, type Cost } from "./cost";
 
 export type Runtime = "codex" | "claude" | "hermes";
 export type MemoryCall = (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -303,7 +303,7 @@ export async function runMemoryEvent(options: {
     const due = () => state.tools >= limits.tool_calls || (runtime !== "codex" && state.users >= limits.user_turns);
     const dueNote = async () => {
       state.dueRequested = true;
-      countCost(state.stats, (cost) => { cost.checkpoint_requests++; });
+      countCheckpointRequest(state.stats);
       return `Memory checkpoint due. Update this session's ONE checkpoint: {"checkpoint": {"title": "<session label>", "content": "current objective, decisions, evidence, pending work"}, "now_line": "<=140 chars next action"}. When no work remains, use {"finish": {}} to close it and remove its Agent Now entry (the checkpoint stays as a session record), or include retain (wiki/preference role, subject, title, content, expected_revision, confirmation for preferences) to preserve lasting knowledge atomically first. Skip unchanged or trivial work with {"skip": "reason"}. Identity comes from the hook session, never a task name; if this session already continued an Agent Now checkpoint, saves update that shared note. For an existing note, read memory_session with action read and restage with its revision as "expected_revision" (inside checkpoint/finish or beside it). Stop means response end, not task completion. Stage command: ${options.stageCommand || "see integrations/agent-memory/README.md"}. Checkpoints need no schema; call get_knowledge_schema only before retain or another note write. This reminder runs once; a rejected stage changes nothing and can be fixed and rerun.`;
     };
     if (event === "PostToolUse") {
@@ -359,7 +359,7 @@ export async function runMemoryEvent(options: {
     let context = "";
     const inject = (source: keyof Cost["injected"], text: string) => {
       context += text;
-      countCost(state.stats, (cost) => { cost.injected[source] += text.length; });
+      countInjected(state.stats, source, text);
     };
     if (event === "SessionStart" || event === "UserPromptSubmit") {
       let resumed: string | undefined;
@@ -426,7 +426,7 @@ export async function runMemoryEvent(options: {
         const receipt = await call("memory_session", capture.request);
         if (!verified(receipt, capture.request.request_id)) throw new Error("Unverified activity receipt");
         state.captured = { tools: capture.tools, users: capture.users };
-        countCost(state.stats, (cost) => { cost.captures++; });
+        countCapture(state.stats);
         state.activityCapture = undefined;
       } catch {
         if (!state.activityWarned) {

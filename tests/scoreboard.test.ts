@@ -63,6 +63,10 @@ test("tune run scores hit rates by group and split, tokens, latency and hit sour
   assert.equal(byId.lost.hit_source, null);
 
   assert.deepEqual(result.summary.hits_by_source, { checkpoint: 1, canonical: 4 });
+  const report = formatReport(result);
+  assert.match(report, /\btax\s.*hit @\d in checkpoint/);
+  assert.match(report, /\bcents\s.*hit @\d in canonical/);
+  assert.match(report, /\blost\s.*miss/);
   assert.ok(result.summary.tokens.total > 0 && result.summary.tokens.mean > 0);
   assert.ok(result.summary.latency_ms.p50 >= 0 && result.summary.latency_ms.p95 >= result.summary.latency_ms.p50);
 });

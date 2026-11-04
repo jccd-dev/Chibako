@@ -12,9 +12,13 @@ export const costSchema = z.object({
 export type Cost = z.infer<typeof costSchema>;
 
 /** Applies a counter update; counting must never break the hook that triggered it. */
-export function countCost(cost: Cost, update: (cost: Cost) => void): void {
+function countCost(cost: Cost, update: (cost: Cost) => void): void {
   try { update(cost); } catch { /* shortcut: a lost count is acceptable, a failed hook is not */ }
 }
+
+export const countInjected = (cost: Cost, source: keyof Cost["injected"], text: string): void => countCost(cost, (c) => { c.injected[source] += text.length; });
+export const countCheckpointRequest = (cost: Cost): void => countCost(cost, (c) => { c.checkpoint_requests++; });
+export const countCapture = (cost: Cost): void => countCost(cost, (c) => { c.captures++; });
 
 export function sumCost(all: Cost[]): Cost {
   const total = emptyCost();
