@@ -12,6 +12,7 @@ test('recall falls back to keywords when the embedding provider never responds',
   const address = server.address();
   assert(address && typeof address !== 'string');
   process.env.CHIBAKO_DATA_DIR = vault;
+  process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS = '1000';
   process.env.CHIBAKO_EMBEDDING_PROVIDER = 'openai';
   process.env.CHIBAKO_EMBEDDING_API_KEY = 'test-key';
   process.env.CHIBAKO_EMBEDDING_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
