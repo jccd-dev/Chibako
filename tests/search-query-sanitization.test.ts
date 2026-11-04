@@ -23,3 +23,23 @@ test('search tolerates a query whose 60-char slice ends in whitespace', async ()
     rmSync(vault, { recursive: true, force: true });
   }
 });
+
+test('search treats hyphens and FTS keywords as plain text', async () => {
+  const vault = mkdtempSync(join(tmpdir(), 'chibako-search-literal-test-'));
+  process.env.CHIBAKO_DATA_DIR = vault;
+  process.env.CHIBAKO_EMBEDDING_PROVIDER = '';
+  process.env.CHIBAKO_EMBEDDING_API_KEY = '';
+  const { createNote, searchNotes } = await import('../src/lib/notes');
+  const { getDb } = await import('../src/lib/db');
+  try {
+    const note = createNote({ title: 'Tenant rollout', content: 'Run db:migrate-tenant on self-hosted boxes. NEAR and NOT OR AND stay plain words.' });
+    createNote({ title: 'Unrelated', content: 'cats sleep' });
+    for (const query of ['db:migrate-tenant', 'migrate-tenant', 'self-hosted', 'self-host', 'AND', 'OR', 'NOT', 'NEAR', 'tenant AND rollout']) {
+      assert.deepEqual(searchNotes(query).map((result) => result.id), [note.id], query);
+    }
+    assert.deepEqual(searchNotes('migrate-tenant missing-word'), [], 'every term must still match');
+  } finally {
+    getDb().close();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});

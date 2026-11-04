@@ -115,7 +115,7 @@ Chibako keeps your notes and agent memory together on your own server.
   - **MCP server** — one stdio server with `list_notes`, `search_notes`,
     `recall` (token-budgeted retrieval), `read_note`, `get_links`, `create_note`,
     `update_note`, `ingest_note` (token-efficient bundle), `delete_note` (trash),
-    `restore_note`, `purge_note`, `get_graph`, `get_knowledge_schema`,
+    `delete_folder` (empty folders only), `restore_note`, `purge_note`, `get_graph`, `get_knowledge_schema`,
     `get_stats`, plus `memory_save` / `list_observations` / `delete_observation`
     (observation log) and `index_embeddings` / `embedding_status`
 - **Token efficiency by design** — raw Markdown bodies, id-only list/links

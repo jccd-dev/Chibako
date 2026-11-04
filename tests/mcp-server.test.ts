@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createFolder, folderTree } from "../src/features/organization/folders";
 import { createMcpServer } from "../src/mcp/create-server";
 import { getDb } from "../src/lib/db";
 import { createNote } from "../src/lib/notes";
@@ -76,4 +77,25 @@ test("purge requires its own scope and local MCP retains embedding indexing", as
   assert.ok((await local.client.listTools()).tools.some((tool) => tool.name === "index_embeddings"));
   await local.client.close();
   await local.server.close();
+});
+
+test("delete_folder needs notes:write and refuses folders with live notes", async () => {
+  const reader = await connect(["notes:read"], "remote");
+  assert.ok(!(await reader.client.listTools()).tools.some((tool) => tool.name === "delete_folder"));
+  await reader.client.close();
+  await reader.server.close();
+
+  const writer = await connect(["notes:write"], "remote");
+  await writer.client.callTool({ name: "create_note", arguments: { title: "Folder resident", folder: "Tool/Busy", content: "kept" } });
+  const refused = await writer.client.callTool({ name: "delete_folder", arguments: { path: "Tool/Busy" } });
+  assert.equal(refused.isError, true);
+  assert.match((refused.content as Array<{ text: string }>)[0].text, /live notes/);
+
+  createFolder("Tool/Empty");
+  const deleted = await writer.client.callTool({ name: "delete_folder", arguments: { path: "Tool/Empty" } });
+  assert.equal(deleted.isError, undefined);
+  assert.deepEqual(deleted.structuredContent, { deleted: "Tool/Empty", parent: "Tool" });
+  assert.ok(!folderTree().includes("Tool/Empty"));
+  await writer.client.close();
+  await writer.server.close();
 });

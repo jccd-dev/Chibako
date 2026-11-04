@@ -74,6 +74,20 @@ export function deleteFolder(from: string): string {
   })();
 }
 
+/** Delete a folder only when it and its subfolders hold no live Notes; trashed Notes move to the parent. */
+export function deleteEmptyFolder(from: string): string {
+  from = normalizeFolder(from);
+  const db = getDb();
+  return db.transaction(() => {
+    const prefix = `${from}/`;
+    const live = from && db
+      .prepare("SELECT 1 FROM notes WHERE deleted_at IS NULL AND (folder = ? OR substr(folder, 1, ?) = ?) LIMIT 1")
+      .get(from, prefix.length, prefix);
+    if (live) throw new NoteInputError("This folder still has live notes.", 409);
+    return deleteFolder(from);
+  })();
+}
+
 function parentOf(path: string): string {
   return path.split("/").slice(0, -1).join("/");
 }

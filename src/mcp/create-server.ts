@@ -31,6 +31,8 @@ import {
 } from "../lib/recall";
 import { reindexEmbeddings, embeddingStatus } from "../lib/embedding-index";
 import { getKnowledgeSchema } from "../features/schema/knowledge-schema";
+import { deleteEmptyFolder } from "../features/organization/organization";
+import { NoteInputError } from "../lib/note-errors";
 import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
 import { authorizeFinance, authorizeFinanceNotes } from "../server/auth/finance-authorization";
@@ -336,6 +338,21 @@ if (authorized(["notes:write"])) server.registerTool("delete_note", {
   if (!note) return fail("note not found");
   deleteNote(note.id);
   return ok({ trashed: note.title });
+});
+
+if (authorized(["notes:write"])) server.registerTool("delete_folder", {
+  title: "Delete empty folder",
+  description: "Delete a folder that holds no live notes, including its empty subfolders. Refuses a folder with live notes. Trashed notes inside move to the parent folder and restore there. Only call this when the user explicitly confirms deletion.",
+  inputSchema: z.object({ path: str }).strict(),
+  annotations: MUTATING,
+}, (args: { path: string }) => {
+  if (!authorized(["notes:write"])) return deny();
+  try {
+    return ok({ deleted: args.path, parent: deleteEmptyFolder(args.path) });
+  } catch (error) {
+    if (error instanceof NoteInputError) return fail(error.message);
+    throw error;
+  }
 });
 
 if (authorized(["notes:write"])) server.registerTool("restore_note", {
