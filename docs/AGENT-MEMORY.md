@@ -174,6 +174,11 @@ in the server environment for pruning and hook environments for briefing filteri
 Setup and status show the effective local `stale_days` beside aliases and path
 mappings. It is not a profile field; the server environment is configured separately.
 
+`status` also reports a `cost` block: per-session and total counters of characters
+injected by source (`resume`, `now`, `recall`, `instructions`), checkpoint requests and
+verified activity captures. They are numbers kept in the private per-session state
+files on the device, never content, and a counter failure never fails a hook.
+
 On Agent Now writes, the server ages entries by the later of checkpoint update
 time and the line's UTC date, so Activity can keep an entry fresh. Old entries
 drop out; only checkpoints with `status: active` become `status: stale`. They stay
