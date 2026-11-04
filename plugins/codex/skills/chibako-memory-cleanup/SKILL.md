@@ -68,6 +68,9 @@ merges unless that exact set of changes is already authorized.
 - Use `delete_note` to move approved notes to recoverable Trash. Permanent note
   purge is outside this workflow. `delete_observation` has no Trash recovery;
   explicitly disclose that before obtaining approval for observation deletion.
+- After approved moves and trashing, use `delete_folder` to remove folders the
+  cleanup emptied, once the proposal names them. It refuses folders with live
+  notes; trashed notes inside move to the parent folder and restore there.
 - Verify each result. After a timeout or uncertain outcome, inspect the affected
   item before retrying. Stop dependent removals when a prerequisite fails.
 
