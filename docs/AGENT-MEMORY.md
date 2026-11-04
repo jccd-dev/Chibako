@@ -240,6 +240,14 @@ Evidence in the implementation:
   configured, it fuses vector and keyword rankings, weighting keywords at half
   so they boost semantic matches rather than displace them; otherwise it stays
   local and uses BM25 alone.
+- Stale embeddings repair themselves. The web server (not the stdio process,
+  and not a remote Recall request) runs a scheduled Reindex every 5 minutes at
+  startup and after, embedding up to 200 stale Notes per run in batches of 50
+  ([implementation](../src/lib/embedding-repair.ts)). Staleness comes from
+  stored content hashes, so a restart finds the same Notes again. The existing
+  circuit breaker applies: after repeated provider failures the pass embeds
+  nothing for a minute, and a failing provider never blocks Note writes or
+  Recall, which falls back to keywords.
 - The caller supplies a retrieval budget. Chibako estimates token use from
   character count and stops adding results near that budget
   ([implementation](../src/lib/recall.ts#L167),
