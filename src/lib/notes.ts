@@ -344,10 +344,8 @@ export function searchNotes(query: string, propertyFilters: PropertyFilter[] = [
     return filterByProperties(listNotes(), propertyFilters).map((n) => ({ ...n, snippet: "", score: 0 }));
   }
   if (!terms.length) return [];
-  // Quoting keeps hyphens and FTS keywords (AND/OR/NOT/NEAR) literal in any-term mode.
-  const q = options.anyTerm
-    ? terms.map((t) => `"${t}"*`).join(" OR ")
-    : terms.map((t) => `${t}*`).join(" AND ");
+  // Quoting keeps hyphens and FTS keywords (AND/OR/NOT/NEAR) literal.
+  const q = terms.map((t) => `"${t}"*`).join(options.anyTerm ? " OR " : " AND ");
   const rows = db
     .prepare(`
       SELECT id, bm25(notes_fts, 0.0, 2.0, 1.0, 0.5) AS score, snippet(notes_fts, 2, '<mark>', '</mark>', '…', 14) AS snippet

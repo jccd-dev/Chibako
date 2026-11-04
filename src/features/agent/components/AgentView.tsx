@@ -60,6 +60,7 @@ const TOOL_GROUPS = [
       { name: "memory_save", desc: "Save a durable observation or decision, optionally linked to a note.", when: "the user asks you to remember a pattern or decision." },
       { name: "delete_observation", desc: "Remove an observation from the saved log by ID.", when: "the user asks to remove a specific saved observation." },
       { name: "delete_note", desc: "Move a note to Trash, where it can be restored for 30 days.", when: "the user explicitly confirms deletion." },
+      { name: "delete_folder", desc: "Delete a folder that holds no live notes; trashed notes inside move to its parent.", when: "the user explicitly confirms removing an empty folder." },
       { name: "restore_note", desc: "Restore a trashed note by ID.", when: "the user asks to recover a trashed note." },
       { name: "purge_note", desc: "Permanently delete a trashed note; this cannot be undone.", when: "the user explicitly confirms permanent deletion." },
     ],
