@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { z } from "zod";
 import { dataDir, getDb } from "../../src/lib/db";
-import { recall } from "../../src/lib/recall";
+import { recallDetailed, type RecallFallbackReason } from "../../src/lib/recall";
 
 const TOP_K = 5;
 
@@ -61,6 +61,7 @@ export interface QuestionResult {
   canonical_rank: number | null;
   tokens: number;
   latency_ms: number;
+  fallback_reason: RecallFallbackReason | null;
 }
 
 export interface Bucket { group: Group; split: Split; n: number; hit_at_1: number; hit_at_5: number }
@@ -75,6 +76,8 @@ export interface ScoreboardResult {
     hits_by_source: Record<HitSource, number>;
     tokens: { total: number; mean: number };
     latency_ms: { p50: number; p95: number };
+    /** Share of questions Recall answered with keywords only. */
+    keyword_fallback_rate: number;
   };
   questions: QuestionResult[];
 }
@@ -88,7 +91,7 @@ function isCheckpoint(noteId: string): boolean {
 async function scoreQuestion(q: Question): Promise<QuestionResult> {
   const started = performance.now();
   // refreshStale: false keeps the run from mutating the temporary Vault's Embeddings.
-  const items = await recall({ query: q.question, limit: TOP_K, refreshStale: false });
+  const { results: items, fallback_reason } = await recallDetailed({ query: q.question, limit: TOP_K, refreshStale: false });
   const latency_ms = performance.now() - started;
   const hit = items.findIndex((it) => {
     if (q.expected_title && norm(it.title) === norm(q.expected_title)) return true;
@@ -102,6 +105,7 @@ async function scoreQuestion(q: Question): Promise<QuestionResult> {
     canonical_rank: canonical === -1 ? null : canonical + 1,
     tokens: items.reduce((sum, it) => sum + Math.ceil((it.title.length + it.snippet.length) / 4), 0),
     latency_ms,
+    fallback_reason,
   };
 }
 
@@ -136,6 +140,7 @@ function summarize(rows: QuestionResult[]): ScoreboardResult["summary"] {
     },
     tokens: { total: tokensTotal, mean: rows.length ? tokensTotal / rows.length : 0 },
     latency_ms: { p50: percentile(latencies, 50), p95: percentile(latencies, 95) },
+    keyword_fallback_rate: rate(rows.filter((r) => r.fallback_reason !== null).length, rows.length),
   };
 }
 
@@ -178,6 +183,7 @@ export function formatReport(r: ScoreboardResult): string {
   lines.push(`  hits by source  checkpoint ${s.hits_by_source.checkpoint}  canonical ${s.hits_by_source.canonical}`);
   lines.push(`  recall tokens  total ${s.tokens.total}  mean ${pad(s.tokens.mean, 1)}`);
   lines.push(`  latency ms  p50 ${pad(s.latency_ms.p50, 1)}  p95 ${pad(s.latency_ms.p95, 1)}`);
+  lines.push(`  keyword fallback  ${pad(s.keyword_fallback_rate, 2)}`);
   return lines.join("\n");
 }
 
@@ -196,5 +202,6 @@ export function compareResults(prev: ScoreboardResult, next: ScoreboardResult): 
   note("tokens mean", prev.summary.tokens.mean, next.summary.tokens.mean, 1);
   note("latency p50 ms", prev.summary.latency_ms.p50, next.summary.latency_ms.p50, 1);
   note("latency p95 ms", prev.summary.latency_ms.p95, next.summary.latency_ms.p95, 1);
+  note("keyword fallback", prev.summary.keyword_fallback_rate ?? 0, next.summary.keyword_fallback_rate ?? 0, 2);
   return [`Compared with "${prev.label}" (${prev.created_at})`, ...(lines.length ? lines : ["  no change"])].join("\n");
 }

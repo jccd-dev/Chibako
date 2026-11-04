@@ -58,6 +58,28 @@ export interface EmbeddingStatus {
   rows: number;
   last_error: string | null;
   last_indexed_at: number | null;
+  /** Query Embedding failures; the provider could not embed the Recall query. */
+  query_failures: { timeout: number; provider_error: number };
+  /** Recalls that fell back to keywords, by reason (disabled is configuration, not counted). */
+  query_fallbacks: { timeout: number; provider_error: number; no_vectors: number };
+  last_query_failure_reason: "timeout" | "provider_error" | null;
+  last_query_failure_at: number | null;
+}
+
+export type QueryFallbackReason = "timeout" | "provider_error" | "no_vectors";
+
+/** Count a keyword fallback. Stores the reason and time only, never the query. */
+export function recordQueryFallback(reason: QueryFallbackReason): void {
+  const meta = getMeta();
+  if (reason === "no_vectors") {
+    setMeta({ query_no_vectors: meta.query_no_vectors + 1 });
+    return;
+  }
+  setMeta(
+    reason === "timeout"
+      ? { query_timeouts: meta.query_timeouts + 1, last_query_failure_reason: reason, last_query_failure_at: now() }
+      : { query_provider_errors: meta.query_provider_errors + 1, last_query_failure_reason: reason, last_query_failure_at: now() },
+  );
 }
 
 function isFresh(note: Note, provider: EmbeddingProvider): boolean {
@@ -229,5 +251,9 @@ export function embeddingStatus(): EmbeddingStatus {
     rows: countEmbeddings(),
     last_error: meta.last_error,
     last_indexed_at: meta.last_indexed_at,
+    query_failures: { timeout: meta.query_timeouts, provider_error: meta.query_provider_errors },
+    query_fallbacks: { timeout: meta.query_timeouts, provider_error: meta.query_provider_errors, no_vectors: meta.query_no_vectors },
+    last_query_failure_reason: meta.last_query_failure_reason,
+    last_query_failure_at: meta.last_query_failure_at,
   };
 }

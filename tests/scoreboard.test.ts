@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { assertTemporaryDataDir, compareResults, loadQuestions, runScoreboard, saveResult, type ScoreboardResult } from "../scripts/scoreboard/scoreboard";
+import { assertTemporaryDataDir, compareResults, formatReport, loadQuestions, runScoreboard, saveResult, type ScoreboardResult } from "../scripts/scoreboard/scoreboard";
 import { createFixtureVault, FIXTURE_QUESTIONS } from "../scripts/scoreboard/fixture/vault";
 import { staleNoteIds } from "../src/lib/embedding-index";
 import { updateNote, listNotes } from "../src/lib/notes";
@@ -65,6 +65,25 @@ test("tune run scores hit rates by group and split, tokens, latency and hit sour
   assert.deepEqual(result.summary.hits_by_source, { checkpoint: 1, canonical: 4 });
   assert.ok(result.summary.tokens.total > 0 && result.summary.tokens.mean > 0);
   assert.ok(result.summary.latency_ms.p50 >= 0 && result.summary.latency_ms.p95 >= result.summary.latency_ms.p50);
+});
+
+test("the report shows the keyword fallback rate", async () => {
+  const questions = loadQuestions(FIXTURE_QUESTIONS);
+  const hybrid = await runScoreboard({ questions });
+  assert.equal(hybrid.summary.keyword_fallback_rate, 0);
+  assert.match(formatReport(hybrid), /keyword fallback\s+0\.00/);
+
+  const provider = process.env.CHIBAKO_EMBEDDING_PROVIDER;
+  delete process.env.CHIBAKO_EMBEDDING_PROVIDER;
+  try {
+    const keyword = await runScoreboard({ questions });
+    assert.equal(keyword.summary.keyword_fallback_rate, 1);
+    assert.ok(keyword.questions.every((q) => q.fallback_reason === "disabled"));
+    assert.match(formatReport(keyword), /keyword fallback\s+1\.00/);
+    assert.match(compareResults(hybrid, keyword), /keyword fallback.*0\.00 -> 1\.00/);
+  } finally {
+    process.env.CHIBAKO_EMBEDDING_PROVIDER = provider;
+  }
 });
 
 test("a final run also scores hidden questions", async () => {
