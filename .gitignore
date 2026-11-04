@@ -25,6 +25,10 @@ test-results/
 PRD/
 .scratch/
 
+# Scoreboard: private question files and saved results (default location is .scratch/)
+*.questions.local.json
+scoreboard-results/
+
 # Agent configs & skills (all agents)
 .agent/
 .agents/*

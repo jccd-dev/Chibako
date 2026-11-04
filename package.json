@@ -13,6 +13,7 @@
     "lint": "eslint src tests updater \"*.{js,cjs,mjs,ts,tsx}\" --max-warnings 0",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "scoreboard": "node --import tsx scripts/scoreboard.ts",
     "test:mcp-stdio": "npm run build:mcp && node --import tsx tests/mcp-stdio.smoke.ts && node --import tsx tests/finance/finance-stdio.smoke.ts",
     "test:e2e": "playwright test",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/mcp/server.mjs",
