@@ -69,6 +69,19 @@ _Avoid_: Excerpt, preview
 
 ### Agent memory
 
+**Scoreboard**:
+A developer tool (`npm run scoreboard`) that runs a question file through Recall
+and reports hit rate at top 1 and top 5 by group (`saved`, `conversation-only`)
+and split (`tune`, `hidden`), Recall tokens returned, p50/p95 latency, and whether
+each hit landed in a checkpoint or a canonical Note. Each run has two passes: a normal
+pass (cold query cache, real time limit) gives latency and keyword fallback, then a ranking
+pass with every query Embedding available gives hit rates, hit sources and tokens. Hit rates
+are the stable figure; tokens can shift slightly when a near-tie changes the result set. Scoring is by simple rules, with
+no model judge. It runs only on a temporary Vault with lazy refresh off, scores
+`hidden` questions only for a final result, and saves each run for comparison. Real
+questions stay in git-ignored local files; the repository holds only a fake fixture.
+_Avoid_: Benchmark, eval
+
 **Thread key**:
 An optional SHA-256 hash of a host thread identifier, sent as `thread_key` to
 resolve one checkpoint across model/runtime switches under the same API-key

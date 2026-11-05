@@ -1,4 +1,4 @@
-import { now } from "./db";
+import { MaintenanceError, now } from "./db";
 import { listNotes, getNote, type Note } from "./notes";
 import {
   getEmbeddingProvider,
@@ -29,6 +29,7 @@ const BATCH = 100;
 const DEFAULT_MAX = 200;
 const BREAKER_MS = 60_000;
 const BREAKER_THRESHOLD = 3;
+const QUERY_LATENCY_SAMPLES = 200;
 const SCAN_TTL_MS = 10_000;
 
 let consecutiveFailures = 0;
@@ -58,6 +59,41 @@ export interface EmbeddingStatus {
   rows: number;
   last_error: string | null;
   last_indexed_at: number | null;
+  /** Query Embedding failures; the provider could not embed the Recall query. */
+  query_failures: { timeout: number; provider_error: number };
+  /** Recalls that fell back to keywords, by reason (disabled is configuration, not counted). */
+  query_fallbacks: { timeout: number; provider_error: number; no_vectors: number };
+  last_query_failure_reason: "timeout" | "provider_error" | null;
+  last_query_failure_at: number | null;
+  /** How long the Provider took to answer recent query Embeddings, including answers after the time limit. Calls that fail or never answer are not timed; see query_failures. */
+  query_latency: { samples: number; p50_ms: number | null; p95_ms: number | null; max_ms: number | null };
+}
+
+export type QueryFallbackReason = "timeout" | "provider_error" | "no_vectors";
+
+/** Count a keyword fallback. Stores the reason and time only, never the query. */
+export function recordQueryFallback(reason: QueryFallbackReason): void {
+  const meta = getMeta();
+  if (reason === "no_vectors") {
+    setMeta({ query_no_vectors: meta.query_no_vectors + 1 });
+    return;
+  }
+  setMeta(
+    reason === "timeout"
+      ? { query_timeouts: meta.query_timeouts + 1, last_query_failure_reason: reason, last_query_failure_at: now() }
+      : { query_provider_errors: meta.query_provider_errors + 1, last_query_failure_reason: reason, last_query_failure_at: now() },
+  );
+}
+
+/** Keep one answer time. Stores the number only, never the query. */
+export function recordQueryLatency(ms: number): void {
+  setMeta({ query_latency_ms: [...getMeta().query_latency_ms, Math.round(ms)].slice(-QUERY_LATENCY_SAMPLES) });
+}
+
+function queryLatencyFigures(times: number[]): EmbeddingStatus["query_latency"] {
+  const sorted = [...times].sort((a, b) => a - b);
+  const nearestRank = (p: number) => sorted[Math.ceil((p / 100) * sorted.length) - 1] ?? null;
+  return { samples: sorted.length, p50_ms: nearestRank(50), p95_ms: nearestRank(95), max_ms: sorted.at(-1) ?? null };
 }
 
 function isFresh(note: Note, provider: EmbeddingProvider): boolean {
@@ -114,11 +150,11 @@ function syncMeta(provider: EmbeddingProvider): void {
     (provider.dim > 0 && meta.dim !== provider.dim);
   if (changed) {
     deleteAllEmbeddings();
-    setMeta({ model: provider.model, dim: provider.dim, input_version: INPUT_VERSION });
+    setMeta({ model: provider.model, dim: provider.dim, input_version: INPUT_VERSION, query_latency_ms: [] });
   }
 }
 
-/** Embed the given note ids. Never throws; records failure state instead. */
+/** Embed the given note ids. Provider failures are recorded, not thrown; a maintenance fence (MaintenanceError) propagates. */
 export async function refreshNotes(ids: string[]): Promise<number> {
   const provider = getEmbeddingProvider();
   if (!provider || ids.length === 0) return 0;
@@ -160,6 +196,7 @@ export async function refreshNotes(ids: string[]): Promise<number> {
       consecutiveFailures = 0;
       setMeta({ last_error: null, last_indexed_at: now() });
     } catch (e) {
+      if (e instanceof MaintenanceError) throw e; // a maintenance fence is not a provider failure
       consecutiveFailures++;
       const message = e instanceof Error ? e.message : String(e);
       setMeta({ last_error: message.slice(0, 300) });
@@ -217,6 +254,7 @@ export function embeddingStatus(): EmbeddingStatus {
   const provider = getEmbeddingProvider();
   const meta = getMeta();
   const current = provider ? cachedScan() : { total: listNotes().length, indexed: 0, staleIds: [] as string[] };
+  const query_failures = { timeout: meta.query_timeouts, provider_error: meta.query_provider_errors };
   return {
     enabled: Boolean(provider),
     provider: provider?.id ?? "disabled",
@@ -229,5 +267,10 @@ export function embeddingStatus(): EmbeddingStatus {
     rows: countEmbeddings(),
     last_error: meta.last_error,
     last_indexed_at: meta.last_indexed_at,
+    query_failures,
+    query_fallbacks: { ...query_failures, no_vectors: meta.query_no_vectors },
+    last_query_failure_reason: meta.last_query_failure_reason,
+    last_query_failure_at: meta.last_query_failure_at,
+    query_latency: queryLatencyFigures(meta.query_latency_ms),
   };
 }

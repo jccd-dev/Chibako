@@ -7,7 +7,7 @@ import type { MemoryFailure } from "./client-error";
 import { z } from "zod";
 import type { MemoryCall } from "./runtime";
 
-const MEMORY_REQUEST_TIMEOUT_MS = 5000;
+export const MEMORY_REQUEST_TIMEOUT_MS = 5000;
 
 export const requiredScopes = ["notes:read", "schema:read", "memory:write"];
 export const memoryStatusSchema = z.object({

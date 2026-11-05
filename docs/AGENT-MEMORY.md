@@ -42,7 +42,7 @@ sequenceDiagram
     participant MCP as Chibako MCP
     participant DB as SQLite vault
 
-    Agent->>MCP: recall(query, limit, budget)
+    Agent->>MCP: recall(query, project, limit, budget)
     MCP->>DB: Rank matching notes
     DB-->>Agent: Titles and trimmed snippets
 
@@ -174,6 +174,11 @@ in the server environment for pruning and hook environments for briefing filteri
 Setup and status show the effective local `stale_days` beside aliases and path
 mappings. It is not a profile field; the server environment is configured separately.
 
+`status` also reports a `cost` block: per-session and total counters of characters
+injected by source (`resume`, `now`, `recall`, `instructions`), checkpoint requests and
+verified activity captures. They are numbers kept in the private per-session state
+files on the device, never content, and a counter failure never fails a hook.
+
 On Agent Now writes, the server ages entries by the later of checkpoint update
 time and the line's UTC date, so Activity can keep an entry fresh. Old entries
 drop out; only checkpoints with `status: active` become `status: stale`. They stay
@@ -235,17 +240,47 @@ Evidence in the implementation:
   configured, it fuses vector and keyword rankings, weighting keywords at half
   so they boost semantic matches rather than displace them; otherwise it stays
   local and uses BM25 alone.
-- The caller supplies a retrieval budget. Chibako estimates token use from
-  character count and stops adding results near that budget
-  ([implementation](../src/lib/recall.ts#L167),
-  [test](../tests/recall/recall.test.ts#L7)).
+- Stale embeddings repair themselves. The web server (not the stdio process,
+  and not a remote Recall request) runs a scheduled Reindex every 5 minutes at
+  startup and after, embedding up to 200 stale Notes per run in batches of 50
+  ([implementation](../src/lib/embedding-repair.ts)). Staleness comes from
+  stored content hashes, so a restart finds the same Notes again. The existing
+  circuit breaker applies: after repeated provider failures the pass embeds
+  nothing for a minute, and a failing provider never blocks Note writes or
+  Recall, which falls back to keywords.
+- The caller supplies a retrieval budget, and it is a hard limit. Chibako
+  estimates token use from character count (`characters / 4`) and gives each
+  result at most an even share of what is left, so one long Note cannot use the
+  whole allowance; a share a result does not use rolls forward to the next. The
+  budget is a ceiling, not a target: a Snippet never exceeds 380 estimated
+  tokens. Once a result's share reaches that ceiling, more budget adds no text
+  to its Snippet
+  ([implementation](../src/lib/recall.ts),
+  [test](../tests/recall/recall-hard-budget.test.ts)).
+- Each result carries a Snippet, never the full body: a short window of the
+  Note around the area where the most query terms appear together, with
+  punctuation ignored (`osprey?` matches `osprey`). `matched` lists the query
+  terms found in the title or Snippet.
+- Recall cleans the query before the keyword search: common English and Tagalog
+  filler words (leading or trailing punctuation ignored, so `i18n` and `a11y`
+  stay) are dropped, and when only filler remains the original terms are used.
+  Exact Search keeps every term.
+- The optional `project` is a ranking hint, not search text. Notes whose folder
+  has a segment equal to the project rank higher; none are added or removed.
+  It must be a project name as hooks send it (lowercase letters, digits, `.`,
+  `_` or `-`, up to 64 characters); REST answers 400 and MCP rejects anything else.
+- Agent Now and Activity notes are left out of Recall (Search and the Note list
+  still show them). Each result has the Note's `status` (`draft`, `active`,
+  `done`, `archived` or `null`). Archived Notes rank below current ones among
+  the top `limit` results but are still found, so an exact match to an old Note
+  is not cut by weaker current ones.
 - [`ingest_note`](../src/mcp/create-server.ts#L397) combines a note, its outlinks,
   backlinks, and the Knowledge Schema in one MCP call. This saves round trips;
   its full note body can still be large.
 
-The token budget is approximate. Chibako currently estimates tokens with
-`characters / 4`, trims snippets by words, and may return the first result even
-when it exceeds the requested budget. Claims such as “exact token cap” or a
+The token count is an estimate. Chibako currently estimates tokens with
+`characters / 4`, trims Snippets by characters, and never returns more than the
+requested budget in total by that estimate. Claims such as “exact token cap” or a
 specific percentage saved would require tokenizer-based measurements and a
 repeatable benchmark. The supported claim is: **Chibako lets callers target a
 context budget and avoids loading full note bodies during discovery.**

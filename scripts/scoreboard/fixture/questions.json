@@ -1,0 +1,10 @@
+[
+  { "id": "host", "question": "Which provider hosts the server and why", "group": "saved", "expected_title": "Hosting Decision", "split": "tune" },
+  { "id": "store", "question": "What database is the only store", "group": "saved", "expected_title": "Database Choice", "canonical_note": "Database Choice", "split": "tune" },
+  { "id": "launch", "question": "blastoff steps", "group": "saved", "expected_title": "Launch Checklist", "split": "tune" },
+  { "id": "cents", "question": "how is money rounded and stored", "group": "saved", "expected_phrase": "integer cents", "canonical_note": "Money Handling", "split": "tune" },
+  { "id": "tax", "question": "what is the open tax rate question", "group": "saved", "expected_phrase": "tax rate", "canonical_note": "Money Handling", "split": "tune" },
+  { "id": "tag", "question": "who publishes tagged releases", "group": "saved", "expected_title": "Release Process", "split": "hidden" },
+  { "id": "lost", "question": "what was the pineapple deadline we discussed", "group": "conversation-only", "expected_phrase": "pineapple deadline", "split": "tune" },
+  { "id": "lost-hidden", "question": "which mango vendor did we reject", "group": "conversation-only", "expected_phrase": "mango vendor", "split": "hidden" }
+]

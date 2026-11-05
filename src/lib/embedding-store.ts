@@ -22,10 +22,22 @@ export interface EmbeddingMeta {
   input_version: number;
   last_error: string | null;
   last_indexed_at: number | null;
+  // Query-time counters. Reasons only, never query text or provider messages.
+  query_timeouts: number;
+  query_provider_errors: number;
+  query_no_vectors: number;
+  last_query_failure_reason: "timeout" | "provider_error" | null;
+  last_query_failure_at: number | null;
+  /** Most recent Provider answer times for query Embeddings, oldest first. Numbers only. */
+  query_latency_ms: number[];
 }
 
 const META_KEY = "embedding_meta";
-const EMPTY_META: EmbeddingMeta = { model: "", dim: 0, input_version: 0, last_error: null, last_indexed_at: null };
+const EMPTY_META: EmbeddingMeta = {
+  model: "", dim: 0, input_version: 0, last_error: null, last_indexed_at: null,
+  query_timeouts: 0, query_provider_errors: 0, query_no_vectors: 0,
+  last_query_failure_reason: null, last_query_failure_at: null, query_latency_ms: [],
+};
 
 // Monotonic counter bumped on every mutation. The index uses it to invalidate
 // its short-lived scan cache without re-hashing the whole vault.

@@ -510,7 +510,9 @@ test("the project resolves once per session and scopes Agent Now order, recall a
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("UserPromptSubmit", { cwd: "/elsewhere", turn_id: "turn-1" }) });
   assert.equal(resolved, 1);
   assert.deepEqual(calls.find(({ name }) => name === "memory_read"), { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } }, "Agent Now is global; the project only orders it");
-  assert.match(String(calls.find(({ name }) => name === "recall")!.args.query), /^atlas Resume/);
+  const recallArgs = calls.find(({ name }) => name === "recall")!.args;
+  assert.equal(recallArgs.query, "Resume", "the project is not search text");
+  assert.equal(recallArgs.project, "atlas", "the project is passed as a ranking hint");
   const result = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject, input: event("Checkpoint"),
     stage: { checkpoint: { title: "Atlas", content: "Progress", expected_revision: null } } });
   assert.equal(result.staged, true);

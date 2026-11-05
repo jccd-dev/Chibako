@@ -1,6 +1,6 @@
 import { getMemoryStatus, readMemory, writeMemory } from "../features/memory/memory";
 import { sessionMemory } from "../features/memory/session-memory";
-import { MemoryError, memoryReadSchema, memoryWriteSchema, sessionMemoryToolSchema } from "../features/memory/types";
+import { MemoryError, memoryReadSchema, memoryWriteSchema, projectSchema, sessionMemoryToolSchema } from "../features/memory/types";
 import type { ApiKeyPrincipal } from "../server/auth/api-key-authorization";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -24,7 +24,7 @@ import {
   type PropertyFilter,
 } from "../lib/notes";
 import {
-  recall,
+  recallDetailed,
   saveObservation,
   listObservations,
   deleteObservation,
@@ -179,14 +179,14 @@ if (authorized(["notes:read", "search:read"])) server.registerTool("search_notes
 
 if (authorized(["notes:read", "search:read"])) server.registerTool("recall", {
   title: "Recall relevant context (token-budgeted)",
-  description: "Semantic recall, the recommended way to load context. Always BM25-ranked; when embeddings are enabled (CHIBAKO_EMBEDDING_*) it fuses vector similarity too. Returns only ranked titles + trimmed snippets, capped at a token budget — never full note bodies. Use this instead of search_notes when you want context, not a full dump.",
-  inputSchema: z.object({ query: str, limit: z.number().int().min(1).max(50).optional(), budget: z.number().int().min(100).max(20000).optional() }).strict(),
+  description: "Semantic recall, the recommended way to load context. Always BM25-ranked; when embeddings are enabled (CHIBAKO_EMBEDDING_*) it fuses vector similarity too. Returns only ranked titles + trimmed snippets, capped at a token budget — never full note bodies. `mode` is `hybrid` or `keyword`; when `keyword`, `fallback_reason` (timeout, provider_error, disabled, no_vectors) says why semantic search did not contribute. Each item has the Note's `status` (draft, active, done, archived, or null); archived Notes rank below current ones, and Agent Now and Activity notes are left out (search_notes still finds them). Optional `project` is a ranking hint only: Notes in that project rank higher, but it is never matched as search text. Use this instead of search_notes when you want context, not a full dump.",
+  inputSchema: z.object({ query: str, project: projectSchema.optional(), limit: z.number().int().min(1).max(50).optional(), budget: z.number().int().min(100).max(20000).optional() }).strict(),
   annotations: READ_ONLY,
-}, async (args: { query: string; limit?: number; budget?: number }) => {
+}, async (args: { query: string; project?: string; limit?: number; budget?: number }) => {
   if (!authorized(["notes:read", "search:read"])) return deny();
   try {
-    const items = await recall({ query: args.query, limit: args.limit, budget: args.budget, refreshStale: options.exposure === "local" });
-    return ok({ count: items.length, results: items });
+    const { results, mode, fallback_reason } = await recallDetailed({ query: args.query, project: args.project, limit: args.limit, budget: args.budget, refreshStale: options.exposure === "local" });
+    return ok({ count: results.length, results, mode, fallback_reason });
   } catch (e) {
     return fail(`recall failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -246,7 +246,7 @@ if (options.exposure === "local" && authorized(["notes:write", "schema:write"]))
 
 if (authorized(["notes:read"])) server.registerTool("embedding_status", {
   title: "Embedding status",
-  description: "Check whether semantic embeddings are enabled, the active provider/model/dimensions, how many notes are indexed, how many are stale, and the last error (if any).",
+  description: "Check whether semantic embeddings are enabled, the active provider/model/dimensions, how many notes are indexed, how many are stale, the last indexing error (if any), query-time failure and keyword-fallback counts with the last failure reason and time, and query Embedding latency (p50, p95, max) over recent Provider answers.",
   inputSchema: z.object({}).strict(),
   annotations: READ_ONLY,
 }, () => {
