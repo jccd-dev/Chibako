@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -156,5 +156,9 @@ test("--source-dir style backup copies the database into a temp dir and cleanup 
     copy.cleanup();
   }
   assert.equal(existsSync(copy.dir), false);
+  // A failed backup must not leave its empty temp directory behind.
+  const copies = () => readdirSync(tmpdir()).filter((n) => n.startsWith("chibako-scoreboard-copy-"));
+  const before = copies();
   await assert.rejects(backupVaultToTemp(join(tmpdir(), "does-not-exist-chibako")));
+  assert.deepEqual(copies(), before);
 });
