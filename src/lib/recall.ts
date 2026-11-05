@@ -58,32 +58,46 @@ export function rrf(rankings: Array<Array<{ id: string }>>, weights: number[] = 
 
 // ---------- token-budget snippet ----------
 
-/** Trim content to at most `maxChars` characters (ellipses included), centered on the densest query-term hit. */
-function trimmedSnippet(raw: string, query: string, maxChars: number): string {
+const CHARS_PER_TOKEN = 4;
+const tokensFor = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
+
+/** Leading and trailing punctuation only, so `osprey?` becomes `osprey` while `i18n` and `a11y` stay whole. */
+const stripEdgePunctuation = (term: string) => term.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+
+/** Lowercase query terms without edge punctuation, for matching text. */
+function queryTerms(query: string): string[] {
+  return [...new Set(query.toLowerCase().split(/\s+/).map(stripEdgePunctuation).filter(Boolean))];
+}
+
+/**
+ * Trim content to at most `maxChars` characters (ellipses included). The window holds the most distinct
+ * query terms, then the most hits, and is centered on the hits inside it.
+ */
+function trimmedSnippet(raw: string, terms: string[], maxChars: number): string {
   const content = raw.replace(/\s+/g, " ").trim();
   if (content.length <= maxChars) return content;
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const lower = content.toLowerCase();
-  let best = -1;
-  let bestCount = 0;
-  for (const t of terms) {
-    let idx = lower.indexOf(t);
-    while (idx !== -1) {
-      let count = 0;
-      let j = idx;
-      while (j !== -1) {
-        count++;
-        j = lower.indexOf(t, j + t.length);
-      }
-      if (count > bestCount) {
-        bestCount = count;
-        best = idx;
-      }
-      idx = -1;
-    }
+  const hits: Array<{ at: number; end: number; term: string }> = [];
+  for (const term of terms) {
+    for (let at = lower.indexOf(term); at !== -1; at = lower.indexOf(term, at + term.length)) hits.push({ at, end: at + term.length, term });
   }
+  hits.sort((a, b) => a.at - b.at);
   const room = Math.max(0, maxChars - 2); // reserve both possible ellipses
-  const start = best === -1 ? 0 : Math.min(Math.max(0, best - Math.floor(room / 2)), content.length - room);
+  let center = 0;
+  let bestDistinct = 0;
+  let bestHits = 0;
+  // Each window starts at a hit; ties keep the earliest.
+  hits.forEach((first, i) => {
+    const inside = [];
+    for (let j = i; j < hits.length && hits[j].at < first.at + room; j++) inside.push(hits[j]);
+    const distinct = new Set(inside.map((h) => h.term)).size;
+    if (distinct > bestDistinct || (distinct === bestDistinct && inside.length > bestHits)) {
+      bestDistinct = distinct;
+      bestHits = inside.length;
+      center = (first.at + inside[inside.length - 1].end) / 2;
+    }
+  });
+  const start = bestDistinct === 0 ? 0 : Math.min(Math.max(0, Math.floor(center - room / 2)), content.length - room);
   const end = start + room;
   return `${start > 0 ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`.slice(0, maxChars);
 }
@@ -91,7 +105,7 @@ function trimmedSnippet(raw: string, query: string, maxChars: number): string {
 // ---------- query cleaning ----------
 
 // Filler words stop matching in Recall only; exact Search keeps every term.
-// shortcut: short hand-picked English list plus common Tagalog, tune from Scoreboard misses.
+// shortcut: short hand-picked English list plus common Tagalog, tune from recall misses.
 const FILLER = new Set((
   "a an and are as at be been but by can could did do does for from had has have how i if in is it its me my of on or our so than that the their them then there these they this to us was we were what when where which who why will with would you your " +
   "ang ay ba din na ng sa mga si ni kay ko mo ka ako ikaw siya kami tayo sila ito iyan iyon at o pero kasi para pa naman lang po ano paano bakit saan kailan sino"
@@ -100,7 +114,7 @@ const FILLER = new Set((
 /** Drops filler terms for the keyword query; when nothing is left, the original terms stay. */
 function cleanQuery(query: string): string {
   const terms = query.split(/\s+/).filter(Boolean);
-  const kept = terms.filter((t) => !FILLER.has(t.toLowerCase().replace(/[^a-z]/g, "")));
+  const kept = terms.filter((t) => !FILLER.has(stripEdgePunctuation(t).toLowerCase()));
   return (kept.length ? kept : terms).join(" ");
 }
 
@@ -110,7 +124,7 @@ function inProject(folder: string, project: string): boolean {
   return folder.toLowerCase().split("/").includes(wanted);
 }
 
-// shortcut: flat 1.3x boost, ticket 10 tunes it against the Scoreboard.
+// shortcut: flat 1.3x boost, ticket 10 tunes it against the tune split.
 const PROJECT_BOOST = 1.3;
 
 // ---------- public recall API ----------
@@ -169,38 +183,55 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
   const rankings = vec ? [bm25, vec.map((v) => ({ id: v.id }))] : [bm25];
   const vectorScores = vec ? new Map(vec.map((v) => [v.id, v.score])) : null;
 
+  const byId = new Map<string, NoteSummary>(listNotes().map((n) => [n.id, n]));
   // Any-term keyword hits are broad in large vaults: let them boost semantic
   // matches, not displace them. shortcut: fixed 0.5 weight, tune from pilot recall samples.
-  // Bookkeeping notes are left out; archived ones sink below current ones but stay findable.
-  // shortcut: strict demotion, ticket 10 tunes it against the tune split.
-  const byId = new Map<string, NoteSummary>(listNotes().map((n) => [n.id, n]));
-  const skip = bookkeepingNoteIds();
-  const project = opts.project?.trim();
-  const ranked = rrf(rankings, [0.5, 1])
-    .filter(({ id }) => !skip.has(id))
-    .map((r) => { const folder = byId.get(r.id)?.folder; return project && folder !== undefined && inProject(folder, project) ? { ...r, score: r.score * PROJECT_BOOST } : r; })
-    .sort((a, b) => b.score - a.score);
-  const isArchived = ({ id }: { id: string }) => byId.get(id)?.properties.status === "archived";
-  const fused = [...ranked.filter((r) => !isArchived(r)), ...ranked.filter(isArchived)];
-  const terms = keywords.toLowerCase().split(/\s+/).filter(Boolean);
+  const fused = rrf(rankings, [0.5, 1]);
+  const candidates = selectCandidates(fused, byId, opts.project?.trim(), limit);
+  const terms = queryTerms(keywords);
 
+  // Each result may use at most an even share of what is left, so one long Note cannot take the whole
+  // allowance; a share it leaves unused rolls forward. The total stays a hard limit.
   const items: RecallItem[] = [];
-  let tokens = 0;
-  for (const { id, score } of fused.slice(0, limit)) {
+  let used = 0;
+  for (const [index, { id, score }] of candidates.entries()) {
     const summary = byId.get(id);
     if (!summary) continue;
     const full = getNote(id);
     if (!full) continue;
 
-    const titleTokens = Math.ceil(summary.title.length / 4);
-    const snippetTokens = budget - tokens - titleTokens;
-    if (snippetTokens < 1) break; // hard limit: no room left for even a tiny Snippet
-    const snippet = trimmedSnippet(stripFrontmatter(full.content), keywords, snippetTokens * 4);
-    tokens += titleTokens + Math.ceil(snippet.length / 4);
+    const share = Math.floor((budget - used) / (candidates.length - index));
+    const titleTokens = tokensFor(summary.title);
+    const snippetRoom = share - titleTokens; // tokens this result's Snippet may use
+    if (snippetRoom < 1) continue; // no room for even a tiny Snippet; later results may have a larger share
+    const snippet = trimmedSnippet(stripFrontmatter(full.content), terms, snippetRoom * CHARS_PER_TOKEN);
+    used += titleTokens + tokensFor(snippet);
     items.push(buildItem(summary, snippet, score, vectorScores, terms));
   }
 
   return { results: items, mode: vec ? "hybrid" : "keyword", fallback_reason: fallback };
+}
+
+/**
+ * Picks the Notes Recall may return: bookkeeping Notes are left out, Notes in the project get a boost, the best `limit`
+ * by score are kept, and archived Notes go after current ones within that window. Archived Notes compete for a place
+ * on score first, so an exact match to an old Note is not cut by weaker current ones.
+ * shortcut: strict demotion inside the window, ticket 10 tunes it against the tune split.
+ */
+function selectCandidates(
+  fused: Array<{ id: string; score: number }>,
+  byId: Map<string, NoteSummary>,
+  project: string | undefined,
+  limit: number,
+): Array<{ id: string; score: number }> {
+  const hidden = bookkeepingNoteIds();
+  const top = fused
+    .filter(({ id }) => !hidden.has(id))
+    .map((r) => { const folder = byId.get(r.id)?.folder; return project && folder !== undefined && inProject(folder, project) ? { ...r, score: r.score * PROJECT_BOOST } : r; })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+  const isArchived = ({ id }: { id: string }) => byId.get(id)?.properties.status === "archived";
+  return [...top.filter((r) => !isArchived(r)), ...top.filter(isArchived)];
 }
 
 /**

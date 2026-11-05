@@ -39,8 +39,54 @@ test('total tokens across all results stay within the budget', async () => {
       createNote({ title: `Note ${i}`, content: `${'lorem ipsum '.repeat(120)} zebrafish ${'dolor sit '.repeat(120)}` });
     }
     const results = await recall({ query: 'zebrafish', budget: 300, limit: 6 });
-    assert(results.length >= 1);
+    assert.equal(results.length, 6, 'every candidate gets a share');
     assert(results.reduce((sum, r) => sum + tokens(r), 0) <= 300);
+  });
+});
+
+// Story 22: one long Note must not consume the whole allowance. 2000 is the default, 1600 is the hook's.
+for (const budget of [undefined, 1600]) {
+  test(`several long Notes each get a share of the ${budget ?? 'default'} budget`, async () => {
+    await withVault(async ({ createNote, recall }) => {
+      for (let i = 0; i < 6; i++) {
+        createNote({ title: `Long ${i}`, content: `${'lorem ipsum '.repeat(600)} zebrafish ${'dolor sit '.repeat(600)}` });
+      }
+      const results = await recall({ query: 'zebrafish', limit: 6, ...(budget ? { budget } : {}) });
+      assert.equal(results.length, 6);
+      assert(results.reduce((sum, r) => sum + tokens(r), 0) <= (budget ?? 2000));
+      assert(results.every((r) => r.snippet.includes('zebrafish')));
+    });
+  });
+}
+
+test('a short Note leaves its unused share to the Notes after it', async () => {
+  await withVault(async ({ createNote, recall }) => {
+    createNote({ title: 'Short', content: 'zebrafish zebrafish zebrafish zebrafish' });
+    createNote({ title: 'Long', content: `${'lorem ipsum '.repeat(600)} zebrafish ${'dolor sit '.repeat(600)}` });
+    const results = await recall({ query: 'zebrafish', budget: 400, limit: 2 });
+    const long = results.find((r) => r.title === 'Long')!;
+    assert(tokens(long) > 200, `the long Note used ${tokens(long)} tokens, more than an even half`);
+    assert(results.reduce((sum, r) => sum + tokens(r), 0) <= 400);
+  });
+});
+
+test('the snippet matches a term followed by punctuation and reports it as matched', async () => {
+  await withVault(async ({ createNote, recall }) => {
+    const head = Array.from({ length: 400 }, (_, i) => `head${i}`).join(' ');
+    createNote({ title: 'Birds', content: `${head} the osprey nests here ${head}` });
+    const [hit] = await recall({ query: 'where is the osprey?', budget: 100 });
+    assert(hit.snippet.includes('osprey'));
+    assert.deepEqual(hit.matched, ['osprey']);
+  });
+});
+
+test('the snippet shows the area where the query terms sit together, not the first or densest single term', async () => {
+  await withVault(async ({ createNote, recall }) => {
+    const filler = (tag: string) => Array.from({ length: 300 }, (_, i) => `${tag}${i}`).join(' ');
+    createNote({ title: 'Pair', content: `alpha alpha alpha alpha ${filler('a')} alpha beta ${filler('b')}` });
+    const [hit] = await recall({ query: 'alpha beta', budget: 100 });
+    assert(hit.snippet.includes('alpha beta'), hit.snippet);
+    assert(!hit.snippet.includes('a0 '), 'the top of the note is not shown');
   });
 });
 

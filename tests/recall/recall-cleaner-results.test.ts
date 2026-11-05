@@ -53,3 +53,13 @@ test('archived notes rank below current ones, stay findable, and items carry the
   assert(byTitle['Old ravenwing ravenwing'].rank > byTitle['Current ravenwing'].rank);
   assert(byTitle['Old ravenwing ravenwing'].rank > byTitle['Unlabelled ravenwing'].rank);
 });
+
+test('an archived exact-title match survives behind weaker current notes at a small limit, and still ranks below them', async () => {
+  const term = 'quokkalore';
+  createNote({ title: term, content: `${term} ${term}`, properties: { status: 'archived' } });
+  for (let i = 0; i < 6; i++) createNote({ title: `Passing mention ${i}`, content: `${'filler words here '.repeat(80)} ${term} ${'more filler '.repeat(80)}`, properties: { status: 'active' } });
+  const results = await recall({ query: term, limit: 5 });
+  assert.equal(results.length, 5);
+  assert.equal(results[4].title, term, 'archived Note is kept, placed after the current ones');
+  assert(results.slice(0, 4).every((r) => r.status === 'active'));
+});

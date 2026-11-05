@@ -34,9 +34,13 @@ restricted memory scope does not grant general Note-write authority.
 0. With automatic memory, use the resumed checkpoint when supplied, or open the
    relevant checkpoint from the startup Agent Now index.
    If it is the same task or handoff, continue it rather than starting a new one.
-1. Call `recall` with a short query containing the project and topic. A useful
-   starting point is `{ "query": "project authentication decisions", "limit": 5,
-   "budget": 2000 }`. Results contain snippets, not complete notes.
+1. Call `recall` with a short query about the topic. Pass the project as
+   `project`, a ranking hint: the project name is not search text, so leave it out
+   of the query. A useful starting point is `{ "query": "authentication decisions",
+   "project": "myproject", "limit": 5, "budget": 2000 }`. Results contain snippets,
+   not complete notes. Each has a `status`; archived Notes rank below current
+   ones, and Agent Now and Activity notes are left out (use `search_notes` for
+   those).
 2. Call `list_observations({ "limit": 20 })` once at session start to inspect
    recent decisions and preferences. **Recall does not search observations.**
    This list is newest-first and has no query, project filter, or pagination;
