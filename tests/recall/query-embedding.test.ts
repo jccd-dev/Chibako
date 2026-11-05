@@ -63,11 +63,11 @@ after(async () => {
   rmSync(vault, { recursive: true, force: true });
 });
 
-test('timeout env var accepts positive integers up to 30000 and falls back to 6000 otherwise', async () => {
+test('timeout env var accepts positive integers up to 30000 and falls back to 4000 otherwise', async () => {
   const { queryEmbedTimeoutMs } = await import('../../src/lib/query-embedding');
   const cases: Array<[string | undefined, number]> = [
-    [undefined, 6000], ['', 6000], ['2500', 2500], [' 30000 ', 30000], ['1', 1],
-    ['0', 6000], ['-5', 6000], ['1.5', 6000], ['abc', 6000], ['30001', 6000], ['1e3', 6000],
+    [undefined, 4000], ['', 4000], ['2500', 2500], [' 30000 ', 30000], ['1', 1],
+    ['0', 4000], ['-5', 4000], ['1.5', 4000], ['abc', 4000], ['30001', 4000], ['1e3', 4000],
   ];
   for (const [raw, expected] of cases) {
     if (raw === undefined) delete process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS;
