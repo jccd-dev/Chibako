@@ -9,11 +9,13 @@ import type { EmbeddingProvider } from '../../src/lib/embeddings';
 const vault = mkdtempSync(join(tmpdir(), 'chibako-query-embedding-test-'));
 process.env.CHIBAKO_DATA_DIR = vault;
 delete process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS;
+delete process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS;
 
 let server: Server;
 let delayMs = 0;
 let failNext = 0;
 let queryCalls = 0;
+let callPlan: Array<{ delayMs: number; fail?: boolean }> = []; // one entry per query call, in order; overrides delayMs and failNext
 
 before(async () => {
   server = createServer((req, res) => {
@@ -23,16 +25,18 @@ before(async () => {
       const input = JSON.parse(body).input as string[];
       const isQuery = input[0] === 'slow query words';
       if (isQuery) queryCalls++;
+      const planned = isQuery ? callPlan.shift() : undefined;
       const reply = () => {
-        if (isQuery && failNext > 0) {
-          failNext--;
+        if (planned?.fail || (!planned && isQuery && failNext > 0)) {
+          if (!planned) failNext--;
           res.writeHead(500).end('boom');
           return;
         }
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ data: input.map(() => ({ embedding: [1, 0, 0, 0] })) }));
       };
-      if (isQuery && delayMs) setTimeout(reply, delayMs);
+      const wait = planned ? planned.delayMs : isQuery ? delayMs : 0;
+      if (wait) setTimeout(reply, wait);
       else reply();
     });
   });
@@ -52,7 +56,9 @@ afterEach(async () => {
   delayMs = 0;
   failNext = 0;
   queryCalls = 0;
+  callPlan = [];
   delete process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS;
+  delete process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS;
   (await import('../../src/lib/query-embedding')).clearQueryEmbeddingCache();
 });
 
@@ -103,6 +109,109 @@ test('a failed provider call is not cached and reports provider_error', async ()
   const second = await recallDetailed({ query: 'slow query words', refreshStale: false });
   assert.equal(second.mode, 'hybrid');
   assert.equal(queryCalls, 2, 'the failure was retried, not cached');
+});
+
+test('retry delay env var accepts 0 to turn the retry off, and falls back to 1500 otherwise', async () => {
+  const { queryRetryDelayMs } = await import('../../src/lib/query-embedding');
+  const cases: Array<[string | undefined, number]> = [
+    [undefined, 1500], ['', 1500], ['2000', 2000], [' 0 ', 0], ['-5', 1500], ['1.5', 1500], ['abc', 1500], ['30001', 1500],
+  ];
+  for (const [raw, expected] of cases) {
+    if (raw === undefined) delete process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS;
+    else process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS = raw;
+    assert.equal(queryRetryDelayMs(), expected, `value ${JSON.stringify(raw)}`);
+  }
+});
+
+/** Recall with a 50 ms retry delay and a 600 ms limit, against the planned Provider calls. */
+async function recallWithRetry(plan: typeof callPlan) {
+  process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS = '50';
+  process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS = '600';
+  callPlan = plan;
+  const { recallDetailed } = await import('../../src/lib/recall');
+  const start = performance.now();
+  const result = await recallDetailed({ query: 'slow query words', refreshStale: false });
+  return { result, ms: performance.now() - start };
+}
+
+test('a slow first call is rescued by the extra call, and the first answer wins', async () => {
+  const { result, ms } = await recallWithRetry([{ delayMs: 2000 }, { delayMs: 0 }]);
+  assert.equal(result.mode, 'hybrid');
+  assert.equal(result.fallback_reason, null);
+  assert.equal(queryCalls, 2);
+  assert(ms < 500, 'recall took the extra call\'s answer without waiting for the slow one');
+});
+
+test('a call that answers before the delay makes no extra call', async () => {
+  const { result } = await recallWithRetry([{ delayMs: 0 }]);
+  assert.equal(result.mode, 'hybrid');
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(queryCalls, 1);
+});
+
+test('a first call that fails before the delay is not retried', async () => {
+  const { result } = await recallWithRetry([{ delayMs: 0, fail: true }]);
+  assert.equal(result.fallback_reason, 'provider_error');
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(queryCalls, 1);
+});
+
+test('a first call that fails after the extra call started does not fail Recall', async () => {
+  const { result } = await recallWithRetry([{ delayMs: 100, fail: true }, { delayMs: 200 }]);
+  assert.equal(result.mode, 'hybrid');
+  assert.equal(result.fallback_reason, null);
+});
+
+test('an extra call that fails does not fail Recall while the first can still answer', async () => {
+  const { result } = await recallWithRetry([{ delayMs: 200 }, { delayMs: 0, fail: true }]);
+  assert.equal(result.mode, 'hybrid');
+  assert.equal(result.fallback_reason, null);
+});
+
+test('when both calls fail, Recall reports provider_error', async () => {
+  const { result } = await recallWithRetry([{ delayMs: 100, fail: true }, { delayMs: 0, fail: true }]);
+  assert.equal(result.mode, 'keyword');
+  assert.equal(result.fallback_reason, 'provider_error');
+  assert.equal(queryCalls, 2);
+});
+
+test('when both calls are slow, Recall still answers at the limit and makes only one extra call', async () => {
+  const { result, ms } = await recallWithRetry([{ delayMs: 900 }, { delayMs: 900 }]);
+  assert.equal(result.fallback_reason, 'timeout');
+  assert(ms < 850, 'recall returned at the limit, not at provider speed');
+  await new Promise((r) => setTimeout(r, 450));
+  assert.equal(queryCalls, 2);
+});
+
+test('a retry delay of 0 turns the extra call off', async () => {
+  process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS = '0';
+  process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS = '100';
+  delayMs = 200;
+  const { recallDetailed } = await import('../../src/lib/recall');
+  const result = await recallDetailed({ query: 'slow query words', refreshStale: false });
+  assert.equal(result.fallback_reason, 'timeout');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(queryCalls, 1);
+});
+
+test('both answers of a retried query are reported, each timed from its own call', async () => {
+  process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS = '50';
+  const { embedQuery } = await import('../../src/lib/query-embedding');
+  const waits = [200, 0];
+  const provider: EmbeddingProvider = {
+    id: 'fake', model: 'retry-report', dim: 2,
+    embed: async (t) => {
+      await new Promise((r) => setTimeout(r, waits.shift()));
+      return t.map(() => [1, 0]);
+    },
+  };
+  const answers: number[] = [];
+  await embedQuery(provider, 'q', (ms) => answers.push(ms));
+  assert.equal(answers.length, 1, 'the extra call answered first');
+  assert(answers[0] < 50, 'the extra call is timed from its own start, not the query start');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(answers.length, 2, 'the slow first call still reports its late answer');
+  assert(answers[1] >= 190);
 });
 
 function countingProvider(model = 'm'): EmbeddingProvider & { calls: number } {
