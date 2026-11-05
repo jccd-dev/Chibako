@@ -116,8 +116,8 @@ Chibako keeps your notes and agent memory together on your own server.
     `recall` (token-budgeted retrieval), `read_note`, `get_links`, `create_note`,
     `update_note`, `ingest_note` (token-efficient bundle), `delete_note` (trash),
     `delete_folder` (empty folders only), `restore_note`, `purge_note`, `get_graph`, `get_knowledge_schema`,
-    `get_stats`, plus `memory_save` / `list_observations` / `delete_observation`
-    (observation log) and `index_embeddings` / `embedding_status`
+    `get_stats`, plus `memory_save` (saves a Fact note) and the legacy
+    `list_observations` / `delete_observation` and `index_embeddings` / `embedding_status`
 - **Token efficiency by design** — raw Markdown bodies, id-only list/links
   payloads, single-call `ingest_note`, and `recall` snippets targeted to an
   approximate token budget

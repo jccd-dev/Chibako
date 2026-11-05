@@ -41,22 +41,17 @@ restricted memory scope does not grant general Note-write authority.
    not complete notes. Each has a `status`; archived Notes rank below current
    ones, and Agent Now and Activity notes are left out (use `search_notes` for
    those).
-2. Call `list_observations({ "limit": 20 })` once at session start to inspect
-   recent decisions and preferences. **Recall does not search observations.**
-   This list is newest-first and has no query, project filter, or pagination;
-   disregard unrelated entries. Increase the limit only when older context is
-   needed (maximum 500). An empty match is not proof that no older memory exists.
-3. Read relevant matches with `read_note({ "id": "..." })`. Use
+2. Read relevant matches with `read_note({ "id": "..." })`. Use
    `ingest_note({ "id": "..." })` when links and backlinks are useful too; it
    also returns the schema. Either tool accepts an exact `title` instead of `id`.
-4. If recall misses a known topic, try `search_notes({ "query": "..." })` with
+3. If recall misses a known topic, try `search_notes({ "query": "..." })` with
    alternate terms or read a known exact title. Use `list_notes` for deliberate
    browsing, not a routine dump of every note.
 
 Reuse loaded context while it remains relevant. Search again when the topic
 changes or fresh information matters. Do not read every linked note, repeatedly
 fetch the schema, or initialize embeddings as part of an ordinary task.
-For important claims, identify the supporting note title or observation and
+For important claims, identify the supporting note title and
 distinguish saved claims from facts verified during the current task.
 
 ## Save durable knowledge when authorized
@@ -74,26 +69,30 @@ not authorize reorganizing existing notes or changing the schema.
 - Save confirmed, reusable preferences, decisions with reasons, or lessons.
   Skip temporary status, repeated facts, guesses, raw transcripts, credentials,
   and sensitive information the user has not asked to retain.
-- Use `memory_save({ "content": "...", "source": "..." })` for a concise
-  observation. Include the project/topic and enough context to stand alone in
-  a new chat. Use an honest source label, such as `user-confirmed decision`;
-  include `note_id` only when you have resolved an existing note's ID.
+- Use `memory_save({ "content": "...", "source": "..." })` for a concise fact,
+  decision or preference. It becomes a Fact note that Recall finds and the user
+  can edit. Include enough context to stand alone in a new chat. Pass `project`
+  (a lowercase slug) to file it under that project; omit it for cross-project
+  facts. A title is derived from the content unless you pass `title`. Use an
+  honest source label, such as `user-confirmed decision`; include `note_id` only
+  when you have resolved an existing note's ID, and it becomes a Wikilink.
 - Use `create_note` or `update_note` for substantial, searchable knowledge:
   project handoffs, canonical decisions, guides, or accumulated lessons.
-  Important long-lived knowledge belongs in notes because observations have
-  only bounded recent-list retrieval. Do not duplicate every save in both.
+  Substantial or structured knowledge belongs in a full note rather than a Fact
+  note. Do not duplicate every save in both.
 - Search before creating. Before updating, read the current note and preserve
   unrelated content: `update_note.content` replaces the body, it does not append.
   Pass only changed fields. Check `get_property_defs` before setting properties;
   use the schema's conventions and `[[Exact Note Title]]` links. Backlinks are
   maintained by Chibako, not handwritten.
 - Preserve the provenance of conflicting claims. State which decision supersedes
-  which and why when confirmed; keep conflicting observations rather than
-  deleting them, and do not change the knowledge schema as routine memory
+  which and why when confirmed; keep conflicting facts rather than
+  deleting them (to retire one, set its `status` to `archived` and link its
+  replacement), and do not change the knowledge schema as routine memory
   maintenance.
 - Inspect the write result before reporting success. If a write times out or
-  its outcome is uncertain, inspect recent observations or the target note
-  before retrying to avoid duplicates. Report unresolved failures clearly.
+  its outcome is uncertain, recall the fact or inspect the target note
+  before retrying (an identical `memory_save` retry returns the same Note) to avoid duplicates. Report unresolved failures clearly.
 
 ## Write for the intended reader
 
@@ -177,8 +176,8 @@ authorize rewriting existing notes or broadening a targeted edit.
 - Preserve partial dates and uncertainty in prose. Resolve relative dates only
   from a known source date and relevant timezone; otherwise keep the wording and
   flag ambiguity. Never substitute today's date for an unknown event date.
-- `memory_save` observations support content, source, and note_id, not arbitrary
-  properties. Include meaningful dates and provenance in their content.
+- `memory_save` supports content, title, project, source and note_id, not arbitrary
+  properties. Include meaningful dates and provenance in the content.
   Restricted automatic `memory_session` checkpoints also have no properties field:
   keep dates in their content and stay in the configured memory folder. Do not
   use general Note tools to bypass those restrictions.

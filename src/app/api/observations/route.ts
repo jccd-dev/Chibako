@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { withAuth } from "@/lib/api";
-import { listObservations, saveObservation } from "@/lib/recall";
+import { saveFact } from "@/features/memory/facts";
+import { MemoryError } from "@/features/memory/types";
+import { listObservations } from "@/lib/recall";
 
 export const GET = withAuth("notes:read", async (req: NextRequest) => {
   const limit = Math.max(1, Math.min(500, Number(req.nextUrl.searchParams.get("limit") ?? 50)));
@@ -13,10 +15,11 @@ export const POST = withAuth("notes:write", async (req: NextRequest) => {
   if (!body || typeof body !== "object" || typeof body.content !== "string" || !body.content.trim()) {
     return Response.json({ error: "content is required" }, { status: 400 });
   }
-  const obs = saveObservation({
-    content: body.content,
-    note_id: typeof body.note_id === "string" ? body.note_id : undefined,
-    source: typeof body.source === "string" ? body.source : undefined,
-  });
-  return Response.json({ observation: obs }, { status: 201 });
+  try {
+    // Same capability and response shape as the MCP memory_save tool.
+    return Response.json({ observation: saveFact(body) }, { status: 201 });
+  } catch (e) {
+    if (e instanceof MemoryError) return Response.json({ error: e.message, code: e.code }, { status: e.status });
+    throw e;
+  }
 });

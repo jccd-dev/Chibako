@@ -13,7 +13,7 @@ flowchart LR
     B --> C[(brain.db)]
     C --> D[Knowledge Schema]
     C --> E[Markdown notes]
-    C --> F[Observations]
+    C --> F[Fact notes]
     E --> G[FTS5 / BM25]
     E -. optional .-> H[Embeddings]
     G --> I[Ranked snippets]
@@ -22,7 +22,7 @@ flowchart LR
 ```
 
 The chat itself is not copied into Chibako. Reusable knowledge comes from saved
-notes and observations; hooks can also save a bounded metadata-only Activity
+notes and Fact notes; hooks can also save a bounded metadata-only Activity
 record. A later chat can access it when its MCP connection points to the same
 `brain.db` vault.
 
@@ -32,7 +32,7 @@ The three stored forms have different jobs:
 |---|---|---|
 | Knowledge Schema | Vault-specific rules for naming, linking, properties, and compilation | `get_knowledge_schema` or `ingest_note` |
 | Notes | Canonical, substantial knowledge in Markdown | `recall`, `search_notes`, `read_note`, `ingest_note` |
-| Observations | Short decisions, preferences, and lessons | `list_observations` |
+| Fact notes | Short decisions, preferences, and lessons saved with `memory_save` (ordinary Notes in the memory folder) | `recall`, `search_notes`, `read_note` |
 
 ## A typical session
 
@@ -295,7 +295,7 @@ context budget and avoids loading full note bodies during discovery.**
 
 ## Access and ownership
 
-Chibako stores notes, links, settings, observations, search data, and optional
+Chibako stores notes, links, settings, legacy observations, search data, and optional
 embeddings in one SQLite vault. API keys are hashed, revocable, and scoped. A
 read-only agent can receive `notes:read`, `search:read`, and `schema:read`; add
 `notes:write` only when that agent should save knowledge.
@@ -330,8 +330,10 @@ half-indexed vault.
 ## Current limits
 
 - Chibako does not automatically capture chat transcripts.
-- `recall` searches notes; observations are retrieved separately and currently
-  have no query filter.
+- `memory_save` writes a Fact note when `CHIBAKO_MEMORY_FOLDER` is set, so
+  `recall` finds it. Without a memory folder it writes a legacy observation row,
+  which only `list_observations` reads. Existing observation rows stay until the
+  owner approves a mapping into Notes.
 - Token budgeting is estimated rather than tokenizer-enforced.
 - Semantic recall needs an OpenAI-compatible embedding provider; keyword recall
   works without one.

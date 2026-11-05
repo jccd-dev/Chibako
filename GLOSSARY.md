@@ -95,6 +95,15 @@ with its revision. Matching ignores case, repeated whitespace and legacy
 `(runtime-hex)` suffixes; open records precede finished records, then newest wins.
 _Avoid_: Per-task session (one session can cover several tasks)
 
+**Fact note**:
+An ordinary Note holding one fact, decision or preference saved with `memory_save`.
+It lives in the project's memory folder (the memory area root when cross-project),
+uses the `wiki` memory role, links its related Note with a Wikilink, and is found by
+Recall. Outdated facts are set to `status: archived` with a Wikilink to the
+replacement. Without a memory folder, `memory_save` still writes a legacy
+observation row.
+_Avoid_: Observation (the older table of rows outside Notes)
+
 **Activity note**:
 The bounded metadata log in each project's memory folder, with at most 30 entries.
 Hooks record runtime/date, available git metadata and work counts without prompts

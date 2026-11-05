@@ -33,7 +33,6 @@ const TOOL_GROUPS = [
     label: "Find context",
     tools: [
       { name: "get_knowledge_schema", desc: "Read the vault&apos;s instructions for organizing and linking notes.", when: "starting a session (once)." },
-      { name: "list_observations", desc: "List recent saved decisions and patterns.", when: "checking what earlier sessions learned." },
       { name: "list_notes", desc: "List note IDs, titles, folders, kinds, and non-empty properties; no note bodies.", when: "browsing or filtering the vault by folder, kind, or property." },
       { name: "search_notes", desc: "Search note titles and content; returns matches with snippets and supports property filters.", when: "a phrase or exact term should locate a note." },
       { name: "recall", desc: "Return BM25-ranked snippets within a token budget; also fuses vector similarity when embeddings are enabled.", when: "gathering relevant context across notes." },
@@ -57,8 +56,9 @@ const TOOL_GROUPS = [
       { name: "create_note", desc: "Create a Markdown note with optional title, folder, kind, and properties.", when: "the user asks to add a note." },
       { name: "update_note", desc: "Patch note fields; renaming a note also repoints its backlinks.", when: "the user asks to edit or move a note." },
       { name: "set_properties", desc: "Merge property values into a note's frontmatter; null removes a property.", when: "the user asks to change note metadata." },
-      { name: "memory_save", desc: "Save a durable observation or decision, optionally linked to a note.", when: "the user asks you to remember a pattern or decision." },
-      { name: "delete_observation", desc: "Remove an observation from the saved log by ID.", when: "the user asks to remove a specific saved observation." },
+      { name: "memory_save", desc: "Save a durable fact or decision as a Note that recall finds, optionally linked to a note.", when: "the user asks you to remember a pattern or decision." },
+      { name: "list_observations", desc: "List legacy observation rows saved before Fact notes.", when: "the user asks to review old saved observations." },
+      { name: "delete_observation", desc: "Remove a legacy observation row by ID.", when: "the user asks to remove a specific saved observation." },
       { name: "delete_note", desc: "Move a note to Trash, where it can be restored for 30 days.", when: "the user explicitly confirms deletion." },
       { name: "delete_folder", desc: "Delete a folder that holds no live notes; trashed notes inside move to its parent.", when: "the user explicitly confirms removing an empty folder." },
       { name: "restore_note", desc: "Restore a trashed note by ID.", when: "the user asks to recover a trashed note." },
@@ -153,7 +153,7 @@ bearer_token_env_var = "CHIBAKO_API_KEY"`;
         <h2 className="text-sm font-semibold tracking-tight">Recommended agent workflow</h2>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-muted-foreground marker:text-foreground">
           <li>Read <code className="font-mono text-xs text-foreground">get_knowledge_schema</code> once at the start of the session.</li>
-          <li>Check <code className="font-mono text-xs text-foreground">list_observations</code>; use <code className="font-mono text-xs text-foreground">recall</code> for relevant context or <code className="font-mono text-xs text-foreground">search_notes</code> for literal terms.</li>
+          <li>Use <code className="font-mono text-xs text-foreground">recall</code> for relevant context or <code className="font-mono text-xs text-foreground">search_notes</code> for literal terms.</li>
           <li>After finding a note, use <code className="font-mono text-xs text-foreground">ingest_note</code> when you need its full content, links, and schema.</li>
           <li>Use write or reindex tools only when the user asks; require explicit confirmation before deleting, especially permanent purge.</li>
         </ol>

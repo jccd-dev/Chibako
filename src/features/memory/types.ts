@@ -80,6 +80,16 @@ export const sessionMemoryToolSchema = sessionIdentity.extend({
   entry: activityEntrySchema.optional().describe("activity: metadata only (branch, head, up to 10 repo-relative files, counts); hooks send it"),
 }).strict();
 
+// memory_save input. Content keeps the legacy 200k cap for observation rows; a Fact note is limited again by memoryWriteSchema.
+export const factSaveSchema = z.object({
+  content: z.string().max(200_000),
+  note_id: z.string().max(200_000).optional(),
+  source: z.string().max(200_000).optional(),
+  title: memoryWriteSchema.shape.title.refine((value) => !/[[\]|]/.test(value), "Title cannot contain [, ] or |").optional(),
+  project: projectSchema.optional(),
+}).strict();
+export type FactSaveInput = z.infer<typeof factSaveSchema>;
+
 export class MemoryError extends Error {
   constructor(message: string, public status: number, public code: string) {
     super(message);
