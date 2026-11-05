@@ -130,7 +130,9 @@ Chibako keeps your notes and agent memory together on your own server.
   to keyword results; query embeddings are cached in memory for an hour. The
   default sits under the 5000 ms limit memory hooks give a request, so a slow
   provider yields keyword results instead of no memory; keep a custom value
-  below 5000 if hooks use the server.
+  below 5000 if hooks use the server. Embedding status (`GET /api/embeddings`,
+  MCP `embedding_status`) reports query latency over the last 200 Provider
+  answers as numbers only, never query text.
 - **Single admin auth** — password login + DB-backed sessions; one-time setup
 - **Light / dark theme**, keyboard-driven UI, responsive mobile drawer
 - **One file to back up** — the whole vault is `data/brain.db`

@@ -29,6 +29,7 @@ const BATCH = 100;
 const DEFAULT_MAX = 200;
 const BREAKER_MS = 60_000;
 const BREAKER_THRESHOLD = 3;
+const QUERY_LATENCY_SAMPLES = 200;
 const SCAN_TTL_MS = 10_000;
 
 let consecutiveFailures = 0;
@@ -64,6 +65,8 @@ export interface EmbeddingStatus {
   query_fallbacks: { timeout: number; provider_error: number; no_vectors: number };
   last_query_failure_reason: "timeout" | "provider_error" | null;
   last_query_failure_at: number | null;
+  /** How long the Provider took to answer recent query Embeddings, including answers after the time limit. Calls that fail or never answer are not timed; see query_failures. */
+  query_latency: { samples: number; p50_ms: number | null; p95_ms: number | null; max_ms: number | null };
 }
 
 export type QueryFallbackReason = "timeout" | "provider_error" | "no_vectors";
@@ -80,6 +83,17 @@ export function recordQueryFallback(reason: QueryFallbackReason): void {
       ? { query_timeouts: meta.query_timeouts + 1, last_query_failure_reason: reason, last_query_failure_at: now() }
       : { query_provider_errors: meta.query_provider_errors + 1, last_query_failure_reason: reason, last_query_failure_at: now() },
   );
+}
+
+/** Keep one answer time. Stores the number only, never the query. */
+export function recordQueryLatency(ms: number): void {
+  setMeta({ query_latency_ms: [...getMeta().query_latency_ms, Math.round(ms)].slice(-QUERY_LATENCY_SAMPLES) });
+}
+
+function queryLatencyFigures(times: number[]): EmbeddingStatus["query_latency"] {
+  const sorted = [...times].sort((a, b) => a - b);
+  const nearestRank = (p: number) => sorted[Math.ceil((p / 100) * sorted.length) - 1] ?? null;
+  return { samples: sorted.length, p50_ms: nearestRank(50), p95_ms: nearestRank(95), max_ms: sorted.at(-1) ?? null };
 }
 
 function isFresh(note: Note, provider: EmbeddingProvider): boolean {
@@ -136,7 +150,7 @@ function syncMeta(provider: EmbeddingProvider): void {
     (provider.dim > 0 && meta.dim !== provider.dim);
   if (changed) {
     deleteAllEmbeddings();
-    setMeta({ model: provider.model, dim: provider.dim, input_version: INPUT_VERSION });
+    setMeta({ model: provider.model, dim: provider.dim, input_version: INPUT_VERSION, query_latency_ms: [] });
   }
 }
 
@@ -257,5 +271,6 @@ export function embeddingStatus(): EmbeddingStatus {
     query_fallbacks: { ...query_failures, no_vectors: meta.query_no_vectors },
     last_query_failure_reason: meta.last_query_failure_reason,
     last_query_failure_at: meta.last_query_failure_at,
+    query_latency: queryLatencyFigures(meta.query_latency_ms),
   };
 }

@@ -101,3 +101,16 @@ test('a malformed project hint is rejected the same way through REST and MCP', a
     assert.notEqual((await rpc(key, 'recall', { query: 'rollout', project })).isError, true);
   }
 });
+
+test('query Embedding latency is the same through REST and MCP', async () => {
+  process.env.CHIBAKO_EMBEDDING_PROVIDER = 'fake';
+  try {
+    const { key } = createApiKey('latency reader', ['notes:read', 'search:read']);
+    await rpc(key, 'recall', { query: 'latency parity question' });
+    const status = (await (await restGet(restEmbeddings, rest(key, 'embeddings'))).json()).status;
+    assert.equal(status.query_latency.samples, 1);
+    assert.deepEqual((await rpc(key, 'embedding_status', {})).structuredContent.query_latency, status.query_latency);
+  } finally {
+    delete process.env.CHIBAKO_EMBEDDING_PROVIDER;
+  }
+});

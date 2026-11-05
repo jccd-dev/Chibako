@@ -37,16 +37,19 @@ function cacheKey(p: EmbeddingProvider, text: string): string | null {
 
 /**
  * Embeds one query within the time limit. A call that finishes after the limit still fills the cache,
- * so the same query is instant next time; failed calls are never cached.
+ * so the same query is instant next time; failed calls are never cached. `onAnswer` gets the Provider's answer time,
+ * late answers included; cache hits and failed calls make no report.
  */
-export async function embedQuery(provider: EmbeddingProvider, text: string): Promise<number[] | undefined> {
+export async function embedQuery(provider: EmbeddingProvider, text: string, onAnswer?: (ms: number) => void): Promise<number[] | undefined> {
   const key = cacheKey(provider, text);
   const hit = key === null ? undefined : cache.get(key);
   if (key !== null && hit) {
     if (Date.now() - hit.at < QUERY_CACHE_TTL_MS) return hit.vec;
     cache.delete(key);
   }
+  const started = performance.now();
   const call = provider.embed([text]).then(([vec]) => {
+    onAnswer?.(performance.now() - started);
     if (vec && key !== null) {
       cache.delete(key);
       cache.set(key, { vec, at: Date.now() });

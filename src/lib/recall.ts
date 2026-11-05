@@ -5,7 +5,7 @@ import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
 import { embedQuery, QueryEmbedTimeout } from "./query-embedding";
 import { listEmbeddings } from "./embedding-store";
 import { bookkeepingNoteIds } from "../features/memory/session-memory";
-import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, type QueryFallbackReason } from "./embedding-index";
+import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, recordQueryLatency, type QueryFallbackReason } from "./embedding-index";
 
 // ---------- vector search ----------
 
@@ -27,7 +27,7 @@ function cosine(a: number[], b: number[]): number {
 async function vectorSearch(query: string, limit: number): Promise<Array<{ id: string; score: number }>> {
   const provider = getEmbeddingProvider();
   if (!provider) return [];
-  const qvec = await embedQuery(provider, query);
+  const qvec = await embedQuery(provider, query, recordLatencyBestEffort);
   if (!qvec) return [];
   const fresh = freshEmbeddingIds();
   const scored: Array<{ id: string; score: number }> = [];
@@ -281,8 +281,17 @@ async function vectorHalf(
 /** Counters must never break a read-only Recall. */
 function recordFallbackBestEffort(reason: QueryFallbackReason): void {
   try {
-    // The one write on this read path: a settings counter that never touches notes, embeddings, the store version or scan cache, so results are unaffected.
+    // Writes on this read path touch only a settings counter, never notes, embeddings, the store version or scan cache, so results are unaffected.
     recordQueryFallback(reason);
+  } catch {
+    // Metrics are advisory.
+  }
+}
+
+/** Runs from the Provider's answer, which can land after Recall has returned, so nothing here may throw. */
+function recordLatencyBestEffort(ms: number): void {
+  try {
+    recordQueryLatency(ms);
   } catch {
     // Metrics are advisory.
   }
