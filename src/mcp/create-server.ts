@@ -179,13 +179,13 @@ if (authorized(["notes:read", "search:read"])) server.registerTool("search_notes
 
 if (authorized(["notes:read", "search:read"])) server.registerTool("recall", {
   title: "Recall relevant context (token-budgeted)",
-  description: "Semantic recall, the recommended way to load context. Always BM25-ranked; when embeddings are enabled (CHIBAKO_EMBEDDING_*) it fuses vector similarity too. Returns only ranked titles + trimmed snippets, capped at a token budget — never full note bodies. `mode` is `hybrid` or `keyword`; when `keyword`, `fallback_reason` (timeout, provider_error, disabled, no_vectors) says why semantic search did not contribute. Use this instead of search_notes when you want context, not a full dump.",
-  inputSchema: z.object({ query: str, limit: z.number().int().min(1).max(50).optional(), budget: z.number().int().min(100).max(20000).optional() }).strict(),
+  description: "Semantic recall, the recommended way to load context. Always BM25-ranked; when embeddings are enabled (CHIBAKO_EMBEDDING_*) it fuses vector similarity too. Returns only ranked titles + trimmed snippets, capped at a token budget — never full note bodies. `mode` is `hybrid` or `keyword`; when `keyword`, `fallback_reason` (timeout, provider_error, disabled, no_vectors) says why semantic search did not contribute. Optional `project` is a ranking hint only: Notes in that project rank higher, but it is never matched as search text. Use this instead of search_notes when you want context, not a full dump.",
+  inputSchema: z.object({ query: str, project: z.string().max(100).optional(), limit: z.number().int().min(1).max(50).optional(), budget: z.number().int().min(100).max(20000).optional() }).strict(),
   annotations: READ_ONLY,
-}, async (args: { query: string; limit?: number; budget?: number }) => {
+}, async (args: { query: string; project?: string; limit?: number; budget?: number }) => {
   if (!authorized(["notes:read", "search:read"])) return deny();
   try {
-    const { results, mode, fallback_reason } = await recallDetailed({ query: args.query, limit: args.limit, budget: args.budget, refreshStale: options.exposure === "local" });
+    const { results, mode, fallback_reason } = await recallDetailed({ query: args.query, project: args.project, limit: args.limit, budget: args.budget, refreshStale: options.exposure === "local" });
     return ok({ count: results.length, results, mode, fallback_reason });
   } catch (e) {
     return fail(`recall failed: ${e instanceof Error ? e.message : String(e)}`);
