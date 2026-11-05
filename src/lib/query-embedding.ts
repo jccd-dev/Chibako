@@ -2,7 +2,8 @@ import type { EmbeddingProvider } from "./embeddings";
 
 // ---------- query embedding: time limit + small cache ----------
 
-const DEFAULT_TIMEOUT_MS = 6000;
+// Must stay under the memory hook's 5000 ms request limit (scripts/memory/connection.ts) with room for the rest of Recall; tests/automatic-memory holds that.
+const DEFAULT_TIMEOUT_MS = 4000;
 const MAX_TIMEOUT_MS = 30000;
 export const QUERY_CACHE_MAX = 200;
 export const QUERY_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -14,7 +15,7 @@ export class QueryEmbedTimeout extends Error {
   }
 }
 
-/** CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS: positive integer up to 30000, otherwise the 6000 ms default. Read lazily so tests can toggle it. */
+/** CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS: positive integer up to 30000, otherwise the 4000 ms default. Read lazily so tests can toggle it. */
 export function queryEmbedTimeoutMs(): number {
   const raw = (process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS ?? "").trim();
   if (!/^\d+$/.test(raw)) return DEFAULT_TIMEOUT_MS;
