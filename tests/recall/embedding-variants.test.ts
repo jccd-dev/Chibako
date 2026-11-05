@@ -60,7 +60,7 @@ test('refreshNotes hash-skips notes that are already fresh', async () => {
   assert.equal(await index.refreshNotes([note.id]), 0, 'no provider work for a fresh note');
 });
 
-test('switching the model wipes old vectors and reindexes', async () => {
+test('switching the model replaces old vectors and reindexes', async () => {
   process.env.CHIBAKO_EMBEDDING_MODEL = 'fake-model-a';
   notes.createNote({ title: 'Switchy', content: 'model switch body' });
   await index.reindexEmbeddings();

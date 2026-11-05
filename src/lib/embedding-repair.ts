@@ -25,7 +25,8 @@ export async function runEmbeddingRepair(opts: { batch?: number; passes?: number
     for (let pass = 0; pass < (opts.passes ?? PASSES); pass++) {
       const result = await reindexEmbeddings({ max: opts.batch ?? BATCH });
       indexed += result.indexed;
-      if (result.indexed === 0 || result.remaining === 0) break; // done, disabled, or breaker/provider failure
+      // Done, disabled, or the Provider stopped mid-pass (failure, limit): the next tick carries on instead of calling it again now.
+      if (result.indexed < (opts.batch ?? BATCH) || result.remaining === 0) break;
     }
   } catch (error) {
     if (!(error instanceof MaintenanceError)) console.error(`Embedding repair failed: ${error instanceof Error ? error.message : "Unknown error"}`);

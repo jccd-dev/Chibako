@@ -56,8 +56,8 @@ export function memoryRevision(note: Note): string {
   return hash([note.id, note.title, note.folder, note.content, note.kind, note.is_pinned]);
 }
 
-function owner(principal: ApiKeyPrincipal, input: { role: string; session_id: string }): string {
-  return input.role === "session" ? JSON.stringify([principal.id, input.session_id]) : "shared";
+function owner(actorId: string, input: { role: string; session_id: string }): string {
+  return input.role === "session" ? JSON.stringify([actorId, input.session_id]) : "shared";
 }
 
 function findRecord(folder: string, role: string, subject: string, ownerId: string): MemoryRecord | undefined {
@@ -83,7 +83,7 @@ export function readMemory(principal: ApiKeyPrincipal, raw: unknown): { note: No
   const input = parsed.data;
   const folder = memoryFolder(area, input.project);
   return getDb().transaction(() => {
-    const record = findRecord(folder, input.role, input.subject, owner(principal, input));
+    const record = findRecord(folder, input.role, input.subject, owner(principal.id, input));
     if (!record) return { note: null, revision: null };
     const note = eligibleNote(record);
     return { note, revision: memoryRevision(note) };
@@ -98,19 +98,20 @@ export function writeMemory(principal: ApiKeyPrincipal, raw: unknown): MemoryRec
   if (input.role === "preference" && !input.confirmation) {
     throw new MemoryError("Preferences require a confirmation source and scope", 400, "confirmation_required");
   }
-  return getDb().transaction(() => persist(principal, memoryFolder(area, input.project), input)).immediate();
+  return getDb().transaction(() => persist(principal.id, memoryFolder(area, input.project), input)).immediate();
 }
 
-function persist(principal: ApiKeyPrincipal, folder: string, input: MemoryWriteInput): MemoryReceipt {
+/** Shared by checkpoints and Fact notes: one idempotent, revision-checked Note write. Callers authorize and run it in a transaction. */
+export function persist(actorId: string, folder: string, input: MemoryWriteInput): MemoryReceipt {
   const db = getDb();
   const fingerprint = hash([folder, input.request_id, input.role, input.subject, input.session_id, input.title, input.content, input.expected_revision, input.confirmation ?? null]);
   const previous = db.prepare("SELECT fingerprint, note_id, revision FROM memory_requests WHERE actor_id = ? AND request_id = ?")
-    .get(principal.id, input.request_id) as { fingerprint: string; note_id: string; revision: string } | undefined;
+    .get(actorId, input.request_id) as { fingerprint: string; note_id: string; revision: string } | undefined;
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new MemoryError("Request identity reused with different content", 409, "request_conflict");
     return { note_id: previous.note_id, revision: previous.revision, request_id: input.request_id, saved: true };
   }
-  const ownerId = owner(principal, input);
+  const ownerId = owner(actorId, input);
   const record = findRecord(folder, input.role, input.subject, ownerId);
   let note: Note;
   if (record) {
@@ -129,6 +130,6 @@ function persist(principal: ApiKeyPrincipal, folder: string, input: MemoryWriteI
   }
   const result: MemoryReceipt = { note_id: note.id, revision: memoryRevision(note), request_id: input.request_id, saved: true };
   db.prepare("INSERT INTO memory_requests (actor_id, request_id, fingerprint, note_id, revision, session_id, confirmation_json, created_at) VALUES (?,?,?,?,?,?,?,?)")
-    .run(principal.id, input.request_id, fingerprint, note.id, result.revision, input.session_id, JSON.stringify(input.confirmation ?? null), now());
+    .run(actorId, input.request_id, fingerprint, note.id, result.revision, input.session_id, JSON.stringify(input.confirmation ?? null), now());
   return result;
 }

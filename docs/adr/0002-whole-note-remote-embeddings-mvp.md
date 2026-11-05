@@ -10,8 +10,11 @@ and an in-database vector index remain out of scope.
 
 The embedding row is shaped so a chunk layer can be added later without
 changing the freshness model: Staleness is keyed by a content hash per note, and
-changing the model or dimensions wipes and Backfills rather than mixing vectors
-from different Providers. We accept whole-note granularity (a long note yields
+changing the model or dimensions never mixes vectors from different Providers:
+rows from the old model stay in the table but are stale, so vector search skips
+them, and repair replaces each as its Note is re-embedded. Nothing is deleted
+up front, so a Provider that refuses calls cannot leave the index empty.
+We accept whole-note granularity (a long note yields
 one vector) because it keeps the storage, staleness, and token-budget logic
 simple while the feature is optional, and because retrieval quality is not the
 constraint the MVP is trying to remove.

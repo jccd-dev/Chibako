@@ -122,17 +122,19 @@ Run from this checkout with its existing Node dependencies installed. Use an
 absolute script path and an approved working directory in installed hook commands.
 The runner reuses the configured Chibako endpoint over the MCP SDK; it adds no
 model/extraction service. At session start it injects the capped "Agent Now" index
-(`memory_read`, about 500 tokens, current project first), preceded by a resolved
+(`memory_read`, about 500 tokens: the resolved project's entries plus a count of the
+others, or every entry when no project resolves), preceded by a resolved
 checkpoint's revision and up to 1,500 characters of content when available, then
 one short instruction and recall on the first
-known request. Checkpoint requests carry no schema; the agent fetches it only before
+known request. Recall results are injected only if one matches two or more query
+terms, or the only term of a one-term query; otherwise nothing is added. Checkpoint requests carry no schema; the agent fetches it only before
 retaining knowledge or writing other notes. The agent
 retrieves again on meaningful topic changes. Retrieved content is marked as evidence,
 never executable instructions.
 
 PostToolUse counts activity without remote memory calls. A checkpoint is requested
-once after 10 tool calls for Codex; chat turns alone never qualify. Other hosts
-request one after 4 user turns or 10 tool calls since the last verified save (`thresholds: { user_turns, tool_calls }` in
+once after 40 tool calls for Codex; chat turns alone never qualify. Other hosts
+request one after 12 user turns or 40 tool calls since the last verified save (`thresholds: { user_turns, tool_calls }` in
 `profile.json` overrides). Trivial turns get no request, skip or Stop block. A
 verified save, or an explicit skip, restarts the count. The active agent produces the
 summary and stages it when requested:

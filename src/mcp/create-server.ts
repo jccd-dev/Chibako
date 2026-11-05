@@ -1,6 +1,7 @@
 import { getMemoryStatus, readMemory, writeMemory } from "../features/memory/memory";
+import { saveFact } from "../features/memory/facts";
 import { sessionMemory } from "../features/memory/session-memory";
-import { MemoryError, memoryReadSchema, memoryWriteSchema, projectSchema, sessionMemoryToolSchema } from "../features/memory/types";
+import { MemoryError, factSaveSchema, memoryReadSchema, memoryWriteSchema, projectSchema, sessionMemoryToolSchema, type FactSaveInput } from "../features/memory/types";
 import type { ApiKeyPrincipal } from "../server/auth/api-key-authorization";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -25,7 +26,6 @@ import {
 } from "../lib/notes";
 import {
   recallDetailed,
-  saveObservation,
   listObservations,
   deleteObservation,
 } from "../lib/recall";
@@ -193,15 +193,14 @@ if (authorized(["notes:read", "search:read"])) server.registerTool("recall", {
 });
 
 if (authorized(["notes:write"])) server.registerTool("memory_save", {
-  title: "Save an observation/decision",
-  description: "Persist an explicit observation, decision, or pattern into the vault's observation log. Attach note_id (a note id) when it relates to a specific note. The log is searchable context for future sessions. Use this when you learned something worth remembering that isn't a full note.",
-  inputSchema: z.object({ content: str, note_id: str.optional(), source: str.optional() }).strict(),
+  title: "Save a fact/decision",
+  description: "Persist an explicit fact, decision, or preference as an ordinary Note that recall finds and the owner can edit. Attach note_id (a note id) when it relates to a specific note; it becomes a Wikilink. A title is derived from the content when none is given. Optional project files it under that project's memory folder, otherwise it goes to the memory area root. `id` is the new Note's id. Retrying the same save returns the same Note. Without a memory folder configured it falls back to the legacy observation log. To retire an outdated fact, set its status property to archived and link its replacement. Use this when you learned something worth remembering that isn't a full note.",
+  inputSchema: factSaveSchema,
   annotations: MUTATING,
-}, (args: { content: string; note_id?: string; source?: string }) => {
+}, (args: FactSaveInput) => {
   if (!authorized(["notes:write"])) return deny();
   try {
-    const obs = saveObservation({ content: args.content, note_id: args.note_id, source: args.source });
-    return ok({ id: obs.id, note_id: obs.note_id, created_at: obs.created_at, saved: true });
+    return ok({ ...saveFact(args) });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
@@ -246,7 +245,7 @@ if (options.exposure === "local" && authorized(["notes:write", "schema:write"]))
 
 if (authorized(["notes:read"])) server.registerTool("embedding_status", {
   title: "Embedding status",
-  description: "Check whether semantic embeddings are enabled, the active provider/model/dimensions, how many notes are indexed, how many are stale, the last indexing error (if any), query-time failure and keyword-fallback counts with the last failure reason and time, and query Embedding latency (p50, p95, max) over recent Provider answers.",
+  description: "Check whether semantic embeddings are enabled, the active provider/model/dimensions, how many notes are indexed, how many are stale, the last indexing error (if any, starting with any Provider retry-after and rate-limit hints), the last repair time with Notes indexed and Notes remaining after it, query-time failure and keyword-fallback counts with the last failure reason and time, the count of failed query calls another call rescued, and query Embedding latency (p50, p95, max) over recent Provider answers.",
   inputSchema: z.object({}).strict(),
   annotations: READ_ONLY,
 }, () => {

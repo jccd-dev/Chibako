@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { getDb, now } from "../../lib/db";
 import { applyFrontmatter } from "../../lib/markdown";
-import { deleteNote, getNote, restoreNote, updateNote, type Note } from "../../lib/notes";
+import { deleteNote, getNote, getNoteByPath, restoreNote, updateNote, type Note } from "../../lib/notes";
 import type { ApiKeyPrincipal } from "../../server/auth/api-key-authorization";
 import { getMemoryStatus, memoryFolder, memoryProject, memoryRevision, writeMemory } from "./memory";
 import { MemoryError, sessionMemorySchema, type SessionMemoryInput } from "./types";
@@ -119,8 +119,9 @@ function updateNow(principal: ApiKeyPrincipal, area: string, project: string | u
   for (const item of legacy) db.prepare("DELETE FROM memory_records WHERE note_id = ?").run(item.note_id);
 }
 
-/** One bounded, metadata-only Activity note per project folder, newest line first. */
+/** One bounded, metadata-only Activity note per project folder, newest line first. The area root keeps the plain title. */
 const ACTIVITY = { subject: "Activity", title: "Activity", lines: 30 };
+const activityTitle = (project: string | undefined) => project ? `${ACTIVITY.title} — ${project}` : ACTIVITY.title;
 
 /** Ids of the managed bookkeeping notes (Agent Now and every project's Activity); Recall leaves them out. */
 export function bookkeepingNoteIds(): Set<string> {
@@ -130,37 +131,60 @@ export function bookkeepingNoteIds(): Set<string> {
 }
 type ActivityInput = Extract<SessionMemoryInput, { action: "activity" }>;
 
-function activityLine(input: ActivityInput, linked: string | undefined): string {
+// A line is: time UTC · runtime · [branch/head · ][files · ]counts[ · [[checkpoint]]]. `where` is everything between runtime and counts.
+const ACTIVITY_LINE = /^- .+? UTC · (?<runtime>\S+) · (?<where>(?:.* · )?)(?<calls>\d+) tool calls?, (?<prompts>\d+) prompts?(?<tail> · \[\[[^\]]+\]\])?$/;
+
+/** The line for this capture; `merged` is true when it replaces the newest line (same runtime, branch, commit, files and checkpoint) with the counts added. */
+function activityLine(input: ActivityInput, linked: string | undefined, newest: string | undefined): { line: string; merged: boolean } {
   const { branch, head, files, files_changed, tool_calls, user_turns } = input.entry;
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
   const changed = Math.max(files_changed, files.length);
-  const parts = [`${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`, input.runtime];
-  if (branch || head) parts.push([branch && `\`${branch}\``, head && `@ \`${head}\``].filter(Boolean).join(" "));
-  if (changed) parts.push(`${plural(changed, "file")} changed${files.length ? `: ${files.map(file => `\`${file}\``).join(", ")}${changed > files.length ? ` (+${changed - files.length} more)` : ""}` : ""}`);
-  parts.push(`${plural(tool_calls, "tool call")}, ${plural(user_turns, "prompt")}`);
-  if (linked) parts.push(`[[${linked}]]`);
-  return `- ${parts.join(" · ")}`;
+  const where = [
+    (branch || head) && [branch && `\`${branch}\``, head && `@ \`${head}\``].filter(Boolean).join(" "),
+    changed && `${plural(changed, "file")} changed${files.length ? `: ${files.map(file => `\`${file}\``).join(", ")}${changed > files.length ? ` (+${changed - files.length} more)` : ""}` : ""}`,
+  ].filter(Boolean).map(part => `${part} · `).join("");
+  const tail = linked ? ` · [[${linked}]]` : "";
+  const previous = newest && ACTIVITY_LINE.exec(newest)?.groups;
+  const merge = previous && previous.runtime === input.runtime && previous.where === where && (previous.tail ?? "") === tail;
+  const calls = tool_calls + (merge ? Number(previous.calls) : 0);
+  const prompts = user_turns + (merge ? Number(previous.prompts) : 0);
+  return { merged: Boolean(merge), line: `- ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC · ${input.runtime} · ${where}${plural(calls, "tool call")}, ${plural(prompts, "prompt")}${tail}` };
 }
 
-/** Writes the Activity line and refreshes the linked checkpoint's Agent Now date; the checkpoint note itself is never edited. */
-function recordActivity(principal: ApiKeyPrincipal, area: string, input: ActivityInput, record: SessionRecord | undefined): SessionMemoryReceipt {
+/** The project's Activity note, renamed to its project title once when it still carries an older one. Rename and record change together. */
+function currentActivityNote(area: string, project: string | undefined): Note | null {
   const db = getDb();
   const existing = db.prepare("SELECT note_id, folder, title, closed_at FROM memory_records WHERE folder = ? AND role = 'overview' AND subject = ? AND owner_id = 'shared'")
-    .get(memoryFolder(area, input.project), ACTIVITY.subject) as SessionRecord | undefined;
+    .get(memoryFolder(area, project), ACTIVITY.subject) as SessionRecord | undefined;
   let note = existing ? inPlace(existing) : null;
   // Same rule as Agent Now: a trashed log is restored, one the owner moved or renamed is left and a fresh one starts.
   if (note?.deleted_at != null) note = restoreNote(note.id);
   else if (existing && !note) db.prepare("DELETE FROM memory_records WHERE note_id = ?").run(existing.note_id);
+  const title = activityTitle(project);
+  // updateNote rewrites links to the old title, resolving each by path first so other projects' "Activity" notes keep their links.
+  // A note the owner already put at the new title blocks the rename; the log keeps its old title.
+  if (existing && note && note.title !== title && !getNoteByPath(note.folder, title)) {
+    note = updateNote(note.id, { title });
+    db.prepare("UPDATE memory_records SET title = ? WHERE note_id = ?").run(title, existing.note_id);
+  }
+  return note;
+}
+
+/** Writes the Activity line and refreshes the linked checkpoint's Agent Now date; the checkpoint note itself is never edited. */
+function recordActivity(principal: ApiKeyPrincipal, area: string, input: ActivityInput, record: SessionRecord | undefined): SessionMemoryReceipt {
+  const note = currentActivityNote(area, input.project);
   const checkpoint = record ? inPlace(record) : null;
   const linked = record && checkpoint && checkpoint.deleted_at == null ? `${record.folder}/${record.title}` : undefined;
   const lines = (note?.content ?? "").split("\n");
-  const entries = [activityLine(input, linked), ...lines.filter(line => line.startsWith("- "))].slice(0, ACTIVITY.lines);
+  const earlier = lines.filter(line => line.startsWith("- "));
+  const { line, merged } = activityLine(input, linked, earlier[0]);
+  const entries = [line, ...earlier.slice(merged ? 1 : 0)].slice(0, ACTIVITY.lines);
   // Leave room for the newest capture even if the owner filled the note with header text.
   const head = (lines.filter(line => !line.startsWith("- ")).join("\n").trim() || "# Activity").slice(0, 64_000 - entries[0].length - 4);
   while (`${head}\n\n${entries.join("\n")}\n`.length > 64_000) entries.pop();
   const written = writeMemory(principal, {
     request_id: `session-activity-${hash([principal.id, input]).slice(0, 40)}`,
-    project: input.project, role: "overview", subject: ACTIVITY.subject, session_id: input.session_id, title: ACTIVITY.title,
+    project: input.project, role: "overview", subject: ACTIVITY.subject, session_id: input.session_id, title: note?.title ?? activityTitle(input.project),
     content: `${head}\n\n${entries.join("\n")}\n`, expected_revision: note ? memoryRevision(note) : null,
   });
   if (record && linked) updateNow(principal, area, memoryProject(area, record.folder), input, record.title);

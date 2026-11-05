@@ -27,12 +27,12 @@ test('Recall skips Activity notes and Agent Now but Search and the Note list sti
   createNote({ title: 'Quill guide', content: `How the ${TERM} parser works` });
 
   const titles = (await recall({ query: TERM })).map((r) => r.title);
-  assert.deepEqual(titles.filter((t) => t === 'Agent Now' || t === 'Activity'), []);
+  assert.deepEqual(titles.filter((t) => t === 'Agent Now' || t === 'Activity — atlas'), []);
   assert(titles.includes('Quill guide') && titles.includes('Cleaner work'), 'ordinary notes and checkpoints stay');
 
   const searched = searchNotes(TERM, []).map((r) => r.title);
-  assert(searched.includes('Agent Now') && searched.includes('Activity'), 'Search is unchanged');
-  assert(listNotes().some((n) => n.title === 'Agent Now') && listNotes().some((n) => n.title === 'Activity'));
+  assert(searched.includes('Agent Now') && searched.includes('Activity — atlas'), 'Search is unchanged');
+  assert(listNotes().some((n) => n.title === 'Agent Now') && listNotes().some((n) => n.title === 'Activity — atlas'));
 });
 
 test('a user note that merely shares the title Activity is not excluded', async () => {

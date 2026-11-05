@@ -58,4 +58,9 @@ async function main() {
   }
 }
 
-void main();
+// Exit once cleanup is done: a Provider answer still in flight would otherwise reach the database and recreate brain.db in the deleted copy.
+const flushed = (stream: NodeJS.WriteStream) => new Promise<void>((resolve) => stream.write("", () => resolve()));
+void main().then(async () => {
+  await Promise.all([flushed(process.stdout), flushed(process.stderr)]);
+  process.exit();
+});

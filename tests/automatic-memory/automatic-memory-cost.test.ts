@@ -21,7 +21,7 @@ const call: MemoryCall = async (name, args) => {
   if (name === "memory_status") return { continuity: 1 };
   if (name === "memory_session" && args.action === "read") return { note: { title: "Work", content: `resume ${SECRET}` }, revision: "r1" };
   if (name === "memory_read") return { note: { content: `- [[Work]] — next ${SECRET}` } };
-  if (name === "recall") return { results: [SECRET] };
+  if (name === "recall") return { results: [{ title: SECRET, matched: ["question", "work"] }] };
   if (name === "memory_session" && args.action === "activity") return { saved: true, request_id: args.request_id, note_id: "n", revision: "a".repeat(64) };
   return {};
 };

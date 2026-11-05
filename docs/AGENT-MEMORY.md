@@ -13,7 +13,7 @@ flowchart LR
     B --> C[(brain.db)]
     C --> D[Knowledge Schema]
     C --> E[Markdown notes]
-    C --> F[Observations]
+    C --> F[Fact notes]
     E --> G[FTS5 / BM25]
     E -. optional .-> H[Embeddings]
     G --> I[Ranked snippets]
@@ -22,7 +22,7 @@ flowchart LR
 ```
 
 The chat itself is not copied into Chibako. Reusable knowledge comes from saved
-notes and observations; hooks can also save a bounded metadata-only Activity
+notes and Fact notes; hooks can also save a bounded metadata-only Activity
 record. A later chat can access it when its MCP connection points to the same
 `brain.db` vault.
 
@@ -32,7 +32,7 @@ The three stored forms have different jobs:
 |---|---|---|
 | Knowledge Schema | Vault-specific rules for naming, linking, properties, and compilation | `get_knowledge_schema` or `ingest_note` |
 | Notes | Canonical, substantial knowledge in Markdown | `recall`, `search_notes`, `read_note`, `ingest_note` |
-| Observations | Short decisions, preferences, and lessons | `list_observations` |
+| Fact notes | Short decisions, preferences, and lessons saved with `memory_save` (ordinary Notes in the memory folder) | `recall`, `search_notes`, `read_note` |
 
 ## A typical session
 
@@ -97,13 +97,16 @@ while keeping its cost low:
   `replaces_request_id` supplied by recovery. A successful match can reopen a
   finished workstream. A title collision with an ordinary Note still needs a new title.
 - **Session start:** a linked checkpoint's revision and up to 1,500 characters of
-  content can precede the capped Agent Now read (current project first, about 500
-  tokens). Read the note by title for the rest; a direct MCP session read without
+  content can precede the capped Agent Now read (about 500 tokens): with a
+  resolved project it lists that project's entries and a count of the other active
+  entries, otherwise every entry. Read the note by title for the rest; a direct MCP session read without
   the thread key cannot resolve a thread-only link. First-prompt recall adds
-  relevant snippets. Checkpoint prompts need no Knowledge Schema; fetch it before
+  relevant snippets only when a result matches two or more query terms (or the
+  only term of a one-term query); meaning-only matches are not injected, in keyword
+  and hybrid mode alike. Agents can still call `recall`. Checkpoint prompts need no Knowledge Schema; fetch it before
   retention or general Note writes.
-- **Save gate:** defaults are 10 tool calls for Codex (chat turns alone never
-  qualify), or 4 user turns or 10 tool calls for other hosts. Profile thresholds
+- **Save gate:** defaults are 40 tool calls for Codex (chat turns alone never
+  qualify), or 12 user turns or 40 tool calls for other hosts. Profile thresholds
   can override those counts. One reminder requests a checkpoint; save/skip/finish
   resets the counts. Task changes update the same session checkpoint.
 - **Shared handoffs:** explicitly stage `{"continue":{"title":"<entry title>"}}`
@@ -120,7 +123,11 @@ while keeping its cost low:
   (mapped to Stop). A Stop asking for a checkpoint defers capture. SessionEnd also
   flushes pending data and never finishes a checkpoint; Hermes `on_session_end`
   only flushes. The fixed threshold of three is independent of save thresholds.
-  One Activity note per project holds up to 30 entries within 64,000 characters,
+  One Activity note per project, titled `Activity — <project>` (plain `Activity` at the
+  area root), holds up to 30 entries within 64,000 characters. An older note titled
+  `Activity` is renamed once on its next capture, with its history and Wikilinks to it
+  kept; if you already have a note at the new title, the log keeps its old title. A capture with the same runtime, branch, commit, changed files and checkpoint
+  as the newest entry updates that entry and adds its counts. Entries run
   newest first: UTC date, runtime,
   optional branch/short commit, up to ten repo-relative changed paths, total changed
   files, and tool/prompt counts. No prompts, responses or transcript content are
@@ -242,8 +249,16 @@ Evidence in the implementation:
   local and uses BM25 alone.
 - Stale embeddings repair themselves. The web server (not the stdio process,
   and not a remote Recall request) runs a scheduled Reindex every 5 minutes at
-  startup and after, embedding up to 200 stale Notes per run in batches of 50
-  ([implementation](../src/lib/embedding-repair.ts)). Staleness comes from
+  startup and after, embedding up to 200 stale Notes per run, 50 Notes at a time
+  per Reindex pass, sent to the Provider in requests of `CHIBAKO_EMBEDDING_BATCH`
+  Notes (default 4)
+  ([implementation](../src/lib/embedding-repair.ts)). A request that gets a
+  Provider limit (429) ends the run; the requests that passed are kept and the
+  next run continues. Each request has a 30 second limit, so a hung call cannot
+  stop later runs. `embedding_status` reports the last repair time, Notes
+  indexed and Notes remaining after it; a later single-Note success does not
+  change them, and the last error starts with any `retry-after` and
+  `x-ratelimit-*` values the Provider sent. Staleness comes from
   stored content hashes, so a restart finds the same Notes again. The existing
   circuit breaker applies: after repeated provider failures the pass embeds
   nothing for a minute, and a failing provider never blocks Note writes or
@@ -254,7 +269,9 @@ Evidence in the implementation:
   whole allowance; a share a result does not use rolls forward to the next. The
   budget is a ceiling, not a target: a Snippet never exceeds 380 estimated
   tokens. Once a result's share reaches that ceiling, more budget adds no text
-  to its Snippet
+  to its Snippet. The saving from the 380-token ceiling was measured at limit 5
+  and budget 2000 only; it is not proven on other settings, and the ceiling
+  applies to all of them
   ([implementation](../src/lib/recall.ts),
   [test](../tests/recall/recall-hard-budget.test.ts)).
 - Each result carries a Snippet, never the full body: a short window of the
@@ -287,7 +304,7 @@ context budget and avoids loading full note bodies during discovery.**
 
 ## Access and ownership
 
-Chibako stores notes, links, settings, observations, search data, and optional
+Chibako stores notes, links, settings, legacy observations, search data, and optional
 embeddings in one SQLite vault. API keys are hashed, revocable, and scoped. A
 read-only agent can receive `notes:read`, `search:read`, and `schema:read`; add
 `notes:write` only when that agent should save knowledge.
@@ -302,11 +319,30 @@ Local stdio remains available through `dist/mcp/server.mjs`. It reads the same
 key is configured. See [Connect your AI agent](../README.md#-connect-your-ai-agent)
 for both configurations. Chibako API keys are not an OAuth implementation.
 
+## Changing the Embedding model
+
+Set `CHIBAKO_EMBEDDING_MODEL` (and `CHIBAKO_EMBEDDING_DIM` if the new model
+needs one) and restart the web server. Nothing is deleted. Rows made under the
+old model count as stale, so vector search ignores them and Recall uses
+keywords for any Note not yet re-embedded. Each scheduled repair run (every 5
+minutes) replaces rows with the new model until `embedding_status` shows
+`stale: 0`; a Provider limit only slows this, because requests that passed are
+kept. Query latency figures reset at the first repair run after the change,
+since they belong to the old model.
+
+Once the rebuild is complete, run the `tune` Scoreboard against a backup of the
+Vault (`npm run scoreboard -- --source-dir <Vault> --questions <file> --label
+<model>`, add `--compare <earlier result>`) and compare it with the previous
+model before relying on the new one. A run during the rebuild measures a
+half-indexed vault.
+
 ## Current limits
 
 - Chibako does not automatically capture chat transcripts.
-- `recall` searches notes; observations are retrieved separately and currently
-  have no query filter.
+- `memory_save` writes a Fact note when `CHIBAKO_MEMORY_FOLDER` is set, so
+  `recall` finds it. Without a memory folder it writes a legacy observation row,
+  which only `list_observations` reads. Existing observation rows stay until the
+  owner approves a mapping into Notes.
 - Token budgeting is estimated rather than tokenizer-enforced.
 - Semantic recall needs an OpenAI-compatible embedding provider; keyword recall
   works without one.

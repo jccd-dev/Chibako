@@ -1,11 +1,12 @@
 import { getDb, now, uid } from "./db";
+import { cleanQuery, queryTerms } from "./query-terms";
 import { listNotes, searchNotes, getNote, type NoteSummary } from "./notes";
 import { stripFrontmatter } from "./markdown";
-import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
+import { embeddingsEnabled, getEmbeddingProvider, INPUT_VERSION } from "./embeddings";
 import { embedQuery, QueryEmbedTimeout } from "./query-embedding";
 import { listEmbeddings } from "./embedding-store";
 import { bookkeepingNoteIds } from "../features/memory/session-memory";
-import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, recordQueryLatency, type QueryFallbackReason } from "./embedding-index";
+import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, recordQueryLatency, recordQueryRescue, type QueryFallbackReason } from "./embedding-index";
 
 // ---------- vector search ----------
 
@@ -27,12 +28,13 @@ function cosine(a: number[], b: number[]): number {
 async function vectorSearch(query: string, limit: number): Promise<Array<{ id: string; score: number }>> {
   const provider = getEmbeddingProvider();
   if (!provider) return [];
-  const qvec = await embedQuery(provider, query, recordLatencyBestEffort);
+  const qvec = await embedQuery(provider, query, recordLatencyBestEffort, recordRescueBestEffort);
   if (!qvec) return [];
   const fresh = freshEmbeddingIds();
   const scored: Array<{ id: string; score: number }> = [];
   for (const e of listEmbeddings()) {
-    if (!fresh.has(e.note_id)) continue;
+    // The fresh-id set is cached for seconds; another process may have rewritten a row since, so the row's own model is checked too.
+    if (!fresh.has(e.note_id) || e.model !== provider.model || e.input_version !== INPUT_VERSION || (provider.dim > 0 && e.dim !== provider.dim)) continue;
     const sim = cosine(qvec, e.vector);
     if (sim > 0) scored.push({ id: e.note_id, score: sim });
   }
@@ -59,18 +61,11 @@ export function rrf(rankings: Array<Array<{ id: string }>>, weights: number[] = 
 // ---------- token-budget snippet ----------
 
 const CHARS_PER_TOKEN = 4;
-// The budget is a ceiling, not a target: spare budget does not lengthen a Snippet. Set on the tune split:
-// 380 brought mean tokens from 1849 to 1664 with no hit rank moved; 400 sat within near-tie drift of the 1717 goal.
+// The budget is a ceiling, not a target: spare budget does not lengthen a Snippet. Measured on the tune split at limit 5 and
+// budget 2000: mean tokens per question fell from 1849 (no ceiling) to 1664 at 380, with no hit rank moved. Not measured at other
+// limits or budgets, so the saving is unproven there; the ceiling applies to all of them.
 const SNIPPET_MAX_TOKENS = 380;
 const tokensFor = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
-
-/** Leading and trailing punctuation only, so `osprey?` becomes `osprey` while `i18n` and `a11y` stay whole. */
-const stripEdgePunctuation = (term: string) => term.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-
-/** Lowercase query terms without edge punctuation, for matching text. */
-function queryTerms(query: string): string[] {
-  return [...new Set(query.toLowerCase().split(/\s+/).map(stripEdgePunctuation).filter(Boolean))];
-}
 
 /**
  * Trim content to at most `maxChars` characters (ellipses included). The window holds the most distinct
@@ -105,29 +100,13 @@ function trimmedSnippet(raw: string, terms: string[], maxChars: number): string 
   return `${start > 0 ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`.slice(0, maxChars);
 }
 
-// ---------- query cleaning ----------
-
-// Filler words stop matching in Recall only; exact Search keeps every term.
-// shortcut: short hand-picked English list plus common Tagalog, tune from recall misses.
-const FILLER = new Set((
-  "a an and are as at be been but by can could did do does for from had has have how i if in is it its me my of on or our so than that the their them then there these they this to us was we were what when where which who why will with would you your " +
-  "ang ay ba din na ng sa mga si ni kay ko mo ka ako ikaw siya kami tayo sila ito iyan iyon at o pero kasi para pa naman lang po ano paano bakit saan kailan sino"
-).split(" "));
-
-/** Drops filler terms for the keyword query; when nothing is left, the original terms stay. */
-function cleanQuery(query: string): string {
-  const terms = query.split(/\s+/).filter(Boolean);
-  const kept = terms.filter((t) => !FILLER.has(stripEdgePunctuation(t).toLowerCase()));
-  return (kept.length ? kept : terms).join(" ");
-}
-
 /** A Note belongs to the project when a segment of its folder is the project. */
 function inProject(folder: string, project: string): boolean {
   const wanted = project.toLowerCase();
   return folder.toLowerCase().split("/").includes(wanted);
 }
 
-// shortcut: flat 1.3x boost. Not tuned in ticket 10: the tuning runs pass no project hint, so there is no evidence.
+// shortcut: flat 1.3x boost. Not tuned: the tuning runs pass no project hint, so there is no evidence for another value.
 const PROJECT_BOOST = 1.3;
 
 // A title that holds the query terms is the strongest sign of the Note asked for. Rank fusion alone lets a
@@ -231,7 +210,7 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
  * Picks the Notes Recall may return: bookkeeping Notes are left out, Notes in the project and Notes whose title holds the query terms get a boost, the best `limit`
  * by score are kept, and archived Notes go after current ones within that window. Archived Notes compete for a place
  * on score first, so an exact match to an old Note is not cut by weaker current ones.
- * shortcut: strict demotion inside the window, ticket 10 tunes it against the tune split.
+ * shortcut: strict demotion inside the window; not tuned against the tune split.
  */
 function selectCandidates(
   fused: Array<{ id: string; score: number }>,
@@ -284,7 +263,7 @@ async function vectorHalf(
 /** Counters must never break a read-only Recall. */
 function recordFallbackBestEffort(reason: QueryFallbackReason): void {
   try {
-    // Writes on this read path touch only a settings counter, never notes, embeddings, the store version or scan cache, so results are unaffected.
+    // The counters live in the embedding-meta row of `settings`. This read path writes nothing else (no Notes, embeddings, store version or scan cache), so results are unaffected.
     recordQueryFallback(reason);
   } catch {
     // Metrics are advisory.
@@ -295,6 +274,15 @@ function recordFallbackBestEffort(reason: QueryFallbackReason): void {
 function recordLatencyBestEffort(ms: number): void {
   try {
     recordQueryLatency(ms);
+  } catch {
+    // Metrics are advisory.
+  }
+}
+
+/** Runs when a failed call was rescued by another one; a counter must never break Recall. */
+function recordRescueBestEffort(): void {
+  try {
+    recordQueryRescue();
   } catch {
     // Metrics are advisory.
   }

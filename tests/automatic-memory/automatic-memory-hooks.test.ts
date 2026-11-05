@@ -162,7 +162,7 @@ test("Hermes envelopes map pre_llm_call context and pre_verify continuation once
   const trivial = await child([hook], verifyInput, hermesEnv);
   assert.equal(trivial.code, 0, trivial.stderr);
   assert.equal(trivial.stdout.trim(), "", "a trivial turn gets no continuation");
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 40; i++) {
     const counted = await child([hook], JSON.stringify({ hook_event_name: "post_tool_call", session_id }), hermesEnv);
     assert.equal(counted.code, 0, counted.stderr);
   }
@@ -208,7 +208,7 @@ test("Codex keeps trivial chats silent and delivers one work reminder as develop
   await runMemoryEvent({ runtime: "codex", promptRequests: true, directory, enabled: true, call: async () => ({}),
     input: { session_id: "quiet-chat", hook_event_name: "Checkpoint" }, stage: { skip: "New task" } });
   await run("UserPromptSubmit", "work-1");
-  for (let tool = 1; tool < 10; tool++) assert.deepEqual(await run("PostToolUse"), {});
+  for (let tool = 1; tool < 40; tool++) assert.deepEqual(await run("PostToolUse"), {});
   const result = await run("PostToolUse");
   assert.match(String(result.context), /Memory checkpoint due/);
   assert.deepEqual(codex.hookOutput({ session_id: "quiet-chat", hook_event_name: "PostToolUse" }, result), {
