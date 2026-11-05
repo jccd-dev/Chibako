@@ -71,7 +71,8 @@ test("a resumed session still gets its checkpoint at the new defaults", async ()
 }));
 
 test("Agent Now injects fewer characters once the project resolves", async () => {
-  const lines = Array.from({ length: 15 }, (_, i) => `- [[Thread ${i}]] (${i < 2 ? "atlas" : `other${i}`}) — next step number ${i} · 2026-11-05`).join("\n");
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = Array.from({ length: 15 }, (_, i) => `- [[Thread ${i}]] (${i < 2 ? "atlas" : `other${i}`}) — next step number ${i} · ${today}`).join("\n");
   const call: MemoryCall = async (name) => name === "memory_read" ? { note: { content: `# Agent Now\n\n${lines}\n` }, revision: "a".repeat(64) } : {};
   const size = async (resolveProject?: () => string) => withDirectory(async (directory) =>
     String((await run(directory, event("SessionStart", { cwd: "/work/atlas" }), call, resolveProject ? { resolveProject } : {})).context).length);
@@ -106,6 +107,23 @@ test("results found by meaning alone are not injected, in any mode", async () =>
   const call: MemoryCall = async (name) => name === "recall" ? { count: 1, results: [{ title: "Semantic", matched: [] }], mode: "hybrid", fallback_reason: null } : {};
   assert.doesNotMatch(String((await prompt(directory, "where do we store sessions", call)).context), /Relevant memory/);
 }));
+
+test("a malformed Recall response is a retrieval warning, never a silent miss", async () => {
+  for (const bad of [{}, { results: "none" }, { results: [{ matched: [null, null] }] }, { results: [{}] }]) {
+    await withDirectory(async (directory) => {
+      const result = await prompt(directory, "how does token validation work", async (name) => name === "recall" ? bad : {});
+      assert.match(String(result.warning), /Memory retrieval unavailable/);
+      assert.doesNotMatch(String(result.context), /Relevant memory/);
+    });
+  }
+});
+
+test("filler words do not hide a one-term query", async () => {
+  await withDirectory(async (directory) => {
+    const result = await prompt(directory, "What is Osprey?", recallCall([{ title: "Osprey", matched: ["osprey"] }]));
+    assert.match(String(result.context), /Relevant memory/, "the server drops what/is, so osprey is the only term");
+  });
+});
 
 test("the only term of a one-term query is enough", async () => {
   await withDirectory(async (directory) => {

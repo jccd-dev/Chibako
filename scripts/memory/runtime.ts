@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { memoryWriteSchema, sessionMemorySchema } from "../../src/features/memory/types";
 import { memoryStaleDays } from "../../src/features/memory/staleness";
+import { effectiveTerms } from "../../src/lib/query-terms";
 import { failureCategories, MemoryClientError } from "./client-error";
 import { acquirePrivateLock, readOptional, withPrivateLock } from "./private-files";
 import { prepareSessionStage, sessionMutationSchema } from "./session-stage";
@@ -133,14 +134,11 @@ function briefNow(content: string, project: string | null | undefined): string {
   const others = entries.length - own.length;
   return [...head, ...own, ...(others ? [`(${others} other active ${others === 1 ? "entry" : "entries"} not shown)`] : [])].join("\n");
 }
-/** Recall results are worth injecting only when one matches 2+ query terms, or the only term of a one-term query. */
+const recallResponseSchema = z.object({ results: z.array(z.object({ matched: z.array(z.string()) }).passthrough()) }).passthrough();
+/** Recall results are worth injecting only when one matches 2+ query terms, or the only term of a one-term query. A malformed response throws, so it reaches the retrieval warning. */
 function relevantRecall(query: string, response: Record<string, unknown>): boolean {
-  const terms = new Set(query.toLowerCase().split(/\s+/).map((term) => term.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")).filter(Boolean));
-  const results = Array.isArray(response.results) ? response.results : [];
-  return results.some((item) => {
-    const matched = item && typeof item === "object" && "matched" in item && Array.isArray(item.matched) ? item.matched.length : 0;
-    return matched >= 2 || (terms.size === 1 && matched === 1);
-  });
+  const single = effectiveTerms(query).length === 1;
+  return recallResponseSchema.parse(response).results.some(({ matched }) => matched.length >= 2 || (single && matched.length === 1));
 }
 // Revision-checked; a failed write re-reads and merges again, never replaces blindly. Agent Now lives at the area root.
 async function upsertNow(call: MemoryCall, session_id: string, thread: string, line: string): Promise<void> {

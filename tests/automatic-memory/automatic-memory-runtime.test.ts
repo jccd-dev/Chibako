@@ -74,7 +74,7 @@ test("a subagent event alone creates no private state", async () => withPrivateD
 
 test("loads the Now index and first prompt recall once, from private state", async () => withPrivateDirectory(async (directory) => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const call = caller(calls);
+  const call = caller(calls, async (name) => name === "recall" ? { results: [] } : {});
   const start = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("SessionStart", { prompt: "Resume the memory work" }) });
   assert.equal(calls.filter(({ name }) => name === "get_knowledge_schema").length, 0, "schema is fetched only when a checkpoint is due");
   assert.deepEqual(calls.find(({ name }) => name === "memory_read"), { name: "memory_read", args: { role: "overview", subject: "Agent Now", session_id: "session-1" } });

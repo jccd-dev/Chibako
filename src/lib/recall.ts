@@ -1,4 +1,5 @@
 import { getDb, now, uid } from "./db";
+import { cleanQuery, queryTerms } from "./query-terms";
 import { listNotes, searchNotes, getNote, type NoteSummary } from "./notes";
 import { stripFrontmatter } from "./markdown";
 import { embeddingsEnabled, getEmbeddingProvider, INPUT_VERSION } from "./embeddings";
@@ -65,14 +66,6 @@ const CHARS_PER_TOKEN = 4;
 const SNIPPET_MAX_TOKENS = 380;
 const tokensFor = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
 
-/** Leading and trailing punctuation only, so `osprey?` becomes `osprey` while `i18n` and `a11y` stay whole. */
-const stripEdgePunctuation = (term: string) => term.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-
-/** Lowercase query terms without edge punctuation, for matching text. */
-function queryTerms(query: string): string[] {
-  return [...new Set(query.toLowerCase().split(/\s+/).map(stripEdgePunctuation).filter(Boolean))];
-}
-
 /**
  * Trim content to at most `maxChars` characters (ellipses included). The window holds the most distinct
  * query terms, then the most hits, and is centered on the hits inside it.
@@ -104,22 +97,6 @@ function trimmedSnippet(raw: string, terms: string[], maxChars: number): string 
   const start = bestDistinct === 0 ? 0 : Math.min(Math.max(0, Math.floor(center - room / 2)), content.length - room);
   const end = start + room;
   return `${start > 0 ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`.slice(0, maxChars);
-}
-
-// ---------- query cleaning ----------
-
-// Filler words stop matching in Recall only; exact Search keeps every term.
-// shortcut: short hand-picked English list plus common Tagalog, tune from recall misses.
-const FILLER = new Set((
-  "a an and are as at be been but by can could did do does for from had has have how i if in is it its me my of on or our so than that the their them then there these they this to us was we were what when where which who why will with would you your " +
-  "ang ay ba din na ng sa mga si ni kay ko mo ka ako ikaw siya kami tayo sila ito iyan iyon at o pero kasi para pa naman lang po ano paano bakit saan kailan sino"
-).split(" "));
-
-/** Drops filler terms for the keyword query; when nothing is left, the original terms stay. */
-function cleanQuery(query: string): string {
-  const terms = query.split(/\s+/).filter(Boolean);
-  const kept = terms.filter((t) => !FILLER.has(stripEdgePunctuation(t).toLowerCase()));
-  return (kept.length ? kept : terms).join(" ");
 }
 
 /** A Note belongs to the project when a segment of its folder is the project. */
