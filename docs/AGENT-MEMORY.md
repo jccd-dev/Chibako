@@ -253,7 +253,8 @@ Evidence in the implementation:
   result at most an even share of what is left, so one long Note cannot use the
   whole allowance; a share a result does not use rolls forward to the next. The
   budget is a ceiling, not a target: a Snippet never exceeds 380 estimated
-  tokens, so raising the budget past that adds no text to a result
+  tokens. Once a result's share reaches that ceiling, more budget adds no text
+  to its Snippet
   ([implementation](../src/lib/recall.ts),
   [test](../tests/recall/recall-hard-budget.test.ts)).
 - Each result carries a Snippet, never the full body: a short window of the
