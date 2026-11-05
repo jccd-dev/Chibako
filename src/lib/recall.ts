@@ -88,10 +88,37 @@ function trimmedSnippet(raw: string, query: string, maxChars: number): string {
   return `${start > 0 ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`.slice(0, maxChars);
 }
 
+// ---------- query cleaning ----------
+
+// Filler words stop matching in Recall only; exact Search keeps every term.
+// shortcut: short hand-picked English list plus common Tagalog, tune from Scoreboard misses.
+const FILLER = new Set((
+  "a an and are as at be been but by can could did do does for from had has have how i if in is it its me my of on or our so than that the their them then there these they this to us was we were what when where which who why will with would you your " +
+  "ang ay ba din na ng sa mga si ni kay ko mo ka ako ikaw siya kami tayo sila ito iyan iyon at o pero kasi para pa naman lang po ano paano bakit saan kailan sino"
+).split(" "));
+
+/** Drops filler terms for the keyword query; when nothing is left, the original terms stay. */
+function cleanQuery(query: string): string {
+  const terms = query.split(/\s+/).filter(Boolean);
+  const kept = terms.filter((t) => !FILLER.has(t.toLowerCase().replace(/[^a-z]/g, "")));
+  return (kept.length ? kept : terms).join(" ");
+}
+
+/** A Note belongs to the project when a segment of its folder is the project. */
+function inProject(folder: string, project: string): boolean {
+  const wanted = project.toLowerCase();
+  return folder.toLowerCase().split("/").includes(wanted);
+}
+
+// shortcut: flat 1.3x boost, ticket 10 tunes it against the Scoreboard.
+const PROJECT_BOOST = 1.3;
+
 // ---------- public recall API ----------
 
 export interface RecallOptions {
   query: string;
+  /** Ranking hint only: Notes in this project rank higher; it is never search text. */
+  project?: string;
   limit?: number;
   budget?: number;
   includeVectors?: boolean;
@@ -136,7 +163,8 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
   const limit = opts.limit ?? 8;
   const budget = opts.budget ?? 2000;
 
-  const bm25 = searchNotes(query, [], { anyTerm: true }).slice(0, 50).map((r) => ({ id: r.id }));
+  const keywords = cleanQuery(query);
+  const bm25 = searchNotes(keywords, [], { anyTerm: true }).slice(0, 50).map((r) => ({ id: r.id }));
   const { vec, fallback } = await vectorHalf(query, opts);
   const rankings = vec ? [bm25, vec.map((v) => ({ id: v.id }))] : [bm25];
   const vectorScores = vec ? new Map(vec.map((v) => [v.id, v.score])) : null;
@@ -145,12 +173,16 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
   // matches, not displace them. shortcut: fixed 0.5 weight, tune from pilot recall samples.
   // Bookkeeping notes are left out; archived ones sink below current ones but stay findable.
   // shortcut: strict demotion, ticket 10 tunes it against the tune split.
-  const skip = bookkeepingNoteIds();
-  const ranked = rrf(rankings, [0.5, 1]).filter(({ id }) => !skip.has(id));
   const byId = new Map<string, NoteSummary>(listNotes().map((n) => [n.id, n]));
+  const skip = bookkeepingNoteIds();
+  const project = opts.project?.trim();
+  const ranked = rrf(rankings, [0.5, 1])
+    .filter(({ id }) => !skip.has(id))
+    .map((r) => { const folder = byId.get(r.id)?.folder; return project && folder !== undefined && inProject(folder, project) ? { ...r, score: r.score * PROJECT_BOOST } : r; })
+    .sort((a, b) => b.score - a.score);
   const isArchived = ({ id }: { id: string }) => byId.get(id)?.properties.status === "archived";
   const fused = [...ranked.filter((r) => !isArchived(r)), ...ranked.filter(isArchived)];
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = keywords.toLowerCase().split(/\s+/).filter(Boolean);
 
   const items: RecallItem[] = [];
   let tokens = 0;
@@ -163,7 +195,7 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
     const titleTokens = Math.ceil(summary.title.length / 4);
     const snippetTokens = budget - tokens - titleTokens;
     if (snippetTokens < 1) break; // hard limit: no room left for even a tiny Snippet
-    const snippet = trimmedSnippet(stripFrontmatter(full.content), query, snippetTokens * 4);
+    const snippet = trimmedSnippet(stripFrontmatter(full.content), keywords, snippetTokens * 4);
     tokens += titleTokens + Math.ceil(snippet.length / 4);
     items.push(buildItem(summary, snippet, score, vectorScores, terms));
   }

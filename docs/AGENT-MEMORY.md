@@ -42,7 +42,7 @@ sequenceDiagram
     participant MCP as Chibako MCP
     participant DB as SQLite vault
 
-    Agent->>MCP: recall(query, limit, budget)
+    Agent->>MCP: recall(query, project, limit, budget)
     MCP->>DB: Rank matching notes
     DB-->>Agent: Titles and trimmed snippets
 

@@ -77,3 +77,13 @@ test('REST and MCP Recall items carry the same status', async () => {
   const status = Object.fromEntries(http.results.map((r: { title: string; status: string | null }) => [r.title, r.status]));
   assert.deepEqual(status, { 'Live plan': null, 'Retired plan': 'archived' });
 });
+
+test('the project hint reorders Recall the same way through REST and MCP', async () => {
+  createNote({ title: 'Rollout plan', folder: 'Agent Memory/zeta', content: 'rollout plan for hint parity' });
+  createNote({ title: 'Rollout plan', folder: 'Agent Memory/atlas', content: 'rollout plan for hint parity' });
+  const { key } = createApiKey('reader3', ['notes:read', 'search:read']);
+  const http = await (await restGet(restRecall, rest(key, 'recall?q=rollout%20plan%20hint%20parity&project=atlas'))).json();
+  const mcp = (await rpc(key, 'recall', { query: 'rollout plan hint parity', project: 'atlas' })).structuredContent;
+  assert.equal(http.results[0].folder, 'Agent Memory/atlas');
+  assert.deepEqual(mcp.results, http.results);
+});
