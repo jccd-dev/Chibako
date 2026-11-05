@@ -121,6 +121,13 @@ function updateNow(principal: ApiKeyPrincipal, area: string, project: string | u
 
 /** One bounded, metadata-only Activity note per project folder, newest line first. */
 const ACTIVITY = { subject: "Activity", title: "Activity", lines: 30 };
+
+/** Ids of the managed bookkeeping notes (Agent Now and every project's Activity); Recall leaves them out. */
+export function bookkeepingNoteIds(): Set<string> {
+  const rows = getDb().prepare("SELECT note_id FROM memory_records WHERE role = 'overview' AND subject IN (?, ?)")
+    .all(AGENT_NOW.subject, ACTIVITY.subject) as Array<{ note_id: string }>;
+  return new Set(rows.map(row => row.note_id));
+}
 type ActivityInput = Extract<SessionMemoryInput, { action: "activity" }>;
 
 function activityLine(input: ActivityInput, linked: string | undefined): string {

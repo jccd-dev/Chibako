@@ -179,7 +179,7 @@ if (authorized(["notes:read", "search:read"])) server.registerTool("search_notes
 
 if (authorized(["notes:read", "search:read"])) server.registerTool("recall", {
   title: "Recall relevant context (token-budgeted)",
-  description: "Semantic recall, the recommended way to load context. Always BM25-ranked; when embeddings are enabled (CHIBAKO_EMBEDDING_*) it fuses vector similarity too. Returns only ranked titles + trimmed snippets, capped at a token budget — never full note bodies. `mode` is `hybrid` or `keyword`; when `keyword`, `fallback_reason` (timeout, provider_error, disabled, no_vectors) says why semantic search did not contribute. Use this instead of search_notes when you want context, not a full dump.",
+  description: "Semantic recall, the recommended way to load context. Always BM25-ranked; when embeddings are enabled (CHIBAKO_EMBEDDING_*) it fuses vector similarity too. Returns only ranked titles + trimmed snippets, capped at a token budget — never full note bodies. `mode` is `hybrid` or `keyword`; when `keyword`, `fallback_reason` (timeout, provider_error, disabled, no_vectors) says why semantic search did not contribute. Each item has the Note's `status` (draft, active, done, archived, or null); archived Notes rank below current ones, and Agent Now and Activity notes are left out (search_notes still finds them). Use this instead of search_notes when you want context, not a full dump.",
   inputSchema: z.object({ query: str, limit: z.number().int().min(1).max(50).optional(), budget: z.number().int().min(100).max(20000).optional() }).strict(),
   annotations: READ_ONLY,
 }, async (args: { query: string; limit?: number; budget?: number }) => {

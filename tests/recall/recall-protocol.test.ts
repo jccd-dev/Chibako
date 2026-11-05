@@ -66,3 +66,14 @@ test('a provider error is reported the same way through REST and MCP and counted
   assert.equal(status.query_failures.provider_error, 2);
   assert.deepEqual((await rpc(key, 'embedding_status', {})).structuredContent, status);
 });
+
+test('REST and MCP Recall items carry the same status', async () => {
+  createNote({ title: 'Retired plan', content: 'osprey migration plan', properties: { status: 'archived' } });
+  createNote({ title: 'Live plan', content: 'osprey migration plan' });
+  const { key } = createApiKey('reader3', ['notes:read', 'search:read']);
+  const http = await (await restGet(restRecall, rest(key, 'recall?q=osprey'))).json();
+  const mcp = (await rpc(key, 'recall', { query: 'osprey' })).structuredContent;
+  assert.deepEqual(mcp.results, http.results);
+  const status = Object.fromEntries(http.results.map((r: { title: string; status: string | null }) => [r.title, r.status]));
+  assert.deepEqual(status, { 'Live plan': null, 'Retired plan': 'archived' });
+});

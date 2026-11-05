@@ -4,6 +4,7 @@ import { stripFrontmatter } from "./markdown";
 import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
 import { embedQuery, QueryEmbedTimeout } from "./query-embedding";
 import { listEmbeddings } from "./embedding-store";
+import { bookkeepingNoteIds } from "../features/memory/session-memory";
 import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, type QueryFallbackReason } from "./embedding-index";
 
 // ---------- vector search ----------
@@ -115,6 +116,8 @@ export interface RecallItem {
   snippet: string;
   score: number;
   matched: string[];
+  /** The Note's `status` property (draft, active, done, archived), or null when unset. */
+  status: string | null;
 }
 
 /**
@@ -140,8 +143,13 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
 
   // Any-term keyword hits are broad in large vaults: let them boost semantic
   // matches, not displace them. shortcut: fixed 0.5 weight, tune from pilot recall samples.
-  const fused = rrf(rankings, [0.5, 1]);
+  // Bookkeeping notes are left out; archived ones sink below current ones but stay findable.
+  // shortcut: strict demotion, ticket 10 tunes it against the tune split.
+  const skip = bookkeepingNoteIds();
+  const ranked = rrf(rankings, [0.5, 1]).filter(({ id }) => !skip.has(id));
   const byId = new Map<string, NoteSummary>(listNotes().map((n) => [n.id, n]));
+  const isArchived = ({ id }: { id: string }) => byId.get(id)?.properties.status === "archived";
+  const fused = [...ranked.filter((r) => !isArchived(r)), ...ranked.filter(isArchived)];
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
 
   const items: RecallItem[] = [];
@@ -223,6 +231,7 @@ function buildItem(
     snippet,
     score: score + vecScore,
     matched,
+    status: typeof summary.properties.status === "string" ? summary.properties.status : null,
   };
 }
 
