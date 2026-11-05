@@ -61,8 +61,9 @@ export function rrf(rankings: Array<Array<{ id: string }>>, weights: number[] = 
 // ---------- token-budget snippet ----------
 
 const CHARS_PER_TOKEN = 4;
-// The budget is a ceiling, not a target: spare budget does not lengthen a Snippet. Set on the tune split:
-// 380 brought mean tokens from 1849 to 1664 with no hit rank moved; 400 sat within near-tie drift of the 1717 goal.
+// The budget is a ceiling, not a target: spare budget does not lengthen a Snippet. Measured on the tune split at limit 5 and
+// budget 2000: mean tokens per question fell from 1849 (no ceiling) to 1664 at 380, with no hit rank moved. Not measured at other
+// limits or budgets, so the saving is unproven there; the ceiling applies to all of them.
 const SNIPPET_MAX_TOKENS = 380;
 const tokensFor = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
 
@@ -105,7 +106,7 @@ function inProject(folder: string, project: string): boolean {
   return folder.toLowerCase().split("/").includes(wanted);
 }
 
-// shortcut: flat 1.3x boost. Not tuned in ticket 10: the tuning runs pass no project hint, so there is no evidence.
+// shortcut: flat 1.3x boost. Not tuned: the tuning runs pass no project hint, so there is no evidence for another value.
 const PROJECT_BOOST = 1.3;
 
 // A title that holds the query terms is the strongest sign of the Note asked for. Rank fusion alone lets a
@@ -209,7 +210,7 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
  * Picks the Notes Recall may return: bookkeeping Notes are left out, Notes in the project and Notes whose title holds the query terms get a boost, the best `limit`
  * by score are kept, and archived Notes go after current ones within that window. Archived Notes compete for a place
  * on score first, so an exact match to an old Note is not cut by weaker current ones.
- * shortcut: strict demotion inside the window, ticket 10 tunes it against the tune split.
+ * shortcut: strict demotion inside the window; not tuned against the tune split.
  */
 function selectCandidates(
   fused: Array<{ id: string; score: number }>,
@@ -262,7 +263,7 @@ async function vectorHalf(
 /** Counters must never break a read-only Recall. */
 function recordFallbackBestEffort(reason: QueryFallbackReason): void {
   try {
-    // Writes on this read path touch only a settings counter, never notes, embeddings, the store version or scan cache, so results are unaffected.
+    // The counters live in the embedding-meta row of `settings`. This read path writes nothing else (no Notes, embeddings, store version or scan cache), so results are unaffected.
     recordQueryFallback(reason);
   } catch {
     // Metrics are advisory.

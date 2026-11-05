@@ -133,7 +133,8 @@ Chibako keeps your notes and agent memory together on your own server.
   below 5000 if hooks use the server. If the provider has not answered after
   `CHIBAKO_EMBEDDING_QUERY_RETRY_MS` (default 1500, 0 turns it off; keep it below
   the time limit or it never fires), Recall makes
-  one extra call to the same provider and model and takes the first answer.
+  a second call to the same provider and model in parallel with the first, and
+  takes the first answer.
   Embedding status (`GET /api/embeddings`, MCP `embedding_status`) reports query
   latency over the last 200 Provider answers, each call timed on its own, so an
   extra call adds a sample. It holds numbers only, never query text.

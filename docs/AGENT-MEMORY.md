@@ -123,7 +123,11 @@ while keeping its cost low:
   (mapped to Stop). A Stop asking for a checkpoint defers capture. SessionEnd also
   flushes pending data and never finishes a checkpoint; Hermes `on_session_end`
   only flushes. The fixed threshold of three is independent of save thresholds.
-  One Activity note per project holds up to 30 entries within 64,000 characters,
+  One Activity note per project, titled `Activity — <project>` (plain `Activity` at the
+  area root), holds up to 30 entries within 64,000 characters. An older note titled
+  `Activity` is renamed once on its next capture, with its history and Wikilinks to it
+  kept. A capture with the same runtime, branch, commit, changed files and checkpoint
+  as the newest entry updates that entry and adds its counts. Entries run
   newest first: UTC date, runtime,
   optional branch/short commit, up to ten repo-relative changed paths, total changed
   files, and tool/prompt counts. No prompts, responses or transcript content are
@@ -265,7 +269,9 @@ Evidence in the implementation:
   whole allowance; a share a result does not use rolls forward to the next. The
   budget is a ceiling, not a target: a Snippet never exceeds 380 estimated
   tokens. Once a result's share reaches that ceiling, more budget adds no text
-  to its Snippet
+  to its Snippet. The saving from the 380-token ceiling was measured at limit 5
+  and budget 2000 only; it is not proven on other settings, and the ceiling
+  applies to all of them
   ([implementation](../src/lib/recall.ts),
   [test](../tests/recall/recall-hard-budget.test.ts)).
 - Each result carries a Snippet, never the full body: a short window of the
