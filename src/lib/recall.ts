@@ -124,8 +124,19 @@ function inProject(folder: string, project: string): boolean {
   return folder.toLowerCase().split("/").includes(wanted);
 }
 
-// shortcut: flat 1.3x boost, ticket 10 tunes it against the tune split.
+// shortcut: flat 1.3x boost. Not tuned in ticket 10: the tuning runs pass no project hint, so there is no evidence.
 const PROJECT_BOOST = 1.3;
+
+// A title that holds the query terms is the strongest sign of the Note asked for. Rank fusion alone lets a
+// vector-only top hit beat an exact title match. Tuned on the tune split: 1 was too weak, 3 gave the best top 1 and top 5.
+// shortcut: substring match with no stemming ("tests" misses "Test"), upgrade if recall misses show it.
+const TITLE_BOOST = 3;
+
+/** Share of the query terms found in the title, from 0 to 1. */
+function titleCoverage(title: string, terms: string[]): number {
+  const lower = title.toLowerCase();
+  return terms.length ? terms.filter((t) => lower.includes(t)).length / terms.length : 0;
+}
 
 // ---------- public recall API ----------
 
@@ -185,10 +196,11 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
 
   const byId = new Map<string, NoteSummary>(listNotes().map((n) => [n.id, n]));
   // Any-term keyword hits are broad in large vaults: let them boost semantic
-  // matches, not displace them. shortcut: fixed 0.5 weight, tune from pilot recall samples.
+  // matches, not displace them. 0.5 kept after a sweep on the tune split: 2 and 4 lost top 5 without
+  // recovering top 1 (a vector-only top hit still outranks a keyword top hit at any sane weight; TITLE_BOOST fixes that).
   const fused = rrf(rankings, [0.5, 1]);
-  const candidates = selectCandidates(fused, byId, opts.project?.trim(), limit);
   const terms = queryTerms(keywords);
+  const candidates = selectCandidates(fused, byId, opts.project?.trim(), limit, terms);
 
   // Each result may use at most an even share of what is left, so one long Note cannot take the whole
   // allowance; a share it leaves unused rolls forward. The total stays a hard limit.
@@ -213,7 +225,7 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
 }
 
 /**
- * Picks the Notes Recall may return: bookkeeping Notes are left out, Notes in the project get a boost, the best `limit`
+ * Picks the Notes Recall may return: bookkeeping Notes are left out, Notes in the project and Notes whose title holds the query terms get a boost, the best `limit`
  * by score are kept, and archived Notes go after current ones within that window. Archived Notes compete for a place
  * on score first, so an exact match to an old Note is not cut by weaker current ones.
  * shortcut: strict demotion inside the window, ticket 10 tunes it against the tune split.
@@ -223,11 +235,13 @@ function selectCandidates(
   byId: Map<string, NoteSummary>,
   project: string | undefined,
   limit: number,
+  terms: string[],
 ): Array<{ id: string; score: number }> {
   const hidden = bookkeepingNoteIds();
   const top = fused
     .filter(({ id }) => !hidden.has(id))
     .map((r) => { const folder = byId.get(r.id)?.folder; return project && folder !== undefined && inProject(folder, project) ? { ...r, score: r.score * PROJECT_BOOST } : r; })
+    .map((r) => ({ ...r, score: r.score * (1 + TITLE_BOOST * titleCoverage(byId.get(r.id)?.title ?? "", terms)) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
   const isArchived = ({ id }: { id: string }) => byId.get(id)?.properties.status === "archived";
