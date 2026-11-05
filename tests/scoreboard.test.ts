@@ -14,7 +14,7 @@ let vault: Awaited<ReturnType<typeof createFixtureVault>>;
 before(async () => { vault = await createFixtureVault(); });
 after(() => vault.cleanup());
 
-const rates = (result: ScoreboardResult) => Object.fromEntries(result.summary.buckets.map((b) => [`${b.group}/${b.split}`, [b.n, b.hit_at_1, b.hit_at_5]]));
+const rates = (result: ScoreboardResult) => Object.fromEntries(result.summary.ranking.buckets.map((b) => [`${b.group}/${b.split}`, [b.n, b.hit_at_1, b.hit_at_5]]));
 
 test("question files are validated and the committed fixture loads", () => {
   assert.equal(loadQuestions(FIXTURE_QUESTIONS).length, 8);
@@ -55,35 +55,35 @@ test("tune run scores hit rates by group and split, tokens, latency and hit sour
   assert.ok(!result.questions.some((q) => q.split === "hidden"), "hidden questions are not scored while tuning");
 
   const byId = Object.fromEntries(result.questions.map((q) => [q.id, q]));
-  assert.equal(byId.host.hit_rank, 1);
-  assert.equal(byId.launch.hit_rank, 2, "the vector half finds a synonym match that keywords miss");
-  assert.equal(byId.cents.hit_source, "canonical");
-  assert.equal(byId.tax.hit_source, "checkpoint");
-  assert.equal(byId.tax.canonical_rank, null, "the answer sits only in a checkpoint, not its canonical Note");
-  assert.equal(byId.lost.hit_rank, null);
-  assert.equal(byId.lost.hit_source, null);
+  assert.equal(byId.host.ranking.hit_rank, 1);
+  assert.equal(byId.launch.ranking.hit_rank, 2, "the vector half finds a synonym match that keywords miss");
+  assert.equal(byId.cents.ranking.hit_source, "canonical");
+  assert.equal(byId.tax.ranking.hit_source, "checkpoint");
+  assert.equal(byId.tax.ranking.canonical_rank, null, "the answer sits only in a checkpoint, not its canonical Note");
+  assert.equal(byId.lost.ranking.hit_rank, null);
+  assert.equal(byId.lost.ranking.hit_source, null);
 
-  assert.deepEqual(result.summary.hits_by_source, { checkpoint: 1, canonical: 4 });
+  assert.deepEqual(result.summary.ranking.hits_by_source, { checkpoint: 1, canonical: 4 });
   const report = formatReport(result);
   assert.match(report, /\btax\s.*hit @\d in checkpoint/);
   assert.match(report, /\bcents\s.*hit @\d in canonical/);
   assert.match(report, /\blost\s.*miss/);
-  assert.ok(result.summary.tokens.total > 0 && result.summary.tokens.mean > 0);
-  assert.ok(result.summary.latency_ms.p50 >= 0 && result.summary.latency_ms.p95 >= result.summary.latency_ms.p50);
+  assert.ok(result.summary.ranking.tokens.total > 0 && result.summary.ranking.tokens.mean > 0);
+  assert.ok(result.summary.normal.latency_ms.p50 >= 0 && result.summary.normal.latency_ms.p95 >= result.summary.normal.latency_ms.p50);
 });
 
 test("the report shows the keyword fallback rate", async () => {
   const questions = loadQuestions(FIXTURE_QUESTIONS);
   const hybrid = await runScoreboard({ questions });
-  assert.equal(hybrid.summary.keyword_fallback_rate, 0);
+  assert.equal(hybrid.summary.normal.keyword_fallback_rate, 0);
   assert.match(formatReport(hybrid), /keyword fallback\s+0\.00/);
 
   const provider = process.env.CHIBAKO_EMBEDDING_PROVIDER;
   delete process.env.CHIBAKO_EMBEDDING_PROVIDER;
   try {
     const keyword = await runScoreboard({ questions });
-    assert.equal(keyword.summary.keyword_fallback_rate, 1);
-    assert.ok(keyword.questions.every((q) => q.fallback_reason === "disabled"));
+    assert.equal(keyword.summary.normal.keyword_fallback_rate, 1);
+    assert.ok(keyword.questions.every((q) => q.normal.fallback_reason === "disabled"));
     assert.match(formatReport(keyword), /keyword fallback\s+1\.00/);
     assert.match(compareResults(hybrid, keyword), /keyword fallback.*0\.00 -> 1\.00/);
   } finally {
@@ -101,7 +101,7 @@ test("a final run also scores hidden questions", async () => {
 });
 
 test("fixture runs are deterministic apart from latency", async () => {
-  const strip = (r: ScoreboardResult) => JSON.stringify([r.summary.buckets, r.summary.hits_by_source, r.summary.tokens, r.questions.map((q) => ({ ...q, latency_ms: 0 }))]);
+  const strip = (r: ScoreboardResult) => JSON.stringify([r.summary.ranking, r.questions.map((q) => ({ ...q, normal: { ...q.normal, latency_ms: 0 } }))]);
   const questions = loadQuestions(FIXTURE_QUESTIONS);
   assert.equal(strip(await runScoreboard({ questions })), strip(await runScoreboard({ questions })));
 });
@@ -130,8 +130,8 @@ test("results are saved and compared with earlier runs", async () => {
     mkdirSync(join(dir, "results"), { recursive: true });
 
     const worse: ScoreboardResult = structuredClone(before);
-    worse.summary.buckets[0].hit_at_1 = 0;
-    worse.summary.tokens.mean += 100;
+    worse.summary.ranking.buckets[0].hit_at_1 = 0;
+    worse.summary.ranking.tokens.mean += 100;
     const report = compareResults(before, worse);
     assert.match(report, /saved\/tune.*top1.*-/s);
     assert.match(report, /tokens.*\+100/);
