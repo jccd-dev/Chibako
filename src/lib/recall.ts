@@ -57,8 +57,10 @@ export function rrf(rankings: Array<Array<{ id: string }>>, weights: number[] = 
 
 // ---------- token-budget snippet ----------
 
-/** Trim content to roughly `budget` words around the densest query-term hit. */
-function trimmedSnippet(content: string, query: string, budget: number): string {
+/** Trim content to at most `maxChars` characters (ellipses included), centered on the densest query-term hit. */
+function trimmedSnippet(raw: string, query: string, maxChars: number): string {
+  const content = raw.replace(/\s+/g, " ").trim();
+  if (content.length <= maxChars) return content;
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const lower = content.toLowerCase();
   let best = -1;
@@ -79,10 +81,10 @@ function trimmedSnippet(content: string, query: string, budget: number): string 
       idx = -1;
     }
   }
-  const start = best === -1 ? 0 : Math.max(0, best - budget * 2);
-  const words = content.slice(start).split(/\s+/).filter(Boolean);
-  const trimmed = words.slice(0, budget).join(" ");
-  return `${start > 0 ? "…" : ""}${trimmed}${words.length > budget ? "…" : ""}`;
+  const room = Math.max(0, maxChars - 2); // reserve both possible ellipses
+  const start = best === -1 ? 0 : Math.min(Math.max(0, best - Math.floor(room / 2)), content.length - room);
+  const end = start + room;
+  return `${start > 0 ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`.slice(0, maxChars);
 }
 
 // ---------- public recall API ----------
@@ -151,17 +153,10 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
     if (!full) continue;
 
     const titleTokens = Math.ceil(summary.title.length / 4);
-    const snippet = trimmedSnippet(stripFrontmatter(full.content), query, budget);
-    const snippetTokens = Math.ceil(snippet.length / 4);
-    const addTokens = titleTokens + snippetTokens;
-
-    if (tokens + addTokens > budget) {
-      if (items.length === 0) {
-        items.push(buildItem(summary, snippet, score, vectorScores, terms));
-      }
-      break;
-    }
-    tokens += addTokens;
+    const snippetTokens = budget - tokens - titleTokens;
+    if (snippetTokens < 1) break; // hard limit: no room left for even a tiny Snippet
+    const snippet = trimmedSnippet(stripFrontmatter(full.content), query, snippetTokens * 4);
+    tokens += titleTokens + Math.ceil(snippet.length / 4);
     items.push(buildItem(summary, snippet, score, vectorScores, terms));
   }
 
