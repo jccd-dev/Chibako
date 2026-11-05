@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { z } from "zod";
 import { dataDir, getDb } from "../../src/lib/db";
-import { clearQueryEmbeddingCache } from "../../src/lib/query-embedding";
+import { clearQueryEmbeddingCache, MAX_TIMEOUT_MS } from "../../src/lib/query-embedding";
 import { recallDetailed, type RecallFallbackReason } from "../../src/lib/recall";
 
 const TOP_K = 5;
@@ -53,7 +53,7 @@ export function assertTemporaryDataDir(dir: string): void {
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw refuse();
 }
 
-/** Ranking figures come from the ranking pass (every query vector available); normal figures from the normal pass (real time limit). */
+/** Ranking figures come from the ranking pass (every query Embedding available); normal figures from the normal pass (real time limit). */
 export interface QuestionResult {
   id: string;
   group: Group;
@@ -72,13 +72,13 @@ export interface ScoreboardResult {
   created_at: string;
   final: boolean;
   summary: {
-    /** Ranking pass: hit rates, hit sources and tokens. Stable for the same code. */
+    /** Ranking pass: hit rates and hit sources are the stable figures; tokens can shift slightly when a near-tie changes the result set. */
     ranking: {
       buckets: Bucket[];
       hits_by_source: Record<HitSource, number>;
       tokens: { total: number; mean: number };
     };
-    /** Normal pass: cold query cache, real time limit. Latency and fallback vary with the provider. */
+    /** Normal pass: cold query cache, real time limit. Latency and fallback vary with the Provider. */
     normal: {
       latency_ms: { p50: number; p95: number };
       /** Share of questions Recall answered with keywords only. */
@@ -107,12 +107,12 @@ async function normalPass(q: Question): Promise<QuestionResult["normal"]> {
   return { latency_ms: performance.now() - started, fallback_reason };
 }
 
-/** Ranking pass: waits (up to the longest allowed time limit) for the query vector, and fails if it never arrives. */
+/** Ranking pass: waits (up to the longest allowed time limit) for the query Embedding, and fails if it never arrives. */
 async function rankingPass(q: Question): Promise<QuestionResult["ranking"]> {
   const { results: items, fallback_reason } = await recallFor(q);
-  // "disabled" means no Embedding provider at all, so every run is keyword-only by design; a missing vector is the noise to refuse.
-  if (fallback_reason === "timeout" || fallback_reason === "provider_error") {
-    throw new Error(`Ranking pass could not get the query vector for "${q.id}" (${fallback_reason}); refusing to score it with keywords.`);
+  // "disabled" means no Provider at all, so every run is keyword-only by design; a missing query Embedding is the noise to refuse.
+  if (fallback_reason !== null && fallback_reason !== "disabled") {
+    throw new Error(`Ranking pass could not get the query Embedding for "${q.id}" (${fallback_reason}); refusing to score it with keywords.`);
   }
   const hit = items.findIndex((it) => {
     if (q.expected_title && norm(it.title) === norm(q.expected_title)) return true;
@@ -171,7 +171,7 @@ function summarize(rows: QuestionResult[]): ScoreboardResult["summary"] {
 async function withLongestQueryLimit<T>(work: () => Promise<T>): Promise<T> {
   const key = "CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS";
   const saved = process.env[key];
-  process.env[key] = "30000"; // MAX_TIMEOUT_MS in src/lib/query-embedding.ts
+  process.env[key] = String(MAX_TIMEOUT_MS);
   try {
     return await work();
   } finally {
@@ -182,7 +182,7 @@ async function withLongestQueryLimit<T>(work: () => Promise<T>): Promise<T> {
 
 /**
  * Two passes per run. The normal pass starts from a cold query cache under the real time limit and gives latency and
- * keyword fallback; its late answers fill the cache. The ranking pass then scores hits with every query vector available.
+ * keyword fallback; its late answers fill the cache. The ranking pass then scores hits with every query Embedding available.
  * Scores `tune` questions; `hidden` ones only when `final` is requested.
  */
 export async function runScoreboard(opts: { questions: Question[]; final?: boolean; label?: string }): Promise<ScoreboardResult> {
@@ -226,24 +226,33 @@ const signed = (n: number, digits: number) => `${n >= 0 ? "+" : ""}${n.toFixed(d
 export function formatReport(r: ScoreboardResult): string {
   const lines = [`Scoreboard "${r.label}" ${r.created_at}${r.final ? " (final: hidden questions included)" : " (tune only)"}`];
   const { ranking, normal } = r.summary;
-  lines.push("  Ranking pass (every query vector available; stable for the same code):");
+  lines.push("  Ranking pass (every query Embedding available; hit rates are stable, tokens can shift slightly on near-ties):");
   for (const b of ranking.buckets) lines.push(`    ${b.group}/${b.split}  n=${b.n}  top1 ${pad(b.hit_at_1, 2)}  top5 ${pad(b.hit_at_5, 2)}`);
   lines.push(`    hits by source  checkpoint ${ranking.hits_by_source.checkpoint}  canonical ${ranking.hits_by_source.canonical}`);
   lines.push(`    recall tokens  total ${ranking.tokens.total}  mean ${pad(ranking.tokens.mean, 1)}`);
-  lines.push("  Normal pass (cold query cache, real time limit; varies with the provider):");
+  lines.push("  Normal pass (cold query cache, real time limit; varies with the Provider):");
   lines.push(`    latency ms  p50 ${pad(normal.latency_ms.p50, 1)}  p95 ${pad(normal.latency_ms.p95, 1)}`);
   lines.push(`    keyword fallback  ${pad(normal.keyword_fallback_rate, 2)}`);
-  for (const q of r.questions) lines.push(`  ${q.id}  ${q.group}/${q.split}  ${q.ranking.hit_rank === null ? "miss" : `hit @${q.ranking.hit_rank} in ${q.ranking.hit_source}`}`);
+  for (const q of r.questions) {
+    const hit = q.ranking.hit_rank === null ? "miss" : `hit @${q.ranking.hit_rank} in ${q.ranking.hit_source}`;
+    lines.push(`  ${q.id}  ${q.group}/${q.split}  ranking: ${hit}  normal: ${pad(q.normal.latency_ms, 1)} ms, ${q.normal.fallback_reason ?? "no fallback"}`);
+  }
   return lines.join("\n");
+}
+
+function isCurrentResult(r: LoadedResult): r is ScoreboardResult {
+  const summary = (r as Partial<ScoreboardResult>).summary;
+  return r.version === RESULT_VERSION && Boolean(summary?.ranking?.buckets && summary.ranking.tokens && summary.normal?.latency_ms);
 }
 
 /** Lines showing how `next` moved against `prev`; empty-diff runs say so. */
 export function compareResults(prev: LoadedResult, next: ScoreboardResult): string {
   const header = `Compared with "${prev.label}" (${prev.created_at})`;
   if (prev.version !== RESULT_VERSION) {
-    return `${header}\n  Result version ${prev.version} is not directly comparable with version ${RESULT_VERSION}: its ranking was scored under the provider time limit, so provider timeouts moved it between runs. No deltas shown.`;
+    return `${header}\n  Result version ${prev.version} is not directly comparable with version ${RESULT_VERSION}: its ranking was scored under the Provider time limit, so Provider timeouts moved it between runs. No deltas shown.`;
   }
-  const before = prev as ScoreboardResult;
+  if (!isCurrentResult(prev)) throw new Error(`Result "${prev.label}" claims version ${RESULT_VERSION} but has no usable summary; it is damaged or hand-edited, so it cannot be compared.`);
+  const before = prev;
   const lines: string[] = [];
   const note = (name: string, a: number, b: number, digits: number) => {
     if (a !== b) lines.push(`  ${name}  ${pad(a, digits)} -> ${pad(b, digits)} (${signed(b - a, digits)})`);

@@ -33,7 +33,7 @@ if (values["source-dir"] && values["data-dir"]) {
 }
 
 async function main() {
-  // Embedding provider settings come from the environment; load the repo's env files (existing variables win).
+  // Provider settings come from the environment; load the repo's env files (existing variables win).
   const repoRoot = join(import.meta.dirname, "..");
   if (!values.fixture) for (const file of [".env.local", ".env"]) if (existsSync(join(repoRoot, file))) process.loadEnvFile(join(repoRoot, file));
   const tempVault = values.fixture ? await createFixtureVault() : values["source-dir"] ? await backupVaultToTemp(values["source-dir"]) : null;

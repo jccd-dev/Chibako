@@ -4,7 +4,7 @@ import type { EmbeddingProvider } from "./embeddings";
 
 // Must stay under the memory hook's 5000 ms request limit (scripts/memory/connection.ts) with room for the rest of Recall; tests/automatic-memory holds that.
 const DEFAULT_TIMEOUT_MS = 4000;
-const MAX_TIMEOUT_MS = 30000;
+export const MAX_TIMEOUT_MS = 30000;
 export const QUERY_CACHE_MAX = 200;
 export const QUERY_CACHE_TTL_MS = 60 * 60 * 1000;
 export const QUERY_CACHE_MAX_CHARS = 1000; // longer queries are embedded but not cached, so keys stay small

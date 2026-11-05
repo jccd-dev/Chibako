@@ -3,9 +3,10 @@ import { createServer, type Server } from "node:http";
 import { after, before, test } from "node:test";
 import { compareResults, formatReport, loadQuestions, runScoreboard, type ScoreboardResult } from "../scripts/scoreboard/scoreboard";
 import { createFixtureVault, FIXTURE_QUESTIONS } from "../scripts/scoreboard/fixture/vault";
+import { getDb } from "../src/lib/db";
 import { reindexEmbeddings, staleNoteIds } from "../src/lib/embedding-index";
 
-// A slow, OpenAI-shaped embedding provider: deterministic word-hash vectors, with a delay and a failure switch for queries.
+// A slow, OpenAI-shaped Provider: deterministic word-hash vectors, with a delay and a failure switch for queries.
 let server: Server;
 let queryDelayMs = 0;
 let failQueries = false;
@@ -85,10 +86,10 @@ test("ranking scores do not depend on provider speed, and the normal pass still 
   }
 });
 
-test("a query vector that cannot be obtained fails the run instead of scoring with keywords", async () => {
+test("a query Embedding that cannot be obtained fails the run instead of scoring with keywords", async () => {
   failQueries = true;
   try {
-    await assert.rejects(runScoreboard({ questions: loadQuestions(FIXTURE_QUESTIONS) }), /query vector/i);
+    await assert.rejects(runScoreboard({ questions: loadQuestions(FIXTURE_QUESTIONS) }), /query Embedding/i);
   } finally {
     failQueries = false;
   }
@@ -100,4 +101,27 @@ test("results from an older version are reported as not comparable", async () =>
   assert.match(report, /not directly comparable/);
   assert.doesNotMatch(report, /->/);
   assert.equal(next.version, 2);
+});
+
+test("a Provider that works but has no stored Embeddings (no_vectors) also refuses to score", async () => {
+  const kept = getDb().prepare("SELECT * FROM note_embeddings").all() as Array<Record<string, unknown>>;
+  getDb().prepare("DELETE FROM note_embeddings").run();
+  try {
+    await assert.rejects(runScoreboard({ questions: loadQuestions(FIXTURE_QUESTIONS) }), /no_vectors/);
+  } finally {
+    const cols = Object.keys(kept[0] ?? {});
+    const insert = getDb().prepare(`INSERT INTO note_embeddings (${cols.join(",")}) VALUES (${cols.map((c) => "@" + c).join(",")})`);
+    for (const row of kept) insert.run(row);
+  }
+});
+
+test("a current-version result without a summary gives a clear error, not a TypeError", async () => {
+  const next = await runScoreboard({ questions: loadQuestions(FIXTURE_QUESTIONS) });
+  assert.throws(() => compareResults({ version: 2, label: "broken", created_at: "2026-01-01T00:00:00.000Z" }, next), /no usable summary/);
+});
+
+test("per-question report lines name their pass: ranking hit and normal latency/fallback", async () => {
+  const run = await runScoreboard({ questions: loadQuestions(FIXTURE_QUESTIONS) });
+  const line = formatReport(run).split("\n").find((l) => l.startsWith(`  ${run.questions[0].id}  `));
+  assert.match(line ?? "", /ranking: (hit @\d in \w+|miss)\s+normal: \d+\.\d ms, (no fallback|timeout|provider_error|no_vectors|disabled)/);
 });

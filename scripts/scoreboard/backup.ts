@@ -7,14 +7,16 @@ import Database from "better-sqlite3";
 export async function backupVaultToTemp(sourceDir: string): Promise<{ dir: string; cleanup: () => void }> {
   const dir = mkdtempSync(join(tmpdir(), "chibako-scoreboard-copy-"));
   const cleanup = () => rmSync(dir, { recursive: true, force: true });
-  const source = new Database(join(sourceDir, "brain.db"), { readonly: true, fileMustExist: true });
+  let source: Database.Database | undefined;
   try {
+    // Opened inside the try: a missing brain.db throws here, and the new directory must still be removed.
+    source = new Database(join(sourceDir, "brain.db"), { readonly: true, fileMustExist: true });
     await source.backup(join(dir, "brain.db"));
   } catch (error) {
     cleanup();
     throw error;
   } finally {
-    source.close();
+    source?.close();
   }
   return { dir, cleanup };
 }
