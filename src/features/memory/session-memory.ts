@@ -132,7 +132,7 @@ export function bookkeepingNoteIds(): Set<string> {
 type ActivityInput = Extract<SessionMemoryInput, { action: "activity" }>;
 
 // A line is: time UTC · runtime · [branch/head · ][files · ]counts[ · [[checkpoint]]]. `where` is everything between runtime and counts.
-const ACTIVITY_LINE = /^- (.+?) UTC · (\S+) · ((?:.* · )?)(\d+) tool calls?, (\d+) prompts?( · \[\[[^\]]+\]\])?$/;
+const ACTIVITY_LINE = /^- .+? UTC · (?<runtime>\S+) · (?<where>(?:.* · )?)(?<calls>\d+) tool calls?, (?<prompts>\d+) prompts?(?<tail> · \[\[[^\]]+\]\])?$/;
 
 /** The line for this capture; `merged` is true when it replaces the newest line (same runtime, branch, commit, files and checkpoint) with the counts added. */
 function activityLine(input: ActivityInput, linked: string | undefined, newest: string | undefined): { line: string; merged: boolean } {
@@ -144,10 +144,10 @@ function activityLine(input: ActivityInput, linked: string | undefined, newest: 
     changed && `${plural(changed, "file")} changed${files.length ? `: ${files.map(file => `\`${file}\``).join(", ")}${changed > files.length ? ` (+${changed - files.length} more)` : ""}` : ""}`,
   ].filter(Boolean).map(part => `${part} · `).join("");
   const tail = linked ? ` · [[${linked}]]` : "";
-  const previous = newest && ACTIVITY_LINE.exec(newest);
-  const merge = previous && previous[2] === input.runtime && previous[3] === where && (previous[6] ?? "") === tail;
-  const calls = tool_calls + (merge ? Number(previous[4]) : 0);
-  const prompts = user_turns + (merge ? Number(previous[5]) : 0);
+  const previous = newest && ACTIVITY_LINE.exec(newest)?.groups;
+  const merge = previous && previous.runtime === input.runtime && previous.where === where && (previous.tail ?? "") === tail;
+  const calls = tool_calls + (merge ? Number(previous.calls) : 0);
+  const prompts = user_turns + (merge ? Number(previous.prompts) : 0);
   return { merged: Boolean(merge), line: `- ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC · ${input.runtime} · ${where}${plural(calls, "tool call")}, ${plural(prompts, "prompt")}${tail}` };
 }
 

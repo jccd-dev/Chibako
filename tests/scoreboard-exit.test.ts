@@ -16,7 +16,7 @@ test("a fixture Scoreboard run exits right after cleanup, so a late Provider ans
     const { stdout } = await run(process.execPath, [
       "--import", "tsx", "--import", join(root, "tests/fixtures/late-provider-answer.mjs"),
       join(root, "scripts/scoreboard.ts"), "--fixture", "--out", join(work, "results"),
-    ], { cwd: root, env: { ...process.env, VAULT_PATH_FILE: pathFile }, timeout: 60_000 });
+    ], { cwd: root, env: { ...process.env, VAULT_PATH_FILE: pathFile }, timeout: 20_000 });
     assert.match(stdout, /Saved /, "the report is fully written before the process exits");
     const vault = readFileSync(pathFile, "utf8");
     assert.match(vault, /chibako-scoreboard-fixture-/);

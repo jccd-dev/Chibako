@@ -126,7 +126,7 @@ while keeping its cost low:
   One Activity note per project, titled `Activity — <project>` (plain `Activity` at the
   area root), holds up to 30 entries within 64,000 characters. An older note titled
   `Activity` is renamed once on its next capture, with its history and Wikilinks to it
-  kept. A capture with the same runtime, branch, commit, changed files and checkpoint
+  kept; if you already have a note at the new title, the log keeps its old title. A capture with the same runtime, branch, commit, changed files and checkpoint
   as the newest entry updates that entry and adds its counts. Entries run
   newest first: UTC date, runtime,
   optional branch/short commit, up to ten repo-relative changed paths, total changed

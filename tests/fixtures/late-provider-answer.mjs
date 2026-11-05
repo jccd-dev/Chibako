@@ -1,6 +1,12 @@
 // Preloaded into a Scoreboard CLI child. The timer stands in for a Provider answer that lands after the run: it keeps the
-// process alive, so a CLI that waits for its event loop to drain lets later code run. The exit hook reports the Vault path.
-import { writeFileSync } from "node:fs";
+// process alive and, if it ever fires, does what a late answer does (opens the database path, recreating the deleted folder).
+// The exit hook reports the Vault path so the test can check nothing was recreated.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
-setTimeout(() => {}, 2500);
+setTimeout(() => {
+  const dir = process.env.CHIBAKO_DATA_DIR;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "brain.db"), "");
+}, 2500);
 process.on("exit", () => writeFileSync(process.env.VAULT_PATH_FILE, process.env.CHIBAKO_DATA_DIR ?? ""));
