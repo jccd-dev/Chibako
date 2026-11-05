@@ -51,7 +51,7 @@ test("the tool refuses a data directory outside the OS temp dir", async () => {
 test("tune run scores hit rates by group and split, tokens, latency and hit source, without hidden questions", async () => {
   const result = await runScoreboard({ questions: loadQuestions(FIXTURE_QUESTIONS) });
   assert.equal(result.final, false);
-  assert.deepEqual(rates(result), { "saved/tune": [5, 0.6, 1], "conversation-only/tune": [1, 0, 0] });
+  assert.deepEqual(rates(result), { "saved/tune": [5, 0.8, 1], "conversation-only/tune": [1, 0, 0] });
   assert.ok(!result.questions.some((q) => q.split === "hidden"), "hidden questions are not scored while tuning");
 
   const byId = Object.fromEntries(result.questions.map((q) => [q.id, q]));
@@ -95,7 +95,7 @@ test("a final run also scores hidden questions", async () => {
   const result = await runScoreboard({ questions: loadQuestions(FIXTURE_QUESTIONS), final: true });
   assert.equal(result.final, true);
   assert.deepEqual(rates(result), {
-    "saved/tune": [5, 0.6, 1], "saved/hidden": [1, 1, 1],
+    "saved/tune": [5, 0.8, 1], "saved/hidden": [1, 1, 1],
     "conversation-only/tune": [1, 0, 0], "conversation-only/hidden": [1, 0, 0],
   });
 });

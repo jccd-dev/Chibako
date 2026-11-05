@@ -87,3 +87,17 @@ test('the project hint reorders Recall the same way through REST and MCP', async
   assert.equal(http.results[0].folder, 'Agent Memory/atlas');
   assert.deepEqual(mcp.results, http.results);
 });
+
+test('a malformed project hint is rejected the same way through REST and MCP', async () => {
+  const { key } = createApiKey('reader4', ['notes:read', 'search:read']);
+  for (const project of ['Bad Project', '../escape', 'a'.repeat(65), '']) {
+    const http = await restGet(restRecall, rest(key, `recall?q=rollout&project=${encodeURIComponent(project)}`));
+    assert.equal(http.status, 400, `REST accepted ${JSON.stringify(project)}`);
+    const mcp = await rpc(key, 'recall', { query: 'rollout', project });
+    assert.equal(mcp.isError, true, `MCP accepted ${JSON.stringify(project)}`);
+  }
+  for (const project of ['atlas', 'workstation', 'my-repo.v2_x']) {
+    assert.equal((await restGet(restRecall, rest(key, `recall?q=rollout&project=${project}`))).status, 200);
+    assert.notEqual((await rpc(key, 'recall', { query: 'rollout', project })).isError, true);
+  }
+});
