@@ -4,7 +4,10 @@ import { getNote } from "../../lib/notes";
 import { saveObservation } from "../../lib/recall";
 import { normalizeFolder } from "../organization/folders";
 import { memoryFolder, persist } from "./memory";
+import { z } from "zod";
 import { MemoryError, factSaveSchema, memoryWriteSchema } from "./types";
+
+const factWriteSchema = memoryWriteSchema.extend({ content: z.string().min(1) });
 
 /** Idempotency namespace for Fact notes. Authorization (notes:write) is the transport's job, as it was for observations. */
 const FACT_ACTOR = "fact-notes";
@@ -60,10 +63,14 @@ export function saveFact(raw: unknown): FactReceipt {
     if (input.note_id) {
       const related = getNote(input.note_id);
       if (!related) throw new MemoryError("Related note not found", 404, "not_found");
-      content += `\n\nRelated: [[${related.folder ? `${related.folder}/` : ""}${related.title}]]`;
+      const target = `${related.folder ? `${related.folder}/` : ""}${related.title}`;
+      // [, ] and | change how a Wikilink resolves, so such a target would link a different Note.
+      if (/[[\]|]/.test(target)) throw new MemoryError("Related note cannot be linked: its title or folder contains [, ] or |", 400, "invalid_input");
+      content += `\n\nRelated: [[${target}]]`;
     }
     if (input.source) content += `\nSource: ${input.source}`;
-    const write = memoryWriteSchema.safeParse({
+    // Fact content keeps the legacy 200k range (factSaveSchema); only the checkpoint 64k cap is relaxed.
+    const write = factWriteSchema.safeParse({
       project: input.project, request_id: requestId, role: "wiki", subject: requestId, session_id: "fact",
       title: input.title ?? freeTitle(folder, deriveTitle(input.content)), content, expected_revision: null,
     });

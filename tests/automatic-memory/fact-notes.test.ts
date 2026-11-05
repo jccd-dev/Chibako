@@ -98,17 +98,22 @@ test("denied and malformed saves write nothing, and an outdated fact can be arch
   try {
     const reader = createApiKey("reader", ["notes:read", "memory:write"]);
     const { key } = createApiKey("writer", ["notes:write"]);
+    const pipeNote = createNote({ title: "Billing|private", folder: "Projects", content: "pipe" });
     const before = counts();
     assert.equal((await rpc(reader.key, "memory_save", { content: "x" })).isError, true);
     assert.equal((await rest(reader.key, { content: "x" })).status, 403);
     for (const body of [
       { content: "x", project: "Bad/Project" }, { content: "x", title: "a/b" }, { content: "x", title: "a|b" },
-      { content: "x", note_id: "missing" }, { content: "   " }, { content: "x", extra: 1 }, { content: "y".repeat(70_000) },
+      { content: "x", note_id: "missing" }, { content: "   " }, { content: "x", extra: 1 }, { content: "y".repeat(200_001) }, { content: "x", note_id: pipeNote.id },
     ]) {
       assert.equal((await rpc(key, "memory_save", body)).isError, true, JSON.stringify(body).slice(0, 60));
       assert.ok((await rest(key, body)).status >= 400);
     }
     assert.deepEqual(counts(), before);
+
+    // The legacy 200k range still saves as a Fact note, past the checkpoint 64k cap.
+    const big = (await rpc(key, "memory_save", { content: "Big fact. " + "y".repeat(100_000), source: "claude" })).structuredContent;
+    assert.ok(getNote(big.id)!.content.length > 100_000);
 
     const oldFact = (await rpc(key, "memory_save", { content: "Deploys run on Fridays.", title: "Deploy day" })).structuredContent;
     const replacement = (await rpc(key, "memory_save", { content: "Deploys never run on Fridays.", title: "Deploy day v2" })).structuredContent;
