@@ -70,6 +70,19 @@ test('a short Note leaves its unused share to the Notes after it', async () => {
   });
 });
 
+// Budget is a ceiling, not a target: spare budget does not lengthen a Snippet.
+for (const budget of [undefined, 20000]) {
+  test(`a long Note stops at the Snippet ceiling and keeps the match with a ${budget ?? 'default'} budget`, async () => {
+    await withVault(async ({ createNote, recall }) => {
+      createNote({ title: 'Long', content: `${'lorem ipsum '.repeat(600)} zebrafish ${'dolor sit '.repeat(600)}` });
+      const [hit] = await recall({ query: 'zebrafish', ...(budget ? { budget } : {}) });
+      assert(hit.snippet.length <= 380 * 4, `the Snippet used ${hit.snippet.length} characters`);
+      assert(hit.snippet.length > 370 * 4, 'the ceiling is used in full when the Note has the text');
+      assert(hit.snippet.includes('zebrafish'));
+    });
+  });
+}
+
 test('the snippet matches a term followed by punctuation and reports it as matched', async () => {
   await withVault(async ({ createNote, recall }) => {
     const head = Array.from({ length: 400 }, (_, i) => `head${i}`).join(' ');

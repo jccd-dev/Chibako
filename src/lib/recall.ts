@@ -59,6 +59,9 @@ export function rrf(rankings: Array<Array<{ id: string }>>, weights: number[] = 
 // ---------- token-budget snippet ----------
 
 const CHARS_PER_TOKEN = 4;
+// The budget is a ceiling, not a target: spare budget does not lengthen a Snippet. Set on the tune split:
+// 380 brought mean tokens from 1849 to 1664 with no hit rank moved; 400 sat within near-tie drift of the 1717 goal.
+const SNIPPET_MAX_TOKENS = 380;
 const tokensFor = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
 
 /** Leading and trailing punctuation only, so `osprey?` becomes `osprey` while `i18n` and `a11y` stay whole. */
@@ -203,7 +206,7 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
   const candidates = selectCandidates(fused, byId, opts.project?.trim(), limit, terms);
 
   // Each result may use at most an even share of what is left, so one long Note cannot take the whole
-  // allowance; a share it leaves unused rolls forward. The total stays a hard limit.
+  // allowance; a share it leaves unused rolls forward, up to SNIPPET_MAX_TOKENS. The total stays a hard limit.
   const items: RecallItem[] = [];
   let used = 0;
   for (const [index, { id, score }] of candidates.entries()) {
@@ -214,7 +217,7 @@ export async function recallDetailed(opts: RecallOptions): Promise<RecallRespons
 
     const share = Math.floor((budget - used) / (candidates.length - index));
     const titleTokens = tokensFor(summary.title);
-    const snippetRoom = share - titleTokens; // tokens this result's Snippet may use
+    const snippetRoom = Math.min(SNIPPET_MAX_TOKENS, share - titleTokens); // tokens this result's Snippet may use
     if (snippetRoom < 1) continue; // no room for even a tiny Snippet; later results may have a larger share
     const snippet = trimmedSnippet(stripFrontmatter(full.content), terms, snippetRoom * CHARS_PER_TOKEN);
     used += titleTokens + tokensFor(snippet);
