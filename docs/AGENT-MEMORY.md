@@ -242,8 +242,16 @@ Evidence in the implementation:
   local and uses BM25 alone.
 - Stale embeddings repair themselves. The web server (not the stdio process,
   and not a remote Recall request) runs a scheduled Reindex every 5 minutes at
-  startup and after, embedding up to 200 stale Notes per run in batches of 50
-  ([implementation](../src/lib/embedding-repair.ts)). Staleness comes from
+  startup and after, embedding up to 200 stale Notes per run, 50 Notes at a time
+  per Reindex pass, sent to the Provider in requests of `CHIBAKO_EMBEDDING_BATCH`
+  Notes (default 4)
+  ([implementation](../src/lib/embedding-repair.ts)). A request that gets a
+  Provider limit (429) ends the run; the requests that passed are kept and the
+  next run continues. Each request has a 30 second limit, so a hung call cannot
+  stop later runs. `embedding_status` reports the last repair time, Notes
+  indexed and Notes remaining after it; a later single-Note success does not
+  change them, and the last error starts with any `retry-after` and
+  `x-ratelimit-*` values the Provider sent. Staleness comes from
   stored content hashes, so a restart finds the same Notes again. The existing
   circuit breaker applies: after repeated provider failures the pass embeds
   nothing for a minute, and a failing provider never blocks Note writes or
@@ -301,6 +309,23 @@ Local stdio remains available through `dist/mcp/server.mjs`. It reads the same
 `CHIBAKO_DATA_DIR` as the web application and has full local access when no API
 key is configured. See [Connect your AI agent](../README.md#-connect-your-ai-agent)
 for both configurations. Chibako API keys are not an OAuth implementation.
+
+## Changing the Embedding model
+
+Set `CHIBAKO_EMBEDDING_MODEL` (and `CHIBAKO_EMBEDDING_DIM` if the new model
+needs one) and restart the web server. Nothing is deleted. Rows made under the
+old model count as stale, so vector search ignores them and Recall uses
+keywords for any Note not yet re-embedded. Each scheduled repair run (every 5
+minutes) replaces rows with the new model until `embedding_status` shows
+`stale: 0`; a Provider limit only slows this, because requests that passed are
+kept. Query latency figures reset at the first repair run after the change,
+since they belong to the old model.
+
+Once the rebuild is complete, run the `tune` Scoreboard against a backup of the
+Vault (`npm run scoreboard -- --source-dir <Vault> --questions <file> --label
+<model>`, add `--compare <earlier result>`) and compare it with the previous
+model before relying on the new one. A run during the rebuild measures a
+half-indexed vault.
 
 ## Current limits
 

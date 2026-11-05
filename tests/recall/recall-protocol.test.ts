@@ -49,6 +49,7 @@ test('REST and MCP Recall return the same mode, fallback reason and results, and
   const status = (await (await restGet(restEmbeddings, rest(key, 'embeddings'))).json()).status;
   assert.deepEqual((await rpc(key, 'embedding_status', {})).structuredContent, status);
   assert.deepEqual(status.query_failures, { timeout: 0, provider_error: 0 });
+  for (const field of ['last_repair_at', 'repair_indexed', 'repair_remaining', 'query_failures_rescued']) assert.ok(field in status, `${field} is in the shared status`);
 });
 
 test('a provider error is reported the same way through REST and MCP and counted in both statuses', async () => {

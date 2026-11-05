@@ -5,7 +5,7 @@ import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
 import { embedQuery, QueryEmbedTimeout } from "./query-embedding";
 import { listEmbeddings } from "./embedding-store";
 import { bookkeepingNoteIds } from "../features/memory/session-memory";
-import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, recordQueryLatency, type QueryFallbackReason } from "./embedding-index";
+import { freshEmbeddingIds, staleNoteIds, refreshNotes, recordQueryFallback, recordQueryLatency, recordQueryRescue, type QueryFallbackReason } from "./embedding-index";
 
 // ---------- vector search ----------
 
@@ -27,7 +27,7 @@ function cosine(a: number[], b: number[]): number {
 async function vectorSearch(query: string, limit: number): Promise<Array<{ id: string; score: number }>> {
   const provider = getEmbeddingProvider();
   if (!provider) return [];
-  const qvec = await embedQuery(provider, query, recordLatencyBestEffort);
+  const qvec = await embedQuery(provider, query, recordLatencyBestEffort, recordRescueBestEffort);
   if (!qvec) return [];
   const fresh = freshEmbeddingIds();
   const scored: Array<{ id: string; score: number }> = [];
@@ -295,6 +295,15 @@ function recordFallbackBestEffort(reason: QueryFallbackReason): void {
 function recordLatencyBestEffort(ms: number): void {
   try {
     recordQueryLatency(ms);
+  } catch {
+    // Metrics are advisory.
+  }
+}
+
+/** Runs when a failed call was rescued by another one; a counter must never break Recall. */
+function recordRescueBestEffort(): void {
+  try {
+    recordQueryRescue();
   } catch {
     // Metrics are advisory.
   }

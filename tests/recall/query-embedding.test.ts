@@ -134,6 +134,11 @@ async function recallWithRetry(plan: typeof callPlan) {
   return { result, ms: performance.now() - start };
 }
 
+async function figures() {
+  const { query_failures, query_failures_rescued } = (await import('../../src/lib/embedding-index')).embeddingStatus();
+  return { failures: query_failures.provider_error + query_failures.timeout, rescued: query_failures_rescued };
+}
+
 test('a slow first call is rescued by the extra call, and the first answer wins', async () => {
   const { result, ms } = await recallWithRetry([{ delayMs: 2000 }, { delayMs: 0 }]);
   assert.equal(result.mode, 'hybrid');
@@ -156,23 +161,41 @@ test('a first call that fails before the delay is not retried', async () => {
   assert.equal(queryCalls, 1);
 });
 
-test('a first call that fails after the extra call started does not fail Recall', async () => {
+test('a first call that fails after the extra call started does not fail Recall, and is counted as rescued', async () => {
+  const before = await figures();
   const { result } = await recallWithRetry([{ delayMs: 100, fail: true }, { delayMs: 200 }]);
   assert.equal(result.mode, 'hybrid');
   assert.equal(result.fallback_reason, null);
+  assert.deepEqual(await figures(), { failures: before.failures, rescued: before.rescued + 1 });
 });
 
-test('an extra call that fails does not fail Recall while the first can still answer', async () => {
+test('an extra call that fails does not fail Recall while the first can still answer, and is counted as rescued', async () => {
+  const before = await figures();
   const { result } = await recallWithRetry([{ delayMs: 200 }, { delayMs: 0, fail: true }]);
   assert.equal(result.mode, 'hybrid');
   assert.equal(result.fallback_reason, null);
+  assert.deepEqual(await figures(), { failures: before.failures, rescued: before.rescued + 1 });
 });
 
-test('when both calls fail, Recall reports provider_error', async () => {
+test('a failure to record a rescue never breaks a read-only Recall', async () => {
+  const { getDb } = await import('../../src/lib/db');
+  getDb().exec(`CREATE TRIGGER block_meta BEFORE UPDATE ON settings WHEN NEW.key = 'embedding_meta'
+    BEGIN SELECT RAISE(ABORT, 'write refused'); END`);
+  try {
+    const { result } = await recallWithRetry([{ delayMs: 100, fail: true }, { delayMs: 200 }]);
+    assert.equal(result.mode, 'hybrid');
+  } finally {
+    getDb().exec('DROP TRIGGER block_meta');
+  }
+});
+
+test('when both calls fail, Recall reports provider_error and nothing counts as rescued', async () => {
+  const before = await figures();
   const { result } = await recallWithRetry([{ delayMs: 100, fail: true }, { delayMs: 0, fail: true }]);
   assert.equal(result.mode, 'keyword');
   assert.equal(result.fallback_reason, 'provider_error');
   assert.equal(queryCalls, 2);
+  assert.deepEqual(await figures(), { failures: before.failures + 1, rescued: before.rescued });
 });
 
 test('when both calls are slow, Recall still answers at the limit and makes only one extra call', async () => {

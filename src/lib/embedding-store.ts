@@ -22,10 +22,16 @@ export interface EmbeddingMeta {
   input_version: number;
   last_error: string | null;
   last_indexed_at: number | null;
+  /** Last Reindex run (scheduled or manual): when it ended, Notes indexed and Notes still remaining after it. Only a Reindex writes these. */
+  last_repair_at: number | null;
+  repair_indexed: number;
+  repair_remaining: number;
   // Query-time counters. Reasons only, never query text or provider messages.
   query_timeouts: number;
   query_provider_errors: number;
   query_no_vectors: number;
+  /** Query calls that failed while another call still answered the query. */
+  query_rescued_failures: number;
   last_query_failure_reason: "timeout" | "provider_error" | null;
   last_query_failure_at: number | null;
   /** Most recent Provider answer times for query Embeddings, oldest first. Numbers only. */
@@ -35,7 +41,8 @@ export interface EmbeddingMeta {
 const META_KEY = "embedding_meta";
 const EMPTY_META: EmbeddingMeta = {
   model: "", dim: 0, input_version: 0, last_error: null, last_indexed_at: null,
-  query_timeouts: 0, query_provider_errors: 0, query_no_vectors: 0,
+  last_repair_at: null, repair_indexed: 0, repair_remaining: 0,
+  query_timeouts: 0, query_provider_errors: 0, query_no_vectors: 0, query_rescued_failures: 0,
   last_query_failure_reason: null, last_query_failure_at: null, query_latency_ms: [],
 };
 
@@ -94,11 +101,6 @@ export function putEmbedding(e: Omit<StoredEmbedding, "updated_at"> & { updated_
 
 export function deleteEmbedding(noteId: string): void {
   getDb().prepare(`DELETE FROM note_embeddings WHERE note_id = ?`).run(noteId);
-  bumpStoreVersion();
-}
-
-export function deleteAllEmbeddings(): void {
-  getDb().prepare(`DELETE FROM note_embeddings`).run();
   bumpStoreVersion();
 }
 

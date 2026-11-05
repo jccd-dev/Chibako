@@ -246,7 +246,7 @@ if (options.exposure === "local" && authorized(["notes:write", "schema:write"]))
 
 if (authorized(["notes:read"])) server.registerTool("embedding_status", {
   title: "Embedding status",
-  description: "Check whether semantic embeddings are enabled, the active provider/model/dimensions, how many notes are indexed, how many are stale, the last indexing error (if any), query-time failure and keyword-fallback counts with the last failure reason and time, and query Embedding latency (p50, p95, max) over recent Provider answers.",
+  description: "Check whether semantic embeddings are enabled, the active provider/model/dimensions, how many notes are indexed, how many are stale, the last indexing error (if any, starting with any Provider retry-after and rate-limit hints), the last repair time with Notes indexed and Notes remaining after it, query-time failure and keyword-fallback counts with the last failure reason and time, the count of failed query calls another call rescued, and query Embedding latency (p50, p95, max) over recent Provider answers.",
   inputSchema: z.object({}).strict(),
   annotations: READ_ONLY,
 }, () => {

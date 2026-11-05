@@ -1,4 +1,4 @@
-import type { EmbeddingProvider } from "./embeddings";
+import { envInt, type EmbeddingProvider } from "./embeddings";
 
 // ---------- query embedding: time limit + small cache ----------
 
@@ -19,18 +19,12 @@ export class QueryEmbedTimeout extends Error {
 
 /** CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS: positive integer up to 30000, otherwise the 4000 ms default. Read lazily so tests can toggle it. */
 export function queryEmbedTimeoutMs(): number {
-  const raw = (process.env.CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS ?? "").trim();
-  if (!/^\d+$/.test(raw)) return DEFAULT_TIMEOUT_MS;
-  const n = Number(raw);
-  return n >= 1 && n <= MAX_TIMEOUT_MS ? n : DEFAULT_TIMEOUT_MS;
+  return envInt("CHIBAKO_EMBEDDING_QUERY_TIMEOUT_MS", DEFAULT_TIMEOUT_MS, 1, MAX_TIMEOUT_MS);
 }
 
 /** CHIBAKO_EMBEDDING_QUERY_RETRY_MS: wait before the one extra call. 0 turns it off; anything else invalid gives the 1500 ms default. */
 export function queryRetryDelayMs(): number {
-  const raw = (process.env.CHIBAKO_EMBEDDING_QUERY_RETRY_MS ?? "").trim();
-  if (!/^\d+$/.test(raw)) return DEFAULT_RETRY_DELAY_MS;
-  const n = Number(raw);
-  return n <= MAX_TIMEOUT_MS ? n : DEFAULT_RETRY_DELAY_MS;
+  return envInt("CHIBAKO_EMBEDDING_QUERY_RETRY_MS", DEFAULT_RETRY_DELAY_MS, 0, MAX_TIMEOUT_MS);
 }
 
 // Insertion-ordered Map, so the oldest entry is evicted first (FIFO, not LRU).
@@ -50,9 +44,15 @@ function cacheKey(p: EmbeddingProvider, text: string): string | null {
  * and the first answer wins; a failed call only fails the query once no other call is running. A call that fails before
  * the delay is not retried. Calls that finish after the limit still fill the cache, so the same query is instant next
  * time; failed calls are never cached. `onAnswer` gets each Provider answer's time, late and losing answers included;
- * cache hits and failed calls make no report.
+ * cache hits and failed calls make no report. `onRescue` is called once when a call failed and another call still answered
+ * the query in time.
  */
-export async function embedQuery(provider: EmbeddingProvider, text: string, onAnswer?: (ms: number) => void): Promise<number[] | undefined> {
+export async function embedQuery(
+  provider: EmbeddingProvider,
+  text: string,
+  onAnswer?: (ms: number) => void,
+  onRescue?: () => void,
+): Promise<number[] | undefined> {
   const key = cacheKey(provider, text);
   const hit = key === null ? undefined : cache.get(key);
   if (key !== null && hit) {
@@ -70,15 +70,17 @@ export async function embedQuery(provider: EmbeddingProvider, text: string, onAn
     }
     return vec;
   };
+  let failedCalls = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
+    const vec = await Promise.race([
       new Promise<number[] | undefined>((resolve, reject) => {
         let running = 0;
         const start = () => {
           running++;
           callProvider().then(resolve, (e) => {
+            failedCalls++;
             if (--running === 0) reject(e);
           });
         };
@@ -90,6 +92,8 @@ export async function embedQuery(provider: EmbeddingProvider, text: string, onAn
         timer = setTimeout(() => reject(new QueryEmbedTimeout()), queryEmbedTimeoutMs());
       }),
     ]);
+    if (failedCalls > 0 && vec) onRescue?.();
+    return vec;
   } finally {
     clearTimeout(timer);
     clearTimeout(retryTimer);

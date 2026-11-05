@@ -3,14 +3,15 @@ import { listNotes, getNote, type Note } from "./notes";
 import {
   getEmbeddingProvider,
   embeddingInput,
+  embeddingBatchSize,
   inputHash,
+  BULK_REQUEST_TIMEOUT_MS,
   INPUT_VERSION,
   type EmbeddingProvider,
 } from "./embeddings";
 import {
   getEmbedding,
   putEmbedding,
-  deleteAllEmbeddings,
   deleteOrphanEmbeddings,
   countEmbeddings,
   getMeta,
@@ -25,7 +26,6 @@ import {
 // model / input_version / dimensions match the active Provider. Timestamps are
 // never trusted for correctness.
 
-const BATCH = 100;
 const DEFAULT_MAX = 200;
 const BREAKER_MS = 60_000;
 const BREAKER_THRESHOLD = 3;
@@ -59,13 +59,21 @@ export interface EmbeddingStatus {
   rows: number;
   last_error: string | null;
   last_indexed_at: number | null;
-  /** Query Embedding failures; the provider could not embed the Recall query. */
+  /** When the last Reindex run (scheduled or manual) ended. A later single-Note success does not change it or the two figures below. */
+  last_repair_at: number | null;
+  /** Notes with a fresh Embedding after that run. */
+  repair_indexed: number;
+  /** Notes still without one after that run. */
+  repair_remaining: number;
+  /** Recall queries the Provider could not embed in time, so Recall fell back to keywords. A call that failed while another call still answered is not counted here; see query_failures_rescued. */
   query_failures: { timeout: number; provider_error: number };
+  /** Query calls that failed while another call still answered the query, so Recall kept its vectors. */
+  query_failures_rescued: number;
   /** Recalls that fell back to keywords, by reason (disabled is configuration, not counted). */
   query_fallbacks: { timeout: number; provider_error: number; no_vectors: number };
   last_query_failure_reason: "timeout" | "provider_error" | null;
   last_query_failure_at: number | null;
-  /** How long the Provider took to answer recent query Embeddings, including answers after the time limit. Calls that fail or never answer are not timed; see query_failures. */
+  /** How long the Provider took to answer recent query Embeddings, including answers after the time limit. Calls that fail or never answer are not timed; see query_failures and query_failures_rescued. */
   query_latency: { samples: number; p50_ms: number | null; p95_ms: number | null; max_ms: number | null };
 }
 
@@ -83,6 +91,11 @@ export function recordQueryFallback(reason: QueryFallbackReason): void {
       ? { query_timeouts: meta.query_timeouts + 1, last_query_failure_reason: reason, last_query_failure_at: now() }
       : { query_provider_errors: meta.query_provider_errors + 1, last_query_failure_reason: reason, last_query_failure_at: now() },
   );
+}
+
+/** Count a query call that failed while another call still answered the query. */
+export function recordQueryRescue(): void {
+  setMeta({ query_rescued_failures: getMeta().query_rescued_failures + 1 });
 }
 
 /** Keep one answer time. Stores the number only, never the query. */
@@ -141,7 +154,11 @@ function cachedScan(): Scan {
   return value;
 }
 
-/** Wipe and reset when the active model / dimensions / input formula changed. */
+/**
+ * Follow the active model / dimensions / input formula. Rows made under another one are never deleted here: they are stale
+ * (isFresh), so vector search skips them and repair replaces each as its Note is re-embedded. Deleting would leave a Provider
+ * that refuses calls with an empty index.
+ */
 function syncMeta(provider: EmbeddingProvider): void {
   const meta = getMeta();
   const changed =
@@ -149,9 +166,17 @@ function syncMeta(provider: EmbeddingProvider): void {
     meta.input_version !== INPUT_VERSION ||
     (provider.dim > 0 && meta.dim !== provider.dim);
   if (changed) {
-    deleteAllEmbeddings();
     setMeta({ model: provider.model, dim: provider.dim, input_version: INPUT_VERSION, query_latency_ms: [] });
   }
+}
+
+/** A hung Provider call must not hold the in-flight guards forever: fail it so later repair ticks run. */
+function withTimeout<T>(call: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`embedding request timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([call, limit]).finally(() => clearTimeout(timer));
 }
 
 /** Embed the given note ids. Provider failures are recorded, not thrown; a maintenance fence (MaintenanceError) propagates. */
@@ -161,8 +186,9 @@ export async function refreshNotes(ids: string[]): Promise<number> {
   if (Date.now() < breakerUntil) return 0;
 
   let done = 0;
-  for (let i = 0; i < ids.length; i += BATCH) {
-    const slice = ids.slice(i, i + BATCH);
+  const batch = embeddingBatchSize();
+  for (let i = 0; i < ids.length; i += batch) {
+    const slice = ids.slice(i, i + batch);
     const valid: string[] = [];
     const inputs: string[] = [];
     const hashes: string[] = [];
@@ -179,7 +205,7 @@ export async function refreshNotes(ids: string[]): Promise<number> {
     if (!valid.length) continue;
     for (const id of valid) inFlight.add(id);
     try {
-      const vectors = await provider.embed(inputs);
+      const vectors = await withTimeout(provider.embed(inputs), BULK_REQUEST_TIMEOUT_MS);
       for (let k = 0; k < valid.length; k++) {
         const vec = vectors[k];
         if (!vec) continue;
@@ -227,6 +253,7 @@ export async function reindexEmbeddings(opts: { max?: number } = {}): Promise<Re
     const current = scan();
     const take = current.staleIds.slice(0, opts.max ?? DEFAULT_MAX);
     const indexed = await refreshNotes(take);
+    setMeta({ last_repair_at: now(), repair_indexed: current.indexed + indexed, repair_remaining: current.staleIds.length - indexed });
     return {
       enabled: true,
       indexed,
@@ -267,7 +294,11 @@ export function embeddingStatus(): EmbeddingStatus {
     rows: countEmbeddings(),
     last_error: meta.last_error,
     last_indexed_at: meta.last_indexed_at,
+    last_repair_at: meta.last_repair_at,
+    repair_indexed: meta.repair_indexed,
+    repair_remaining: meta.repair_remaining,
     query_failures,
+    query_failures_rescued: meta.query_rescued_failures,
     query_fallbacks: { ...query_failures, no_vectors: meta.query_no_vectors },
     last_query_failure_reason: meta.last_query_failure_reason,
     last_query_failure_at: meta.last_query_failure_at,
