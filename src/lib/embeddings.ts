@@ -79,6 +79,12 @@ function baseUrl(): string {
   return "https://api.openai.com/v1";
 }
 
+/** Provider error bodies can echo the request. Cut out the key and the start of every input before the text is stored or shown. */
+function redacted(detail: string, texts: string[]): string {
+  const secrets = [env("CHIBAKO_EMBEDDING_API_KEY"), ...texts.flatMap((t) => (t.length >= 40 ? [t, t.slice(0, 40)] : [t]))].filter((x) => x.length >= 8);
+  return secrets.reduce((out, secret) => out.split(secret).join("[redacted]"), detail);
+}
+
 /** OpenAI-compatible `/v1/embeddings` call. */
 async function openaiEmbed(texts: string[], model: string, dim: number): Promise<number[][]> {
   const body: Record<string, unknown> = { model, input: texts };
@@ -93,7 +99,7 @@ async function openaiEmbed(texts: string[], model: string, dim: number): Promise
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`${rateLimitHints(res.headers)}embedding request failed (${res.status}): ${detail.slice(0, 300)}`);
+    throw new Error(`${rateLimitHints(res.headers)}embedding request failed (${res.status}): ${redacted(detail, texts).slice(0, 300)}`);
   }
   const json = (await res.json()) as { data: Array<{ embedding: number[] }> };
   return json.data.map((d) => d.embedding);

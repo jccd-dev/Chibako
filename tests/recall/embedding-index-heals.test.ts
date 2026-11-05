@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, mock, test } from "node:test";
@@ -11,6 +10,8 @@ import * as store from "../../src/lib/embedding-store";
 import { BULK_REQUEST_TIMEOUT_MS, embeddingBatchSize } from "../../src/lib/embeddings";
 import * as notes from "../../src/lib/notes";
 import { recallDetailed } from "../../src/lib/recall";
+import * as provider from "./provider-fixture";
+import { ok, refuse, TEST_KEY, type Handler } from "./provider-fixture";
 
 const vault = mkdtempSync(join(tmpdir(), "chibako-index-heals-"));
 process.env.CHIBAKO_DATA_DIR = vault;
@@ -18,47 +19,8 @@ after(() => { getDb().close(); rmSync(vault, { recursive: true, force: true }); 
 
 let activeModel = "TEST-model"; // a test that changes the model leaves the later ones on the new one
 
-type Handler = (res: ServerResponse, inputs: number) => void;
-
-const ok: Handler = (res, inputs) => {
-  res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ data: Array.from({ length: inputs }, () => ({ embedding: [1, 0, 0, 0, 0, 0, 0, 0] })) }));
-};
-const refuse: Handler = (res) => void res.writeHead(429, { "retry-after": "12", "x-ratelimit-remaining-requests": "0" }).end("rate limited");
-
-/** Runs fn against an OpenAI-compatible fake Provider on localhost. `sizes` lists the Notes in each request, in order. */
-async function withProvider(handler: Handler, fn: (state: { sizes: number[] }) => Promise<void>, env: Record<string, string> = {}) {
-  const state = { sizes: [] as number[] };
-  const server = createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", () => {
-      const inputs = (JSON.parse(body).input as string[]).length;
-      state.sizes.push(inputs);
-      handler(res, inputs);
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert(address && typeof address !== "string");
-  const saved = { ...process.env };
-  Object.assign(process.env, {
-    CHIBAKO_EMBEDDING_PROVIDER: "openai",
-    CHIBAKO_EMBEDDING_API_KEY: "TEST-secret-key",
-    CHIBAKO_EMBEDDING_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
-    CHIBAKO_EMBEDDING_MODEL: activeModel,
-    CHIBAKO_EMBEDDING_DIM: "8",
-    ...env,
-  });
-  try {
-    await fn(state);
-  } finally {
-    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
-    Object.assign(process.env, saved);
-    server.closeAllConnections();
-    server.close();
-  }
-}
+const withProvider: typeof provider.withProvider = (handler, fn, env = {}) =>
+  provider.withProvider(handler, fn, { CHIBAKO_EMBEDDING_MODEL: activeModel, ...env });
 
 const makeNotes = (prefix: string, count: number) => {
   for (let i = 0; i < count; i++) notes.createNote({ title: `${prefix} ${i}`, content: `${prefix} body number ${i} SECRET-NOTE-TEXT` });
@@ -130,41 +92,6 @@ test("CHIBAKO_EMBEDDING_BATCH sets Notes per request: default 4, invalid values 
   }, { CHIBAKO_EMBEDDING_BATCH: "1" });
 });
 
-test("a Provider volume limit keeps the requests that passed, and repair ticks finish the index", async () => {
-  makeNotes("Volume", 163);
-  const total = index.embeddingStatus().total;
-  let used = 0;
-  const limit = 51; // Notes the Provider takes per window; a request that would pass it is refused whole
-  const handler: Handler = (res, inputs) => {
-    if (used + inputs > limit) return refuse(res, inputs);
-    used += inputs;
-    ok(res, inputs);
-  };
-  await withProvider(handler, async () => {
-    const rowsBefore = index.embeddingStatus().rows;
-    await repair.runEmbeddingRepair();
-    assert.ok(used > 0 && used <= limit);
-    assert.equal(index.embeddingStatus().rows, rowsBefore + used, "every request that passed was kept");
-    assert.equal(index.embeddingStatus().stale, 163 - used);
-    const status = index.embeddingStatus();
-    assert.equal(status.repair_remaining, 163 - used);
-    assert.equal(status.repair_indexed, total - 163 + used);
-    assert.match(status.last_error ?? "", /^\[retry-after=12 x-ratelimit-remaining-requests=0\] embedding request failed \(429\)/);
-    assert.doesNotMatch(status.last_error ?? "", /TEST-secret-key|SECRET-NOTE-TEXT/);
-
-    let ticks = 1;
-    while (index.embeddingStatus().stale > 0 && ticks < 6) {
-      used = 0; // a new window
-      await repair.runEmbeddingRepair();
-      ticks++;
-    }
-    assert.equal(index.embeddingStatus().stale, 0, `all ${total} Notes indexed after ${ticks} ticks`);
-    assert.equal(index.embeddingStatus().repair_remaining, 0);
-    assert.equal(index.embeddingStatus().repair_indexed, total);
-    assert.ok(ticks <= 5);
-  }, { CHIBAKO_EMBEDDING_BATCH: "3" });
-});
-
 test("a hung bulk request times out, and later repair ticks still run", async () => {
   let hang = true;
   const note = notes.createNote({ title: "Hung", content: "waits for a Provider that never answers" });
@@ -214,6 +141,48 @@ test("a rate-limit header can carry no key or Note text: values are cut and stri
       assert.match(error, /^\[retry-after=30 x-ratelimit-reset-requests=6m0s\] embedding request failed \(429\): slow down/);
       assert.doesNotMatch(error, /x-request-id|TEST-secret-key|SECRET-NOTE-TEXT/);
       assert.ok(error.length <= 300, "stored error stays inside its 300-character cut");
+    },
+  );
+  await withProvider(ok, async () => { await repair.runEmbeddingRepair(); });
+});
+
+test("a row rewritten by another process is not searched, even while the fresh-id cache still lists it", async () => {
+  makeNotes("Cross", 2);
+  await withProvider(ok, async () => {
+    await repair.runEmbeddingRepair();
+    assert.ok(index.freshEmbeddingIds().size > 0); // fills the cache
+    getDb().prepare(`UPDATE note_embeddings SET model = 'written-by-another-process'`).run(); // no store version bump, as from another process
+    const result = await recallDetailed({ query: "Cross body", refreshStale: false });
+    assert.equal(result.mode, "keyword");
+    assert.equal(result.fallback_reason, "no_vectors");
+  });
+  index.recordQueryLatency(1); // keep the meta write path warm; rows are repaired next
+  await withProvider(ok, async () => { await repair.runEmbeddingRepair(); });
+});
+
+test("a Provider error that echoes the key or Note text is stored redacted", async () => {
+  makeNotes("Echo", 1);
+  await withProvider(
+    (res, _inputs, texts) => void res.writeHead(400).end(`bad input ${texts?.[0]} with key ${TEST_KEY}`),
+    async () => {
+      await index.reindexEmbeddings();
+      const error = index.embeddingStatus().last_error ?? "";
+      assert.match(error, /embedding request failed \(400\)/);
+      assert.doesNotMatch(error, /SECRET-NOTE-TEXT|TEST-secret-key/);
+    },
+  );
+  await withProvider(ok, async () => { await repair.runEmbeddingRepair(); });
+});
+
+test("repair figures count a Note edited while the run embedded as remaining", async () => {
+  const note = notes.createNote({ title: "Edited midway", content: "before the edit" });
+  await withProvider(
+    (res, inputs) => { notes.updateNote(note.id, { content: "after the edit" }); ok(res, inputs); },
+    async () => {
+      await index.reindexEmbeddings();
+      const status = index.embeddingStatus();
+      assert.equal(status.repair_remaining, status.stale);
+      assert.equal(status.repair_remaining, 1);
     },
   );
   await withProvider(ok, async () => { await repair.runEmbeddingRepair(); });

@@ -44,8 +44,8 @@ function cacheKey(p: EmbeddingProvider, text: string): string | null {
  * and the first answer wins; a failed call only fails the query once no other call is running. A call that fails before
  * the delay is not retried. Calls that finish after the limit still fill the cache, so the same query is instant next
  * time; failed calls are never cached. `onAnswer` gets each Provider answer's time, late and losing answers included;
- * cache hits and failed calls make no report. `onRescue` is called once when a call failed and another call still answered
- * the query in time.
+ * cache hits and failed calls make no report. `onRescue` is called once for each call that failed while another call still answered
+ * the query, whichever failed first.
  */
 export async function embedQuery(
   provider: EmbeddingProvider,
@@ -70,7 +70,8 @@ export async function embedQuery(
     }
     return vec;
   };
-  let failedCalls = 0;
+  let answered = false;
+  let failedCalls = 0; // failed before any call answered
   let timer: ReturnType<typeof setTimeout> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -79,8 +80,12 @@ export async function embedQuery(
         let running = 0;
         const start = () => {
           running++;
-          callProvider().then(resolve, (e) => {
-            failedCalls++;
+          callProvider().then((vec) => {
+            answered = true;
+            resolve(vec);
+          }, (e) => {
+            if (answered) onRescue?.(); // another call already answered, so this failure cost nothing
+            else failedCalls++;
             if (--running === 0) reject(e);
           });
         };
@@ -92,7 +97,7 @@ export async function embedQuery(
         timer = setTimeout(() => reject(new QueryEmbedTimeout()), queryEmbedTimeoutMs());
       }),
     ]);
-    if (failedCalls > 0 && vec) onRescue?.();
+    if (vec) for (let i = 0; i < failedCalls; i++) onRescue?.();
     return vec;
   } finally {
     clearTimeout(timer);

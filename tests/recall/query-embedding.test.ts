@@ -177,6 +177,14 @@ test('an extra call that fails does not fail Recall while the first can still an
   assert.deepEqual(await figures(), { failures: before.failures, rescued: before.rescued + 1 });
 });
 
+test('a call that fails after the other call already answered is counted as rescued', async () => {
+  const before = await figures();
+  const { result } = await recallWithRetry([{ delayMs: 250, fail: true }, { delayMs: 0 }]);
+  assert.equal(result.mode, 'hybrid');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(await figures(), { failures: before.failures, rescued: before.rescued + 1 });
+});
+
 test('a failure to record a rescue never breaks a read-only Recall', async () => {
   const { getDb } = await import('../../src/lib/db');
   getDb().exec(`CREATE TRIGGER block_meta BEFORE UPDATE ON settings WHEN NEW.key = 'embedding_meta'

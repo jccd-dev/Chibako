@@ -143,14 +143,16 @@ function scan(): Scan {
 // The scan hashes every note, so cache it briefly. The store version is bumped
 // on every embedding mutation and on every markStale(), which invalidates the
 // cache on writes; the TTL covers content changes that bypass markStale.
-let scanCache: { version: number; at: number; value: Scan } | null = null;
+let scanCache: { version: number; provider: string; at: number; value: Scan } | null = null;
 
 function cachedScan(): Scan {
   const version = embedStoreVersion();
+  const active = getEmbeddingProvider();
+  const provider = active ? `${active.model}|${active.dim}` : ""; // a model change alone makes every stored row stale
   const at = Date.now();
-  if (scanCache && scanCache.version === version && at - scanCache.at < SCAN_TTL_MS) return scanCache.value;
+  if (scanCache && scanCache.version === version && scanCache.provider === provider && at - scanCache.at < SCAN_TTL_MS) return scanCache.value;
   const value = scan();
-  scanCache = { version, at, value };
+  scanCache = { version, provider, at, value };
   return value;
 }
 
@@ -253,7 +255,8 @@ export async function reindexEmbeddings(opts: { max?: number } = {}): Promise<Re
     const current = scan();
     const take = current.staleIds.slice(0, opts.max ?? DEFAULT_MAX);
     const indexed = await refreshNotes(take);
-    setMeta({ last_repair_at: now(), repair_indexed: current.indexed + indexed, repair_remaining: current.staleIds.length - indexed });
+    const after = cachedScan(); // after the run, so an edit made while it embedded counts as remaining
+    setMeta({ last_repair_at: now(), repair_indexed: after.indexed, repair_remaining: after.staleIds.length });
     return {
       enabled: true,
       indexed,

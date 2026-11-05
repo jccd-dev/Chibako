@@ -1,7 +1,7 @@
 import { getDb, now, uid } from "./db";
 import { listNotes, searchNotes, getNote, type NoteSummary } from "./notes";
 import { stripFrontmatter } from "./markdown";
-import { embeddingsEnabled, getEmbeddingProvider } from "./embeddings";
+import { embeddingsEnabled, getEmbeddingProvider, INPUT_VERSION } from "./embeddings";
 import { embedQuery, QueryEmbedTimeout } from "./query-embedding";
 import { listEmbeddings } from "./embedding-store";
 import { bookkeepingNoteIds } from "../features/memory/session-memory";
@@ -32,7 +32,8 @@ async function vectorSearch(query: string, limit: number): Promise<Array<{ id: s
   const fresh = freshEmbeddingIds();
   const scored: Array<{ id: string; score: number }> = [];
   for (const e of listEmbeddings()) {
-    if (!fresh.has(e.note_id)) continue;
+    // The fresh-id set is cached for seconds; another process may have rewritten a row since, so the row's own model is checked too.
+    if (!fresh.has(e.note_id) || e.model !== provider.model || e.input_version !== INPUT_VERSION || (provider.dim > 0 && e.dim !== provider.dim)) continue;
     const sim = cosine(qvec, e.vector);
     if (sim > 0) scored.push({ id: e.note_id, score: sim });
   }
