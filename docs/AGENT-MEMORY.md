@@ -97,13 +97,16 @@ while keeping its cost low:
   `replaces_request_id` supplied by recovery. A successful match can reopen a
   finished workstream. A title collision with an ordinary Note still needs a new title.
 - **Session start:** a linked checkpoint's revision and up to 1,500 characters of
-  content can precede the capped Agent Now read (current project first, about 500
-  tokens). Read the note by title for the rest; a direct MCP session read without
+  content can precede the capped Agent Now read (about 500 tokens): with a
+  resolved project it lists that project's entries and a count of the other active
+  entries, otherwise every entry. Read the note by title for the rest; a direct MCP session read without
   the thread key cannot resolve a thread-only link. First-prompt recall adds
-  relevant snippets. Checkpoint prompts need no Knowledge Schema; fetch it before
+  relevant snippets only when a result matches two or more query terms (or the
+  only term of a one-term query); meaning-only matches are not injected, in keyword
+  and hybrid mode alike. Agents can still call `recall`. Checkpoint prompts need no Knowledge Schema; fetch it before
   retention or general Note writes.
-- **Save gate:** defaults are 10 tool calls for Codex (chat turns alone never
-  qualify), or 4 user turns or 10 tool calls for other hosts. Profile thresholds
+- **Save gate:** defaults are 40 tool calls for Codex (chat turns alone never
+  qualify), or 12 user turns or 40 tool calls for other hosts. Profile thresholds
   can override those counts. One reminder requests a checkpoint; save/skip/finish
   resets the counts. Task changes update the same session checkpoint.
 - **Shared handoffs:** explicitly stage `{"continue":{"title":"<entry title>"}}`

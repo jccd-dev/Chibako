@@ -60,7 +60,7 @@ test("Hermes Stop captures too, unless it is asking the agent to save", async ()
   await h.tools(4);
   await h.run("Stop");
   assert.equal(h.activity().length, 1);
-  await h.tools(10);
+  await h.tools(40);
   assert.match(String((await h.run("Stop")).request), /Memory checkpoint due/);
   assert.equal(h.activity().length, 1, "a checkpoint request leaves the unit of work to the agent");
 }));

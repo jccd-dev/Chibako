@@ -43,7 +43,7 @@ async function readState(directory: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(join(directory, stateFile), "utf8"));
 }
 
-async function tools(directory: string, call: MemoryCall, count = 10, runtime: "codex" | "claude" | "hermes" = "codex") {
+async function tools(directory: string, call: MemoryCall, count = 40, runtime: "codex" | "claude" | "hermes" = "codex") {
   for (let i = 0; i < count; i++) await runMemoryEvent({ runtime, directory, enabled: true, call, input: event("PostToolUse") });
 }
 
@@ -113,8 +113,8 @@ test("over the threshold, exactly one Stop request; a verified save resets the c
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const call = caller(calls, async (name, args) => isSave(name, args)
     ? { saved: true, request_id: args.request_id, note_id: "note-1", revision: "a".repeat(64), closed: false } : {});
-  for (let turn = 1; turn <= 4; turn++) await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: `t${turn}` }) });
-  await tools(directory, call, 10);
+  for (let turn = 1; turn <= 12; turn++) await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: `t${turn}` }) });
+  await tools(directory, call, 40);
   const requested = await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") });
   assert.match(String(requested.request), /Memory checkpoint due/);
   assert.doesNotMatch(String(requested.reason), /Schema \(evidence/, "a checkpoint request carries no vault schema");
@@ -127,8 +127,8 @@ test("over the threshold, exactly one Stop request; a verified save resets the c
   await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Checkpoint") });
   const state = await readState(directory);
   assert.deepEqual([state.users, state.tools, state.dueRequested], [0, 0, false]);
-  await tools(directory, call, 10);
-  assert.match(String((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request), /Memory checkpoint due/, "ten tool calls make a new checkpoint due");
+  await tools(directory, call, 40);
+  assert.match(String((await runMemoryEvent({ runtime: "codex", directory, enabled: true, call, input: event("Stop") })).request), /Memory checkpoint due/, "forty tool calls make a new checkpoint due");
 }));
 
 test("state files from before the activity gate still load and flush their pending checkpoint", async () => withPrivateDirectory(async (directory) => {
@@ -186,12 +186,22 @@ test("legacy pending saves from two runtimes recover their capped Now index", as
   assert.equal(store.content!.split("\n").filter((line) => line.startsWith("- [[")).length, 15);
 }));
 
-test("the Agent Now briefing lists the current project's entries first", async () => withPrivateDirectory(async (directory) => {
+test("the Agent Now briefing lists only the current project's entries plus a count of the others", async () => withPrivateDirectory(async (directory) => {
   const content = "# Agent Now\n\n- [[Other]] (beta) — b\n- [[Root]] — r\n- [[Mine]] (atlas) — a\n";
   const call = caller([], async (name) => name === "memory_read" ? { note: { content }, revision: "a".repeat(64) } : {});
   const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, resolveProject: () => "atlas", input: event("SessionStart", { cwd: "/work/atlas" }) });
   const context = String(start.context);
-  assert.ok(context.indexOf("[[Mine]]") < context.indexOf("[[Other]]") && context.indexOf("[[Mine]]") < context.indexOf("[[Root]]"));
+  assert.ok(context.includes("[[Mine]]") && !context.includes("[[Other]]") && !context.includes("[[Root]]"));
+  assert.match(context, /\(2 other active entries not shown\)/);
+}));
+
+test("without a resolved project the Agent Now briefing shows every entry", async () => withPrivateDirectory(async (directory) => {
+  const content = "# Agent Now\n\n- [[Other]] (beta) — b\n- [[Root]] — r\n- [[Mine]] (atlas) — a\n";
+  const call = caller([], async (name) => name === "memory_read" ? { note: { content }, revision: "a".repeat(64) } : {});
+  const start = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("SessionStart", { cwd: "/work/atlas" }) });
+  const context = String(start.context);
+  for (const title of ["Mine", "Other", "Root"]) assert.ok(context.includes(`[[${title}]]`));
+  assert.doesNotMatch(context, /not shown/);
 }));
 
 test("the Agent Now briefing hides lines older than the staleness window and keeps undated ones", async () => withPrivateDirectory(async (directory) => {
@@ -250,7 +260,7 @@ test("now_line requires a checkpoint and a plain single line", async () => withP
 test("Hermes injects the checkpoint-due note once instead of blocking at prompt time", async () => withPrivateDirectory(async (directory) => {
   const call = caller([]);
   await runMemoryEvent({ runtime: "hermes", promptRequests: true, directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t0" }) });
-  await tools(directory, call, 10, "hermes");
+  await tools(directory, call, 40, "hermes");
   const noted = await runMemoryEvent({ runtime: "hermes", promptRequests: true, directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t1" }) });
   assert.match(String(noted.context), /Memory checkpoint due/);
   const again = await runMemoryEvent({ runtime: "hermes", promptRequests: true, directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "t2" }) });
@@ -386,7 +396,7 @@ test("Checkpoint reports pending until a verified receipt, and compaction or int
   assert.equal(saved.pending, false);
 
   await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event("UserPromptSubmit", { turn_id: "turn-uncheckpointed" }) });
-  await tools(directory, call, 10, "claude");
+  await tools(directory, call, 40, "claude");
   for (const hook_event_name of ["PreCompact", "Interrupt"]) {
     const warning = await runMemoryEvent({ runtime: "claude", directory, enabled: true, call, input: event(hook_event_name) });
     assert.match(String(warning.warning), /No checkpoint is staged/);

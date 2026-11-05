@@ -8,7 +8,7 @@ import { projectSchema } from "../../src/features/memory/types";
 import { costSchema, sumCost, type Cost } from "./cost";
 import type { HostAdapter } from "./host-adapter";
 
-export const defaultThresholds = { user_turns: 4, tool_calls: 10 };
+export const defaultThresholds = { user_turns: 12, tool_calls: 40 };
 export type ActivityThresholds = typeof defaultThresholds;
 export const profileSchema = z.object({
   version: z.literal(1), runtime: z.enum(["codex", "claude", "hermes"]), name: z.string(),

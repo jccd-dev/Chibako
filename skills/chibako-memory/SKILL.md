@@ -210,8 +210,8 @@ and the pending `replaces_request_id` from the recovery message, omitting
 `request_id`. A successful join can reopen a finished workstream. Explicit
 `{"continue":{"title":"<checkpoint title>"}}` still joins a known handoff.
 
-Saving is activity-gated: defaults are 10 tool calls for Codex, or 4 user turns
-or 10 tool calls for other hosts. Trivial turns need no checkpoint or skip. When
+Saving is activity-gated: defaults are 40 tool calls for Codex, or 12 user turns
+or 40 tool calls for other hosts. Trivial turns need no checkpoint or skip. When
 due, update the session's single checkpoint and `now_line`; task changes do not
 create more session notes. Hooks can also record metadata-only Activity after
 three unsaved tool calls at Stop (and Claude SessionEnd), without changing the
