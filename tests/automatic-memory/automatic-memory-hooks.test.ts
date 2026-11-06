@@ -94,6 +94,7 @@ async function child(args: string[], input: string, env: NodeJS.ProcessEnv): Pro
     const code = await new Promise<number | null>((resolveCode, reject) => {
       processChild.once("error", reject);
       processChild.once("close", resolveCode);
+      processChild.stdin.on("error", () => {}); // A rejected oversized payload closes stdin before the write finishes.
       processChild.stdin.end(input);
     });
     return { code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") };
@@ -142,6 +143,20 @@ test("Codex and Claude CLI stage checkpoints and skips locally; paused hooks cre
     assert.equal(paused.stdout.trim(), "{}");
     await assert.rejects(() => readdir(pausedDir), { code: "ENOENT" });
   }
+}));
+
+test("a tool response over the stage limit is still counted silently; stage keeps its limit", async () => withPrivateDirectory(async (directory) => {
+  const session_id = "large-read";
+  await prepopulate("claude", directory, session_id);
+  const large = "x".repeat(400_000);
+  const hook = await child(["scripts/agent-memory.ts", "claude", "hook"], JSON.stringify({ session_id, hook_event_name: "PostToolUse", tool_name: "Read", tool_response: { file: { base64: large } } }), env(directory, true));
+  assert.equal(hook.code, 0, hook.stderr);
+  assert.doesNotMatch(hook.stdout, /systemMessage/);
+  assert.equal((await states(directory)).find((state) => state.tools === 1) !== undefined, true);
+
+  const stage = await child(["scripts/agent-memory.ts", "claude", "stage"], JSON.stringify({ session_id, hook_event_name: "Checkpoint", skip: large }), env(directory, true));
+  assert.equal(stage.code, 1);
+  assert.match(stage.stdout, /operation failed/);
 }));
 
 test("Hermes envelopes map pre_llm_call context and pre_verify continuation once", async () => withPrivateDirectory(async (directory) => {
