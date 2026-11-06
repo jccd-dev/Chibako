@@ -33297,13 +33297,13 @@ var usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|inspect|setup|s
 `;
 var runner = fileURLToPath(new URL(import.meta.url.endsWith(".mjs") ? "./memory.mjs" : "../agent-memory.ts", import.meta.url));
 var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-async function readInput() {
+async function readInput(limit) {
   let bytes = 0;
   const chunks = [];
   for await (const chunk of process.stdin) {
     const buffer = Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > 3e5) throw new Error("Hook payload exceeds limit.");
+    if (bytes > limit) throw new Error("Hook payload exceeds limit.");
     chunks.push(buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -33336,7 +33336,7 @@ async function runMemoryCli(host, argv = process.argv.slice(2)) {
       return;
     }
     if (profile && profile.runtime !== runtime) throw new Error("Runtime does not match the configured memory profile.");
-    const payload = await readInput();
+    const payload = await readInput(action === "hook" ? 64e6 : 3e5);
     let input2;
     let staged;
     if (action === "stage") {
