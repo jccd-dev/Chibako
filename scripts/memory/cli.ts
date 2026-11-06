@@ -26,13 +26,13 @@ export const usage = `Usage: memory.mjs <codex|claude|hermes> [hook|stage|inspec
 // Packaged bundles sit beside bin/memory.mjs; from source the dev dispatcher is the runner.
 const runner = fileURLToPath(new URL(import.meta.url.endsWith(".mjs") ? "./memory.mjs" : "../agent-memory.ts", import.meta.url));
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-async function readInput(): Promise<unknown> {
+async function readInput(limit: number): Promise<unknown> {
   let bytes = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
     const buffer = Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > 300_000) throw new Error("Hook payload exceeds limit.");
+    if (bytes > limit) throw new Error("Hook payload exceeds limit.");
     chunks.push(buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -64,7 +64,8 @@ export async function runMemoryCli(host: HostAdapter, argv = process.argv.slice(
       process.stdout.write("{}\n"); return;
     }
     if (profile && profile.runtime !== runtime) throw new Error("Runtime does not match the configured memory profile.");
-    const payload = await readInput();
+    // Hook stdin carries whole tool responses (a Read of an image can reach megabytes); adapters keep only small fields.
+    const payload = await readInput(action === "hook" ? 64_000_000 : 300_000);
     let input: HookInput;
     let staged: Record<string, unknown> | undefined;
     if (action === "stage") {
