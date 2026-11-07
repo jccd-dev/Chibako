@@ -10,15 +10,15 @@ COPY src/features/updates/protocol.ts src/features/updates/protocol.ts
 COPY updater updater
 RUN npx esbuild updater/main.ts --bundle --platform=node --format=esm --outfile=/out/updater.mjs
 
-# Official Compose 5.6.1 still ships x/net affected by CVE-2026-78669.
+# Official Compose through 5.7.0 still ships x/net affected by CVE-2026-78661 and CVE-2026-78669.
 FROM --platform=$BUILDPLATFORM golang:1.26.10-bookworm AS compose
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
 ADD --checksum=sha256:bd1318503f131bc7f02538f153a7ead52f27ea30a99aee09f153a5dab9e6230a https://codeload.github.com/docker/compose/tar.gz/refs/tags/v5.6.1 /tmp/compose.tar.gz
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1
-RUN go get golang.org/x/net@v0.60.0
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -tags e2e -ldflags "-X github.com/docker/compose/v5/internal.Version=v5.6.1-chibako.1" -o /out/docker-compose ./cmd
+RUN go get golang.org/x/net@v0.62.0
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -tags e2e -ldflags "-X github.com/docker/compose/v5/internal.Version=v5.6.1-chibako.2" -o /out/docker-compose ./cmd
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
