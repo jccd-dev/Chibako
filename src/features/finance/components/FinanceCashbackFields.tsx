@@ -61,9 +61,9 @@ export function FinanceCashbackFields({ entry, accounts, disabled }: {
             />
           )}
           <FieldDescription id="transaction-cashback-help">
-            Recorded as Cashback income on the expense date.
+            Saved as pending cashback. Apply it when the bank credits it.
             {entry.cashbackMode === "percent" && " Up to two decimal places; rounded to the nearest cent, with half-cents rounded up."}
-            {entry.cashbackPreview !== null && ` Income: ${formatPHP(entry.cashbackPreview)}.`}
+            {entry.cashbackPreview !== null && ` Pending: ${formatPHP(entry.cashbackPreview)}.`}
           </FieldDescription>
           <FieldError id="error-cashback_value">{error}</FieldError>
         </Field>

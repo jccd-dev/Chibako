@@ -19,7 +19,7 @@ let _dbIdentity: string | null = null;
  * as any migration an older image cannot run against, so downgrades are refused
  * before any write. Images that predate the stamp cannot enforce it.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 8;
 
 const FINANCE_ACCOUNT_COLUMNS = `
     id TEXT PRIMARY KEY,
@@ -547,11 +547,40 @@ function openDb(): Database.Database {
       if (!existing.has("hidden")) db.exec(`ALTER TABLE ${table} ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))`);
       if (!existing.has("reverted")) db.exec(`ALTER TABLE ${table} ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0 CHECK (reverted IN (0, 1))`);
     }
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_credit_statements (
+      account_id TEXT NOT NULL REFERENCES finance_accounts(id) ON DELETE CASCADE,
+      statement_date TEXT NOT NULL, due_date TEXT NOT NULL,
+      balance_cents INTEGER NOT NULL CHECK (typeof(balance_cents)='integer' AND balance_cents BETWEEN 0 AND 9007199254740991),
+      minimum_due_cents INTEGER NOT NULL CHECK (typeof(minimum_due_cents)='integer' AND minimum_due_cents BETWEEN 0 AND balance_cents),
+      version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      PRIMARY KEY(account_id, statement_date)
+    );`);
+    const accountPaymentColumns = db.prepare("PRAGMA table_info(finance_accounts)").all() as Array<{ name: string }>;
+    if (!accountPaymentColumns.some(column => column.name === "payment_account_id")) {
+      db.exec("ALTER TABLE finance_accounts ADD COLUMN payment_account_id TEXT REFERENCES finance_accounts(id)");
+    }
     db.exec(`CREATE TABLE IF NOT EXISTS finance_cashbacks (
       expense_id TEXT PRIMARY KEY REFERENCES finance_transactions(id) ON DELETE CASCADE,
       income_id TEXT NOT NULL UNIQUE REFERENCES finance_transactions(id) ON DELETE CASCADE,
       mode TEXT NOT NULL CHECK (mode IN ('percent', 'amount')), value TEXT NOT NULL
     );`);
+    if (stamped < 7) db.exec(`
+      CREATE TABLE finance_cashbacks_v7 (
+        expense_id TEXT PRIMARY KEY REFERENCES finance_transactions(id) ON DELETE CASCADE,
+        income_id TEXT UNIQUE REFERENCES finance_transactions(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL CHECK (mode IN ('percent', 'amount')), value TEXT NOT NULL,
+        account_id TEXT REFERENCES finance_accounts(id)
+      );
+      INSERT INTO finance_cashbacks_v7 (expense_id,income_id,mode,value) SELECT expense_id,income_id,mode,value FROM finance_cashbacks;
+      DROP TABLE finance_cashbacks;
+      ALTER TABLE finance_cashbacks_v7 RENAME TO finance_cashbacks;
+    `);
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_cashback_applications (
+      income_id TEXT PRIMARY KEY REFERENCES finance_transactions(id) ON DELETE CASCADE,
+      expense_id TEXT NOT NULL REFERENCES finance_cashbacks(expense_id) ON DELETE CASCADE
+    ); CREATE INDEX IF NOT EXISTS idx_finance_cashback_applications_expense ON finance_cashback_applications(expense_id);`);
+    if (stamped < 8) db.exec(`INSERT OR IGNORE INTO finance_cashback_applications (income_id,expense_id)
+      SELECT income_id,expense_id FROM finance_cashbacks WHERE income_id IS NOT NULL;`);
     db.exec(`CREATE TABLE IF NOT EXISTS finance_refunds (
       id TEXT PRIMARY KEY, expense_id TEXT NOT NULL REFERENCES finance_transactions(id),
       account_id TEXT NOT NULL REFERENCES finance_accounts(id),

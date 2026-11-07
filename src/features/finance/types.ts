@@ -33,6 +33,7 @@ export const createAccountSchema = z.object({
   currency: z.literal("PHP"),
   maintaining_balance: maintainingBalance.default("0"),
   opening_balance: z.string().max(32).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a PHP decimal string with at most two decimal places"),
+  payment_account_id: accountId.nullable().optional(),
   credit_limit: creditLimit.optional(),
   statement_day: monthDay.optional(),
   due_mode: dueModeSchema.optional(),
@@ -48,6 +49,7 @@ export const updateAccountSchema = z.object({
   account_group: accountGroupSchema.optional(),
   logo: accountLogoSchema.optional(),
   include_in_summary: z.boolean().optional(),
+  payment_account_id: accountId.nullable().optional(),
   credit_limit: creditLimit.optional(),
   statement_day: monthDay.nullable().optional(),
   due_mode: dueModeSchema.nullable().optional(),
@@ -76,6 +78,8 @@ export interface FinanceAccount {
   opening_balance_cents: number;
   maintaining_balance_cents: number;
   planned_expense_cents: number;
+  payment_account_id: string | null;
+  credit_hold_cents: number;
   spendable_cents: number;
   balance_cents: number;
   /** Credit settings and derived usage; null for money and asset accounts. */
@@ -89,6 +93,12 @@ export interface FinanceAccount {
   statement_date: string | null;
   /** Amount owed as of statement_date, and what remains after later payments and credits (never below 0). */
   statement_balance_cents: number | null;
+  statement_confirmed: boolean;
+  statement_version: number | null;
+  estimated_statement_balance_cents: number | null;
+  statement_difference_cents: number | null;
+  minimum_due_cents: number | null;
+  remaining_minimum_cents: number | null;
   remaining_due_cents: number | null;
   /** Due date of the last statement; null without both a statement day and a due rule. */
   next_due_date: string | null;

@@ -34,6 +34,7 @@ import { FinanceAccountHistory } from "./FinanceAccountHistory";
 import { MoneyInput } from "./MoneyInput";
 import { FinanceLogoPicker } from "./FinanceLogoPicker";
 import { FinanceCreditFields } from "./FinanceCreditFields";
+import { FinanceCreditStatement } from "./FinanceCreditStatement";
 
 export function FinanceAccountPanel({
   selected,
@@ -120,6 +121,10 @@ export function FinanceAccountPanel({
                     <dt className="text-muted-foreground">Available credit</dt>
                     <dd className="mt-1 tabular-nums">{formatPHP(current?.available_credit_cents ?? 0)}</dd>
                   </div>
+                  <div>
+                    <dt className="text-muted-foreground">Payment account</dt>
+                    <dd className="mt-1">{finance.allAccounts.find(item => item.id === current?.payment_account_id)?.name ?? "Not linked"}</dd>
+                  </div>
                 </>
               ) : (
                 <div>
@@ -134,6 +139,10 @@ export function FinanceAccountPanel({
                   <div>
                     <dt className="text-muted-foreground">Maintaining balance</dt>
                     <dd className="mt-1 tabular-nums">{formatPHP(current?.maintaining_balance_cents ?? 0)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Held for credit cards</dt>
+                    <dd className="mt-1 tabular-nums">{formatPHP(current?.credit_hold_cents ?? 0)}</dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">Unpaid expenses this month</dt>
@@ -170,6 +179,7 @@ export function FinanceAccountPanel({
               onHistory={() => onHistory(account.id)}
               onInspect={onInspectTransaction}
             />
+            {credit && current && !current.archived && <FinanceCreditStatement key={`${current.id}:${current.version}`} account={current} onSaved={adjustment.refresh} />}
             <div className={financeDrawerFooter}>
               <Button variant="outline" onClick={onClose}>
                 Close

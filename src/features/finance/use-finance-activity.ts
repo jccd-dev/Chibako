@@ -49,7 +49,7 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
 
   const loadHistory = useCallback(() => {
     const sequence = ++historySequence.current;
-    const query = new URLSearchParams({ limit: "25", offset: String(offset) });
+    const query = new URLSearchParams({ limit: "25", offset: String(offset), include_details: "true" });
     for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
     return fetch(`/api/finance/activity?${query}`).then(json<ActivityPage>)
       .then(result => { if (sequence === historySequence.current) setPage(result); })
@@ -136,7 +136,7 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   }
   async function post(input: object) {
     return save<PostedTransaction>("activity", input, "POST", async result => {
-      setNotice(`${result.warnings.includes("negative_balance") ? "Transaction saved. Negative balance: review this account." : "Transaction saved."}${result.cashback ? ` Cashback income recorded: ${formatPHP(result.cashback.amount_cents)}.` : ""}${allocationWarningText(result)}`);
+      setNotice(`${result.warnings.includes("negative_balance") ? "Transaction saved. Negative balance: review this account." : "Transaction saved."}${result.warnings.includes("payment_account_shortfall") ? " Card debt exceeds the payment account’s free cash." : ""}${result.transaction.cashback_amount_cents ? ` Cashback pending: ${formatPHP(result.transaction.cashback_amount_cents)}.` : ""}${allocationWarningText(result)}`);
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
@@ -144,6 +144,12 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
     return save<PostedMovement>(`activity/${path}`, input, "POST", async result => {
       const balances = result.balances.map(balance => `${accounts.find(account => account.id === balance.account_id)?.name ?? "Account"}: ${formatPHP(balance.balance_cents)}`).join("; ");
       setNotice(`Saved. ${balances}.${result.warnings.includes("negative_balance") ? " Negative balance: review this account." : ""}${allocationWarningText(result)}`);
+      await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
+    });
+  }
+  async function changeCashback(id: string, apply: boolean, input: object) {
+    return save<{ transaction: FinanceTransaction }>(`activity/${id}/cashback`, input, apply ? "POST" : "DELETE", async () => {
+      setNotice(apply ? "Cashback applied on the credited date." : "Cashback returned to pending.");
       await Promise.all([refreshHistory(), refreshTotals(), refreshOptions(), onPosted()]);
     });
   }
@@ -182,6 +188,6 @@ export function useFinanceActivity(onPosted: () => Promise<void>) {
   function applyFilters(value: ActivityFilters) { setOffset(0); setFilters(value); }
   function clearFilters() { applyFilters(emptyFilters); }
   const resetSave = useCallback(() => { pending.current = null; setSaveError(""); }, []);
-  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, postObligation, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, ensureClassification, loadMoreOptions, resetSave };
+  return { filters, applyFilters, clearFilters, offset, setOffset, page, totals, month, setMonth, classifications, classificationTotal, accounts, accountTotal, loading, loadError, optionsError, totalsError, saveError, notice, busy, post, postMovement, postObligation, changeCashback, correct, setNoteLinks, saveClassification, inspect, refreshHistory, refreshTotals, refreshOptions, ensureClassification, loadMoreOptions, resetSave };
 }
 export type FinanceActivityController = ReturnType<typeof useFinanceActivity>;

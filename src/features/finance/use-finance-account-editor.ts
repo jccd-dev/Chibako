@@ -31,6 +31,7 @@ export function useFinanceAccountEditor(
   const [statementDay, setStatementDay] = useState(initial?.statement_day ? String(initial.statement_day) : "");
   const [dueMode, setDueMode] = useState<"fixed_day" | "after_statement">(initial?.due_mode ?? "fixed_day");
   const [dueValue, setDueValue] = useState(initial?.due_value ? String(initial.due_value) : "");
+  const [paymentAccountId, setPaymentAccountId] = useState(initial?.payment_account_id ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const saveLock = useRef(false);
@@ -49,6 +50,7 @@ export function useFinanceAccountEditor(
       setStatementDay(adjustment.account.statement_day ? String(adjustment.account.statement_day) : "");
       setDueMode(adjustment.account.due_mode ?? "fixed_day");
       setDueValue(adjustment.account.due_value ? String(adjustment.account.due_value) : "");
+      setPaymentAccountId(adjustment.account.payment_account_id ?? "");
     }
   }
   const busy = saving || finance.busy || activity.busy;
@@ -123,7 +125,7 @@ export function useFinanceAccountEditor(
         logo !== account.logo ||
         included !== account.include_in_summary ||
         maintainingCents !== account.maintaining_balance_cents ||
-        creditChanged
+        creditChanged || (kind === "credit" && paymentAccountId !== (account.payment_account_id ?? ""))
       ) {
         const saved = await finance.save(
           account?.id ?? null,
@@ -135,6 +137,7 @@ export function useFinanceAccountEditor(
                 include_in_summary: included,
                 maintaining_balance: parsedMaintaining.data,
                 ...(creditChanged ? creditFields : {}),
+                ...(kind === "credit" ? { payment_account_id: paymentAccountId || null } : {}),
                 version: account.version,
               }
             : {
@@ -149,6 +152,7 @@ export function useFinanceAccountEditor(
                 maintaining_balance: parsedMaintaining.data,
                 // Create takes omitted, not null, optional credit settings.
                 ...Object.fromEntries(Object.entries(creditFields).filter(([, value]) => value !== null)),
+                ...(kind === "credit" ? { payment_account_id: paymentAccountId || null } : {}),
               },
           account ? "Account details saved." : "Account created.",
         );
@@ -214,6 +218,9 @@ export function useFinanceAccountEditor(
     setDueMode,
     dueValue,
     setDueValue,
+    paymentAccountId,
+    setPaymentAccountId,
+    paymentAccounts: finance.allAccounts.filter(item => item.kind === "money" && !item.archived),
     creditPreview: credit.settings
       ? { used_cents: credit.owedCents ?? 0, available_cents: Math.max(0, (credit.settings.credit_limit_cents ?? 0) - (credit.owedCents ?? 0)) }
       : null,

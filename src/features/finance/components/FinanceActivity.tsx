@@ -211,6 +211,11 @@ export function FinanceActivityList({
                       ) : (
                         <span aria-hidden="true" />
                       )}
+                      {row.text?.trim() && (
+                        <span className="col-span-2 min-w-0 truncate text-xs text-muted-foreground">
+                          {row.text}
+                        </span>
+                      )}
                       {(row.hidden || row.reverted) && (
                         <span className="col-span-2 text-xs">
                           {row.hidden ? "Hidden" : ""}
@@ -356,6 +361,14 @@ export function FinanceTransactionDetails({
                     </p>
                   )}
                 </div>
+                {selected.text?.trim() && (
+                  <div className="min-w-0 sm:col-span-2">
+                    <dt className="text-muted-foreground">Note</dt>
+                    <dd className="mt-1 whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">
+                      {selected.text}
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt className="text-muted-foreground">Type</dt>
                   <dd className="mt-1 break-words">
@@ -440,12 +453,6 @@ export function FinanceTransactionDetails({
                           )?.name ?? "Saved tag",
                       )
                       .join(", ") || "No tags."}
-                  </dd>
-                </div>
-                <div className="sm:col-span-2">
-                  <dt className="text-muted-foreground">Transaction text</dt>
-                  <dd className="mt-1 whitespace-pre-wrap break-words">
-                    {selected.text || "No additional text."}
                   </dd>
                 </div>
                 <div className="text-xs text-muted-foreground sm:col-span-2">
@@ -743,6 +750,16 @@ export function FinanceTransactionEntry({
               </FieldDescription>
               <FieldError id="error-amount">{errors.amount}</FieldError>
             </Field>
+            <Field>
+              <FieldLabel htmlFor="transaction-text">Note</FieldLabel>
+              <Textarea
+                id="transaction-text"
+                value={text}
+                maxLength={2000}
+                disabled={activity.busy}
+                onChange={(event) => setText(event.target.value)}
+              />
+            </Field>
             {type === "expense" && <FinanceCashbackFields entry={entry} accounts={activity.accounts} disabled={activity.busy} />}
             <Field data-invalid={!!errors[accountKey]}>
               <FieldLabel id={`transaction-${accountKey}-label`}>
@@ -817,18 +834,6 @@ export function FinanceTransactionEntry({
                 Additional details
               </summary>
               <FieldGroup className="mt-4">
-                <Field>
-                  <FieldLabel htmlFor="transaction-text">
-                    Transaction text
-                  </FieldLabel>
-                  <Textarea
-                    id="transaction-text"
-                    value={text}
-                    maxLength={2000}
-                    disabled={activity.busy}
-                    onChange={(event) => setText(event.target.value)}
-                  />
-                </Field>
                 <FieldSet>
                   <FieldLegend>Tags</FieldLegend>
                   {activity.classifications

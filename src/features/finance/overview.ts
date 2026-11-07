@@ -154,12 +154,12 @@ export function getFinanceAttention(actor: FinanceActor, input: unknown = {}): F
   for (const card of cards) {
     if (!card.next_due_date || card.remaining_due_cents === null) continue;
     items.push({
-      id: `credit:${card.id}`,
+      id: `credit:${card.id}:${card.statement_date}`,
       kind: "credit_due",
       reference_id: card.id,
       title: card.name,
       target: "accounts",
-      urgency: urgencyFor(asOf, card.next_due_date),
+      urgency: card.statement_confirmed && card.remaining_minimum_cents === 0 && card.next_due_date < asOf ? "warning" : urgencyFor(asOf, card.next_due_date),
       due_date: card.next_due_date,
       amount_cents: card.remaining_due_cents,
       currency: "PHP",

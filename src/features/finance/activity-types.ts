@@ -70,6 +70,9 @@ export interface FinanceTransaction {
   account_name: string; category_name: string | null; subcategory_name: string | null;
   destination_account_id?: string | null; destination_account_name?: string | null;
   linked_record_id?: string | null; fee_transaction_id?: string | null;
+  cashback_applied_cents?: number; cashback_pending_cents?: number;
+  cashback_applications?: { id: string; amount_cents: number; transaction_date: string; account_id: string; version: number }[];
+  cashback_amount_cents?: number; cashback_account_id?: string | null;
   cashback_transaction_id?: string | null; cashback_expense_id?: string | null;
   cashback_mode?: "percent" | "amount" | null; cashback_value?: string | null;
   obligation_id?: string | null; obligation_version?: number | null;
