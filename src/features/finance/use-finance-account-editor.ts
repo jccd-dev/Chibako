@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import type { FinanceAccount } from "./types";
 import { creditSettingsError, type CreditSettings } from "./account-policy";
-import { accountGroupSchema, createAccountSchema } from "./types";
+import { accountGroupSchema, createAccountSchema, interestSettingsSchema } from "./types";
 import type { FinanceAccountsController } from "./use-finance-accounts";
 import type { FinanceActivityController } from "./use-finance-activity";
 import { useFinanceAdjustment } from "./use-finance-adjustment";
@@ -32,6 +32,9 @@ export function useFinanceAccountEditor(
   const [dueMode, setDueMode] = useState<"fixed_day" | "after_statement">(initial?.due_mode ?? "fixed_day");
   const [dueValue, setDueValue] = useState(initial?.due_value ? String(initial.due_value) : "");
   const [paymentAccountId, setPaymentAccountId] = useState(initial?.payment_account_id ?? "");
+  const [interestRate, setInterestRate] = useState(initial?.interest?.annual_rate ?? "");
+  const [interestFrequency, setInterestFrequency] = useState(initial?.interest?.frequency ?? "monthly");
+  const [interestTax, setInterestTax] = useState(initial?.interest?.withholding_tax ?? "20");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const saveLock = useRef(false);
@@ -51,6 +54,9 @@ export function useFinanceAccountEditor(
       setDueMode(adjustment.account.due_mode ?? "fixed_day");
       setDueValue(adjustment.account.due_value ? String(adjustment.account.due_value) : "");
       setPaymentAccountId(adjustment.account.payment_account_id ?? "");
+      setInterestRate(adjustment.account.interest?.annual_rate ?? "");
+      setInterestFrequency(adjustment.account.interest?.frequency ?? "monthly");
+      setInterestTax(adjustment.account.interest?.withholding_tax ?? "20");
     }
   }
   const busy = saving || finance.busy || activity.busy;
@@ -106,6 +112,19 @@ export function useFinanceAccountEditor(
       setError(`${credit.error}.`);
       return false;
     }
+    // A blank rate means off; a blank tax keeps the current or default rate.
+    const parsedInterest = kind === "money" && interestRate.trim()
+      ? interestSettingsSchema.safeParse({ annual_rate: interestRate.trim(), frequency: interestFrequency, withholding_tax: interestTax.trim() || undefined })
+      : null;
+    if (parsedInterest && !parsedInterest.success) {
+      setError("Enter an annual rate and a 0 to 100 withholding tax, each with at most four decimal places.");
+      return false;
+    }
+    const interest = parsedInterest?.data ?? null;
+    const savedInterest = account?.interest ?? null;
+    const interestChanged = !!account && (interest === null ? savedInterest !== null
+      : interest.annual_rate !== savedInterest?.annual_rate || interest.frequency !== savedInterest.frequency
+        || (interest.withholding_tax ?? savedInterest.withholding_tax) !== savedInterest.withholding_tax);
     const settings = credit.settings;
     const creditFields: Record<string, string | number | null> = settings
       ? { credit_limit: decimalPHP(settings.credit_limit_cents ?? 0), statement_day: settings.statement_day, due_mode: settings.due_mode, due_value: settings.due_value }
@@ -125,7 +144,7 @@ export function useFinanceAccountEditor(
         logo !== account.logo ||
         included !== account.include_in_summary ||
         maintainingCents !== account.maintaining_balance_cents ||
-        creditChanged || (kind === "credit" && paymentAccountId !== (account.payment_account_id ?? ""))
+        creditChanged || interestChanged || (kind === "credit" && paymentAccountId !== (account.payment_account_id ?? ""))
       ) {
         const saved = await finance.save(
           account?.id ?? null,
@@ -137,6 +156,7 @@ export function useFinanceAccountEditor(
                 include_in_summary: included,
                 maintaining_balance: parsedMaintaining.data,
                 ...(creditChanged ? creditFields : {}),
+                ...(interestChanged ? { interest } : {}),
                 ...(kind === "credit" ? { payment_account_id: paymentAccountId || null } : {}),
                 version: account.version,
               }
@@ -152,6 +172,7 @@ export function useFinanceAccountEditor(
                 maintaining_balance: parsedMaintaining.data,
                 // Create takes omitted, not null, optional credit settings.
                 ...Object.fromEntries(Object.entries(creditFields).filter(([, value]) => value !== null)),
+                ...(interest ? { interest } : {}),
                 ...(kind === "credit" ? { payment_account_id: paymentAccountId || null } : {}),
               },
           account ? "Account details saved." : "Account created.",
@@ -220,6 +241,12 @@ export function useFinanceAccountEditor(
     setDueValue,
     paymentAccountId,
     setPaymentAccountId,
+    interestRate,
+    setInterestRate,
+    interestFrequency,
+    setInterestFrequency,
+    interestTax,
+    setInterestTax,
     paymentAccounts: finance.allAccounts.filter(item => item.kind === "money" && !item.archived),
     creditPreview: credit.settings
       ? { used_cents: credit.owedCents ?? 0, available_cents: Math.max(0, (credit.settings.credit_limit_cents ?? 0) - (credit.owedCents ?? 0)) }

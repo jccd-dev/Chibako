@@ -107,7 +107,7 @@ Chibako keeps your notes and agent memory together on your own server.
 - **Knowledge schema** — an `AGENTS.md`-format file (editable in Settings) that
   tells your agent how to run the raw → wiki → outputs "second brain" loop
 - **Finance** — accounts, income and expenses, transfers, budgets, goals, debts,
-  receivables, and one-time or recurring plans
+  receivables, one-time or recurring plans, and optional automatic account interest
 - **Automatic agent memory** — opt-in plugins for Claude Code, Codex, and Hermes;
   bundled hooks and skills recall context and save thread checkpoints
 - **Agent access**

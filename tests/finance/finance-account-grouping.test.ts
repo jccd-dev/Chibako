@@ -12,6 +12,7 @@ const account = (
 ): FinanceAccount => ({
   id,
   name: id,
+  interest: null,
   kind,
   account_group: group,
   logo: "",

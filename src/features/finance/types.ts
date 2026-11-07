@@ -23,6 +23,14 @@ const monthDay = z.number().int().min(1).max(31);
 // Day ranges per due mode (1–31 fixed, 1–60 after statement) are checked with the other account kind rules.
 const dueValue = z.number().int().min(1).max(60);
 
+export const interestFrequencySchema = z.enum(["daily", "monthly", "quarterly", "yearly"]);
+/** Omitted frequency and tax keep the active setting, otherwise default to monthly and 20%. */
+export const interestSettingsSchema = z.object({
+  annual_rate: z.string().max(16).regex(/^(?:0|[1-9]\d{0,10})(?:\.\d{1,4})?$/, "Use a non-negative annual rate with at most four decimal places"),
+  frequency: interestFrequencySchema.optional(),
+  withholding_tax: z.string().max(8).regex(/^(?:100(?:\.0{1,4})?|(?:0|[1-9]\d?)(?:\.\d{1,4})?)$/, "Use a withholding tax from 0 to 100 with at most four decimal places").optional(),
+}).strict();
+
 export const createAccountSchema = z.object({
   request_id: requestId,
   name,
@@ -38,6 +46,7 @@ export const createAccountSchema = z.object({
   statement_day: monthDay.optional(),
   due_mode: dueModeSchema.optional(),
   due_value: dueValue.optional(),
+  interest: interestSettingsSchema.optional(),
 }).strict();
 
 export const updateAccountSchema = z.object({
@@ -54,6 +63,7 @@ export const updateAccountSchema = z.object({
   statement_day: monthDay.nullable().optional(),
   due_mode: dueModeSchema.nullable().optional(),
   due_value: dueValue.nullable().optional(),
+  interest: interestSettingsSchema.nullable().optional(),
 }).strict().refine(input => Object.keys(input).some(key => key !== "request_id" && key !== "version"), "Provide account settings to update");
 
 export const getAccountSchema = z.object({ id: accountId }).strict();
@@ -66,6 +76,13 @@ export const listAccountsSchema = z.object({
 
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;
 export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
+
+export interface FinanceAccountInterest {
+  annual_rate: string;
+  withholding_tax: string;
+  frequency: z.infer<typeof interestFrequencySchema>;
+  start_date: string;
+}
 
 export interface FinanceAccount {
   id: string;
@@ -102,6 +119,8 @@ export interface FinanceAccount {
   remaining_due_cents: number | null;
   /** Due date of the last statement; null without both a statement day and a due rule. */
   next_due_date: string | null;
+  /** Active automatic interest setting; null when off, even while earned interest awaits payout. */
+  interest: FinanceAccountInterest | null;
   archived: boolean;
   version: number;
   created_at: number;

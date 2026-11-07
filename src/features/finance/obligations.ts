@@ -187,7 +187,7 @@ export function insertObligationPayment(payload: z.output<typeof postObligationP
     const cash = getDb().prepare(`SELECT t.id,t.type,t.account_id,t.amount_cents,t.transaction_date,t.version,t.hidden,t.reverted,
       EXISTS(SELECT 1 FROM finance_refunds r WHERE r.expense_id=t.id) AS refunded,
       (EXISTS(SELECT 1 FROM finance_movements m WHERE m.fee_transaction_id=t.id) OR EXISTS(SELECT 1 FROM finance_obligation_payments p WHERE p.fee_transaction_id=t.id) OR EXISTS(SELECT 1 FROM finance_cashbacks c WHERE c.expense_id=t.id) OR EXISTS(SELECT 1 FROM finance_cashback_applications ca WHERE ca.income_id=t.id)) AS transfer_fee,
-      EXISTS(SELECT 1 FROM finance_plans p WHERE p.transaction_id=t.id) AS plan_linked
+      (EXISTS(SELECT 1 FROM finance_plans p WHERE p.transaction_id=t.id) OR EXISTS(SELECT 1 FROM finance_interest_periods p WHERE p.payout_transaction_id=t.id)) AS plan_linked
       FROM finance_transactions t WHERE t.id=?`).get(payload.cash_activity_id) as {
         id: string; type: string; account_id: string; amount_cents: number; transaction_date: string;
         version: number; hidden: number; reverted: number; refunded: number; transfer_fee: number; plan_linked: number;

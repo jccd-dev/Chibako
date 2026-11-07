@@ -417,6 +417,19 @@ export function FinanceTransactionDetails({
                     </dd>
                   </div>
                 )}
+                {selected.interest_period_id && (
+                  <div className="sm:col-span-2">
+                    <dt className="text-muted-foreground">
+                      {selected.interest_adjustment ? "Automatic interest adjustment" : "Automatic interest"}
+                    </dt>
+                    <dd className="mt-1 break-words">
+                      Earned from {formatHistoryDate(selected.interest_start_date ?? "")} up to {formatHistoryDate(selected.interest_end_date ?? "")}.{" "}
+                      {selected.interest_adjustment
+                        ? "Past activity changed this period's earnings, so the difference was added on this date. The original payout stays as it was."
+                        : "Calculated by Chibako, not confirmed by your bank. Use a balance adjustment on the account if the bank paid a different amount."}
+                    </dd>
+                  </div>
+                )}
                 {selected.obligation_id && (
                   <div className="sm:col-span-2">
                     <dt className="text-muted-foreground">Linked obligation</dt>

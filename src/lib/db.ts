@@ -19,7 +19,7 @@ let _dbIdentity: string | null = null;
  * as any migration an older image cannot run against, so downgrades are refused
  * before any write. Images that predate the stamp cannot enforce it.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 10;
 
 const FINANCE_ACCOUNT_COLUMNS = `
     id TEXT PRIMARY KEY,
@@ -492,7 +492,7 @@ function openDb(): Database.Database {
   db.pragma("synchronous = NORMAL");
   // better-sqlite3 enables foreign keys by default; table rebuilds below need them off until COMMIT.
   db.pragma("foreign_keys = OFF");
-  db.exec("BEGIN");
+  db.exec("BEGIN IMMEDIATE");
   try {
     for (const m of MIGRATIONS) db.exec(m);
     const memoryColumns = db.prepare("PRAGMA table_info(memory_records)").all() as Array<{ name: string }>;
@@ -663,6 +663,51 @@ function openDb(): Database.Database {
     const paymentColumns = db.prepare("PRAGMA table_info(finance_obligation_payments)").all() as Array<{ name: string }>;
     if (!paymentColumns.some(column => column.name === "fee_transaction_id")) db.exec("ALTER TABLE finance_obligation_payments ADD COLUMN fee_transaction_id TEXT REFERENCES finance_transactions(id)");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_payment_fee ON finance_obligation_payments(fee_transaction_id)");
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_interest_configurations (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+      start_date TEXT NOT NULL, end_date TEXT,
+      annual_rate_scaled INTEGER NOT NULL CHECK (annual_rate_scaled BETWEEN 0 AND 9007199254740991),
+      tax_scaled INTEGER NOT NULL CHECK (tax_scaled BETWEEN 0 AND 1000000),
+      frequency TEXT NOT NULL CHECK (frequency IN ('daily','monthly','quarterly','yearly')),
+      actor_id TEXT NOT NULL, request_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+      CHECK (end_date IS NULL OR end_date >= start_date),
+      UNIQUE(account_id, start_date), UNIQUE(id, account_id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_interest_active ON finance_interest_configurations(account_id) WHERE end_date IS NULL;
+    CREATE TABLE IF NOT EXISTS finance_interest_periods (
+      id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+      configuration_id TEXT NOT NULL,
+      start_date TEXT NOT NULL, end_date TEXT NOT NULL, payout_date TEXT NOT NULL,
+      payout_transaction_id TEXT UNIQUE REFERENCES finance_transactions(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents)='integer' AND amount_cents BETWEEN 0 AND 9007199254740991),
+      carry_numerator TEXT NOT NULL, processed_at INTEGER NOT NULL,
+      FOREIGN KEY(configuration_id, account_id) REFERENCES finance_interest_configurations(id, account_id),
+      CHECK (end_date > start_date AND payout_date >= end_date),
+      UNIQUE(configuration_id, start_date, end_date), UNIQUE(id, account_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_finance_interest_due ON finance_interest_periods(account_id, payout_date);
+    CREATE TABLE IF NOT EXISTS finance_interest_adjustments (
+      id TEXT PRIMARY KEY, period_id TEXT NOT NULL, account_id TEXT NOT NULL REFERENCES finance_accounts(id),
+      amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents)='integer' AND amount_cents != 0 AND amount_cents BETWEEN -9007199254740991 AND 9007199254740991),
+      transaction_date TEXT NOT NULL, created_at INTEGER NOT NULL,
+      FOREIGN KEY(period_id, account_id) REFERENCES finance_interest_periods(id, account_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_finance_interest_adjustment_account ON finance_interest_adjustments(account_id, transaction_date);`);
+    const interestAdjustmentColumns = db.prepare("PRAGMA table_info(finance_interest_adjustments)").all() as Array<{ name: string }>;
+    if (!interestAdjustmentColumns.some(column => column.name === "hidden")) db.exec(`ALTER TABLE finance_interest_adjustments ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0,1));
+      ALTER TABLE finance_interest_adjustments ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version BETWEEN 1 AND 9007199254740991);
+      ALTER TABLE finance_interest_adjustments ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;`);
+    db.exec(`CREATE TABLE IF NOT EXISTS finance_interest_state (
+      account_id TEXT PRIMARY KEY REFERENCES finance_accounts(id),
+      source_snapshot TEXT, carry_numerator TEXT NOT NULL DEFAULT '0', processed_payout_date TEXT, category_id TEXT REFERENCES finance_classifications(id) ON DELETE SET NULL,
+      category_initialized INTEGER NOT NULL DEFAULT 0 CHECK (category_initialized IN (0,1)),
+      automatic_error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS finance_interest_cursors (
+      configuration_id TEXT PRIMARY KEY REFERENCES finance_interest_configurations(id),
+      cursor_date TEXT NOT NULL
+    );`);
     // Preserve existing folders, including ancestors and folders of trashed notes.
     const folders = db.prepare("SELECT DISTINCT folder FROM notes").all() as Array<{ folder: string }>;
     const insertFolder = db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)");

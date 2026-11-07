@@ -76,7 +76,7 @@ export function useFinanceAccounts() {
 
   async function save(
     id: string | null,
-    input: Record<string, string | number | boolean | null>,
+    input: Record<string, unknown>,
     message: string,
   ) {
     if (saving.current) return false;

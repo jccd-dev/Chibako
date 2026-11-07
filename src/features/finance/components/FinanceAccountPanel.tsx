@@ -35,6 +35,8 @@ import { MoneyInput } from "./MoneyInput";
 import { FinanceLogoPicker } from "./FinanceLogoPicker";
 import { FinanceCreditFields } from "./FinanceCreditFields";
 import { FinanceCreditStatement } from "./FinanceCreditStatement";
+import { FinanceInterestFields } from "./FinanceInterestFields";
+import { FinanceInterestStatus } from "./FinanceInterestStatus";
 
 export function FinanceAccountPanel({
   selected,
@@ -157,6 +159,7 @@ export function FinanceAccountPanel({
                 </dd>
               </div>
             </dl>
+            {editor.kind === "money" && current && <FinanceInterestStatus key={`${current.id}:${current.version}`} account={current} />}
             {adjustment.loadError && (
               <Alert>
                 <AlertDescription>
@@ -291,6 +294,7 @@ export function FinanceAccountPanel({
                   </FieldDescription>
                 </Field>
               )}
+              {editor.kind === "money" && !account?.archived && <FinanceInterestFields editor={editor} busy={busy} />}
               {!account ? (
                 credit ? null : <Field>
                   <FieldLabel htmlFor="finance-opening">

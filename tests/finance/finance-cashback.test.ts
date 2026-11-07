@@ -267,7 +267,7 @@ test("schema 7 applied and pending rewards migrate without creating duplicate in
   const legacy = new Database(join(vault, "brain.db"));
   legacy.exec("DROP TABLE finance_cashback_applications; PRAGMA user_version=7;");
   legacy.close();
-  assert.equal(getDb().pragma("user_version", { simple: true }), 8);
+  assert.equal(getDb().pragma("user_version", { simple: true }), SCHEMA_VERSION);
   assert.equal(getTransaction(owner, posted.transaction.id).cashback_applied_cents, 10000);
   assert.equal(getTransaction(owner, posted.transaction.id).cashback_applications?.[0].id, applied.cashback!.id);
   assert.equal(getTransaction(owner, pending.transaction.id).cashback_pending_cents, 1000);

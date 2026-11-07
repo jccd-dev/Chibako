@@ -15,6 +15,7 @@ import { reopenPlanForTransaction } from "./planning";
 import { activityActionSchema, correctActivitySchema, recordRefundSchema, type CorrectedActivity } from "./correction-types";
 
 function editable(record: FinanceTransaction, version: number) {
+  if (record.interest_period_id) throw new FinanceError("Automatic interest is managed by its account; use reconciliation for a bank balance difference", 409, "managed_interest");
   if (record.version !== version || record.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity changed; refresh before editing", 409, "version_conflict");
   if (record.reverted) throw new FinanceError("Reverted activity cannot be changed", 409, "already_reverted");
 }

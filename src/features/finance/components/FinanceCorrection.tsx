@@ -77,7 +77,7 @@ export function FinanceCorrection({
       : "",
   };
   const canDelete = !refund && !record.hidden;
-  const canRevert = !refund && !record.reverted;
+  const canRevert = !refund && !record.reverted && !record.interest_period_id;
   const canRefund =
     !refund &&
     record.type === "expense" &&
@@ -127,7 +127,7 @@ export function FinanceCorrection({
           </p>
         )}
       </div>
-      {!record.reverted && !record.cashback_expense_id && (
+      {!record.reverted && !record.cashback_expense_id && !record.interest_period_id && (
         <form onSubmit={submit} className="flex flex-col gap-5">
           <FieldGroup className="gap-6">
             <FieldGroup className="gap-4">

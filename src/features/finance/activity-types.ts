@@ -78,6 +78,8 @@ export interface FinanceTransaction {
   obligation_id?: string | null; obligation_version?: number | null;
   obligation_payment?: boolean;
   compared_balance_cents?: number | null; actual_balance_cents?: number | null;
+  interest_period_id?: string | null; interest_start_date?: string | null; interest_end_date?: string | null;
+  interest_adjustment?: boolean;
   hidden: boolean; reverted: boolean; expense_id: string | null; refunded_cents: number;
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;
 }

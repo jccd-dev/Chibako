@@ -15,6 +15,7 @@ import {
 } from "./activity-types";
 
 export function activityTable(record: FinanceTransaction) {
+  if (record.interest_adjustment) return "finance_interest_adjustments";
   if (record.obligation_payment) return "finance_transactions";
   if (record.obligation_id) return "finance_obligation_movements";
   return record.type === "refund" ? "finance_refunds" : record.type === "income" || record.type === "expense" ? "finance_transactions" : "finance_movements";
@@ -40,10 +41,16 @@ const activityRows = `WITH activity AS (
   UNION ALL
   SELECT id, type, account_id, amount_cents, transaction_date, NULL, NULL, text, tag_ids, version, created_at, updated_at, hidden, reverted,
     NULL, NULL, NULL, NULL, NULL, NULL, 0 FROM finance_obligation_movements
+  UNION ALL
+  SELECT i.id, 'income', i.account_id, i.amount_cents, i.transaction_date, original.category_id, NULL,
+    'Interest adjustment for ' || p.start_date || ' to ' || p.end_date, '[]', i.version, i.created_at, i.updated_at, i.hidden, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL, 0
+  FROM finance_interest_adjustments i JOIN finance_interest_periods p ON p.id=i.period_id
+    LEFT JOIN finance_transactions original ON original.id=p.payout_transaction_id
 )`;
-const transactionSelect = "SELECT t.*, cp.account_id AS cashback_account_id, cp.income_id AS cashback_transaction_id, cc.expense_id AS cashback_expense_id, COALESCE(cp.mode,cc.mode) AS cashback_mode, COALESCE(cp.value,cc.value) AS cashback_value, COALESCE(om.obligation_id,op.obligation_id) AS obligation_id, CASE WHEN op.id IS NOT NULL THEN 1 ELSE 0 END AS obligation_payment, o.version AS obligation_version, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t LEFT JOIN finance_cashbacks cp ON cp.expense_id=t.id LEFT JOIN finance_cashback_applications ca ON ca.income_id=t.id LEFT JOIN finance_cashbacks cc ON cc.expense_id=ca.expense_id JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id LEFT JOIN finance_obligation_movements om ON om.id = t.id LEFT JOIN finance_obligation_payments op ON op.cash_activity_id=t.id LEFT JOIN finance_obligations o ON o.id = COALESCE(om.obligation_id,op.obligation_id)";
+const transactionSelect = "SELECT t.*, ip.id AS interest_period_id, ip.start_date AS interest_start_date, ip.end_date AS interest_end_date, CASE WHEN ia.id IS NOT NULL THEN 1 ELSE 0 END AS interest_adjustment, cp.account_id AS cashback_account_id, cp.income_id AS cashback_transaction_id, cc.expense_id AS cashback_expense_id, COALESCE(cp.mode,cc.mode) AS cashback_mode, COALESCE(cp.value,cc.value) AS cashback_value, COALESCE(om.obligation_id,op.obligation_id) AS obligation_id, CASE WHEN op.id IS NOT NULL THEN 1 ELSE 0 END AS obligation_payment, o.version AS obligation_version, a.name AS account_name, d.name AS destination_account_name, c.name AS category_name, s.name AS subcategory_name FROM activity t LEFT JOIN finance_interest_adjustments ia ON ia.id=t.id LEFT JOIN finance_interest_periods ip ON ip.payout_transaction_id=t.id OR ip.id=ia.period_id LEFT JOIN finance_cashbacks cp ON cp.expense_id=t.id LEFT JOIN finance_cashback_applications ca ON ca.income_id=t.id LEFT JOIN finance_cashbacks cc ON cc.expense_id=ca.expense_id JOIN finance_accounts a ON a.id = t.account_id LEFT JOIN finance_accounts d ON d.id = t.destination_account_id LEFT JOIN finance_classifications c ON c.id = t.category_id LEFT JOIN finance_classifications s ON s.id = t.subcategory_id LEFT JOIN finance_obligation_movements om ON om.id = t.id LEFT JOIN finance_obligation_payments op ON op.cash_activity_id=t.id LEFT JOIN finance_obligations o ON o.id = COALESCE(om.obligation_id,op.obligation_id)";
 
-type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids" | "hidden" | "reverted" | "obligation_payment"> & { hidden: number; reverted: number; obligation_payment: number; text: string; tag_ids: string; created_at: number; updated_at: number };
+type TransactionRow = Omit<FinanceTransaction, "currency" | "tag_ids" | "hidden" | "reverted" | "obligation_payment" | "interest_adjustment"> & { interest_adjustment: number; hidden: number; reverted: number; obligation_payment: number; text: string; tag_ids: string; created_at: number; updated_at: number };
 function transactionFromRow(row: TransactionRow, details: boolean): FinanceTransaction {
   const { text, tag_ids, created_at, updated_at, ...compact } = row;
   const reward = row.type === "expense" && row.cashback_mode && row.cashback_value ? cashbackCents(row.amount_cents, { mode: row.cashback_mode, value: row.cashback_value }) : null;
@@ -51,7 +58,7 @@ function transactionFromRow(row: TransactionRow, details: boolean): FinanceTrans
     FROM finance_cashback_applications a JOIN finance_transactions t ON t.id=a.income_id
     WHERE a.expense_id=? AND t.reverted=0 ORDER BY t.transaction_date,t.created_at,t.id`).all(row.id) as NonNullable<FinanceTransaction["cashback_applications"]>;
   const applied = exactCents(applications.reduce((sum, entry) => sum + BigInt(entry.amount_cents), 0n));
-  return { ...compact, ...(reward !== null ? { cashback_amount_cents: reward, cashback_applied_cents: applied, cashback_pending_cents: Math.max(0, reward - applied), cashback_applications: applications } : {}), obligation_payment: row.obligation_payment === 1, hidden: row.hidden === 1, reverted: row.reverted === 1, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
+  return { ...compact, interest_adjustment: row.interest_adjustment === 1, ...(reward !== null ? { cashback_amount_cents: reward, cashback_applied_cents: applied, cashback_pending_cents: Math.max(0, reward - applied), cashback_applications: applications } : {}), obligation_payment: row.obligation_payment === 1, hidden: row.hidden === 1, reverted: row.reverted === 1, currency: "PHP", ...(details ? { text, tag_ids: JSON.parse(tag_ids) as string[], created_at, updated_at } : {}) };
 }
 export function readTransaction(id: string, details: boolean): FinanceTransaction {
   const row = getDb().prepare(`${activityRows} ${transactionSelect} WHERE t.id = ?`).get(id) as TransactionRow | undefined;
@@ -136,6 +143,7 @@ export function listTransactions(actor: FinanceActor, input: unknown = {}): Acti
   for (const [key, operator] of [["date_from", ">="], ["date_to", "<="]] as const) {
     if (query[key]) { clauses.push(`t.transaction_date ${operator} ?`); values.push(query[key]); }
   }
+  if (query.matchable || query.payment_matchable) clauses.push("NOT EXISTS (SELECT 1 FROM finance_interest_periods p WHERE p.payout_transaction_id=t.id) AND NOT EXISTS (SELECT 1 FROM finance_interest_adjustments i WHERE i.id=t.id)");
   if (query.matchable) clauses.push("t.type IN ('income','expense') AND t.reverted = 0 AND t.linked_record_id IS NULL AND NOT EXISTS (SELECT 1 FROM finance_plans p WHERE p.transaction_id = t.id) AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments op WHERE op.cash_activity_id=t.id)");
   if (query.payment_matchable) clauses.push(`t.type IN ('income','expense') AND t.hidden = 0 AND t.reverted = 0 AND t.linked_record_id IS NULL
     AND EXISTS (SELECT 1 FROM finance_accounts a WHERE a.id=t.account_id AND a.kind='money' AND a.archived=0)
@@ -177,5 +185,8 @@ export function getActivityTotals(actor: FinanceActor, input: unknown = {}): Act
   const refunds = getDb().prepare("SELECT amount_cents FROM finance_refunds WHERE reverted = 0 AND transaction_date >= ? AND transaction_date <= ?")
     .safeIntegers().iterate(`${month}-01`, `${month}-31`) as Iterable<{ amount_cents: bigint }>;
   for (const refund of refunds) totals.expense -= refund.amount_cents;
+  const adjustments = getDb().prepare("SELECT amount_cents FROM finance_interest_adjustments WHERE transaction_date >= ? AND transaction_date <= ?")
+    .safeIntegers().iterate(`${month}-01`, `${month}-31`) as Iterable<{ amount_cents: bigint }>;
+  for (const adjustment of adjustments) totals.income += adjustment.amount_cents;
   return { currency: "PHP", month, income_cents: exactCents(totals.income), expense_cents: exactCents(totals.expense) };
 }
