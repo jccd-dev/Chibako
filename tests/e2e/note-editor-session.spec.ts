@@ -126,6 +126,35 @@ test("switching Notes preserves the text saved to the previous note", async ({ p
   await expect(content).toHaveValue("saved first edit", { timeout: 15_000 });
 });
 
+test("saved edits survive Settings and Home navigation without a reload", async ({ page }) => {
+  await authenticate(page);
+  await page.evaluate(() => localStorage.setItem("chibako_view", "edit"));
+  const note = await createNote(page, "Settings round trip note", "before editing");
+  await page.goto(`/app/note/${note.id}`);
+  const content = page.getByRole("textbox", { name: "Note content" });
+  await expect(content).toHaveValue("before editing");
+  const saved = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/notes/${note.id}`) && response.request().method() === "PATCH" && response.ok()
+  );
+  await content.fill("saved before Settings");
+  await saved;
+  // Replay the pre-save document in the route payload, as a stale router cache would.
+  await page.route(`**/app/note/${note.id}?*`, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()).replaceAll("saved before Settings", "before editing") });
+  });
+  await page.getByRole("link", { name: "Settings", exact: true }).press("Enter");
+  await expect(page).toHaveURL("/app/settings");
+  await page.getByRole("navigation", { name: "Workspace", exact: true }).getByRole("link", { name: "Home", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Note title" })).not.toHaveValue(note.title);
+  await page.getByRole("link", { name: note.title, exact: true }).click();
+  await expect(content).toHaveValue("saved before Settings");
+  await page.getByRole("link", { name: "Settings", exact: true }).press("Enter");
+  await expect(page).toHaveURL("/app/settings");
+  await page.getByRole("link", { name: note.title, exact: true }).click();
+  await expect(content).toHaveValue("saved before Settings");
+});
+
 test("edited note switches preserve the source editor DOM node", async ({ page }) => {
   await authenticate(page);
   await page.evaluate(() => localStorage.setItem("chibako_view", "edit"));

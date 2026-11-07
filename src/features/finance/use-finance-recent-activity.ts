@@ -10,7 +10,7 @@ export function useFinanceRecentActivity(dateFrom: string, dateTo: string, limit
   const sequence = useRef(0);
   const load = useCallback(() => {
     const current = ++sequence.current;
-    const query = new URLSearchParams({ limit: String(limit), offset: "0" });
+    const query = new URLSearchParams({ limit: String(limit), offset: "0", include_details: "true" });
     if (dateFrom) query.set("date_from", dateFrom);
     if (dateTo) query.set("date_to", dateTo);
     return fetch(`/api/finance/activity?${query}`).then(json<ActivityPage>)

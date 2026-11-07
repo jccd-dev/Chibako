@@ -34,6 +34,9 @@ import { FinanceAccountHistory } from "./FinanceAccountHistory";
 import { MoneyInput } from "./MoneyInput";
 import { FinanceLogoPicker } from "./FinanceLogoPicker";
 import { FinanceCreditFields } from "./FinanceCreditFields";
+import { FinanceCreditStatement } from "./FinanceCreditStatement";
+import { FinanceInterestFields } from "./FinanceInterestFields";
+import { FinanceInterestStatus } from "./FinanceInterestStatus";
 
 export function FinanceAccountPanel({
   selected,
@@ -120,6 +123,10 @@ export function FinanceAccountPanel({
                     <dt className="text-muted-foreground">Available credit</dt>
                     <dd className="mt-1 tabular-nums">{formatPHP(current?.available_credit_cents ?? 0)}</dd>
                   </div>
+                  <div>
+                    <dt className="text-muted-foreground">Payment account</dt>
+                    <dd className="mt-1">{finance.allAccounts.find(item => item.id === current?.payment_account_id)?.name ?? "Not linked"}</dd>
+                  </div>
                 </>
               ) : (
                 <div>
@@ -136,6 +143,10 @@ export function FinanceAccountPanel({
                     <dd className="mt-1 tabular-nums">{formatPHP(current?.maintaining_balance_cents ?? 0)}</dd>
                   </div>
                   <div>
+                    <dt className="text-muted-foreground">Held for credit cards</dt>
+                    <dd className="mt-1 tabular-nums">{formatPHP(current?.credit_hold_cents ?? 0)}</dd>
+                  </div>
+                  <div>
                     <dt className="text-muted-foreground">Unpaid expenses this month</dt>
                     <dd className="mt-1 tabular-nums">{formatPHP(current?.planned_expense_cents ?? 0)}</dd>
                   </div>
@@ -148,6 +159,7 @@ export function FinanceAccountPanel({
                 </dd>
               </div>
             </dl>
+            {editor.kind === "money" && current && <FinanceInterestStatus key={`${current.id}:${current.version}`} account={current} />}
             {adjustment.loadError && (
               <Alert>
                 <AlertDescription>
@@ -170,6 +182,7 @@ export function FinanceAccountPanel({
               onHistory={() => onHistory(account.id)}
               onInspect={onInspectTransaction}
             />
+            {credit && current && !current.archived && <FinanceCreditStatement key={`${current.id}:${current.version}`} account={current} onSaved={adjustment.refresh} />}
             <div className={financeDrawerFooter}>
               <Button variant="outline" onClick={onClose}>
                 Close
@@ -281,6 +294,7 @@ export function FinanceAccountPanel({
                   </FieldDescription>
                 </Field>
               )}
+              {editor.kind === "money" && !account?.archived && <FinanceInterestFields editor={editor} busy={busy} />}
               {!account ? (
                 credit ? null : <Field>
                   <FieldLabel htmlFor="finance-opening">

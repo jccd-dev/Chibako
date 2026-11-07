@@ -25,6 +25,7 @@ import { useFinanceCorrection } from "@/features/finance/use-finance-correction"
 import { formatPHP } from "@/features/finance/presentation";
 
 import { FinanceAccountChoice } from "./FinanceAccountChoice";
+import { FinanceCashbackAction } from "./FinanceCashbackAction";
 export function FinanceCorrection({
   record,
   activity,
@@ -56,12 +57,12 @@ export function FinanceCorrection({
       : undefined,
   });
   const descriptions = {
-    hide: record.cashback_transaction_id
+    hide: record.cashback_transaction_id || (record.cashback_applied_cents ?? 0) > 0
       ? "Delete hides this expense and its linked cashback income. Their balances and reports remain unchanged."
       : record.obligation_id
         ? "Delete hides this activity from the default list. Cash balances, outstanding principal and reports are retained, and the payment progress stays linked. Use the hidden filter to inspect it later."
         : "Delete hides this activity from the default list. Its balances and reports remain unchanged. A transfer's linked fee is hidden with it. Use the hidden filter to inspect it later.",
-    revert: record.cashback_transaction_id
+    revert: record.cashback_transaction_id || (record.cashback_applied_cents ?? 0) > 0
       ? "Revert cancels this expense and its linked cashback income together. Revert active refunds first."
       : record.type === "refund"
         ? "Revert cancels this refund's receiving-account credit and spending reduction. The original expense remains. This can happen only once."
@@ -76,7 +77,7 @@ export function FinanceCorrection({
       : "",
   };
   const canDelete = !refund && !record.hidden;
-  const canRevert = !refund && !record.reverted;
+  const canRevert = !refund && !record.reverted && !record.interest_period_id;
   const canRefund =
     !refund &&
     record.type === "expense" &&
@@ -126,7 +127,7 @@ export function FinanceCorrection({
           </p>
         )}
       </div>
-      {!record.reverted && !record.cashback_expense_id && (
+      {!record.reverted && !record.cashback_expense_id && !record.interest_period_id && (
         <form onSubmit={submit} className="flex flex-col gap-5">
           <FieldGroup className="gap-6">
             <FieldGroup className="gap-4">
@@ -408,11 +409,8 @@ export function FinanceCorrection({
           expense to change its amount, account, or revert both entries.
         </p>
       )}
-      {record.cashback_transaction_id && (
-        <p className="text-sm text-muted-foreground">
-          Cashback stays on the same account as this expense and keeps its own
-          credited date. Percentage cashback recalculates when the expense amount changes.
-        </p>
+      {record.type === "expense" && record.cashback_mode && !record.reverted && (
+        <FinanceCashbackAction key={`${record.id}:${record.version}`} record={record} activity={activity} onSaved={onSaved} />
       )}
       {activity.saveError && (
         <Alert>

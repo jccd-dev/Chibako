@@ -6,6 +6,7 @@ import { readAccountBalance, requireSufficientFunds } from "./accounts";
 import { financeBalanceWarnings } from "./reservations";
 import { readTransaction, insertTransaction, validateTransactionClassifications } from "./activity";
 import { financeMutation, parseFinance } from "./mutations";
+import { localCalendarDate } from "./presentation";
 import { decimalCents, exactCents } from "./money";
 import { postTransferSchema, postAdjustmentSchema, type PostedMovement } from "./movement-types";
 import { replaceActivityNoteLinks } from "./note-link-storage";
@@ -52,6 +53,7 @@ export function postTransfer(actor: FinanceActor, input: unknown): PostedMovemen
   if (amount <= 0 || (payload.fee && feeAmount <= 0)) throw new FinanceError("Transfer and fee amounts must be positive", 400, "invalid_input");
   return financeMutation(actor, request_id, "transfer.post", note_ids.length ? { ...payload, note_ids } : payload, () => {
     const source = readAccountBalance(payload.source_account_id), destination = readAccountBalance(payload.destination_account_id);
+    if (destination.kind === "credit" && payload.transaction_date > localCalendarDate()) throw new FinanceError("Card payment date cannot be in the future", 400, "invalid_date");
     // Paying a card is a transfer into it; credit accounts cannot be a transfer source.
     if (source.archived || destination.archived || source.kind !== "money" || (destination.kind !== "money" && destination.kind !== "credit")) {
       throw new FinanceError("Choose an active money source and an active money or credit destination", 400, "invalid_account");

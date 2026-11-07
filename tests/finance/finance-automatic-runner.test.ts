@@ -61,3 +61,21 @@ test("runner logs the cause once per failure streak and resumes logging after re
   t.mock.timers.tick(60_000);
   assert.equal(log.mock.callCount(), 2);
 });
+
+test("interest account failure does not stop recurring plans or other interest accounts", (t) => {
+  const owner = { kind: "owner" } as const;
+  const db = getDb();
+  for (const [name, balance, rate] of [["TEST bad interest", "90071992547409.91", 9007199254740991], ["TEST good interest", "100", 365000]] as const) {
+    const account = createAccount(owner, { request_id: randomUUID(), name, kind: "money", currency: "PHP", opening_balance: balance }).account;
+    db.prepare("UPDATE finance_accounts SET created_at=0 WHERE id=?").run(account.id);
+    db.prepare("INSERT INTO finance_interest_configurations(id,account_id,start_date,end_date,annual_rate_scaled,tax_scaled,frequency,actor_id,request_id,created_at) VALUES (?,?,'2020-01-01','2020-01-02',?,0,'daily','owner','TEST-enable',0)").run(randomUUID(), account.id, rate);
+    if (name === "TEST good interest") createSchedule(owner, { request_id: randomUUID(), account_id: account.id, amount: "10", handling: "automatic", interval_count: 1, interval_unit: "day", start_date: "2020-01-01", max_occurrences: 1 });
+  }
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.method(console, "error", () => {});
+  t.after(stopRunner);
+  startAutomaticPlans();
+  const good = db.prepare("SELECT id FROM finance_accounts WHERE name='TEST good interest'").get() as { id: string };
+  assert.equal(getAccount(owner, good.id).balance_cents, 9009); // Expense first, then interest on the 90 PHP closing cash.
+  assert.equal(db.prepare("SELECT * FROM finance_interest_periods WHERE account_id=?").all(good.id).length, 1);
+});

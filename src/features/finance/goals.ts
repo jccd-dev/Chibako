@@ -55,6 +55,7 @@ export function listGoalAllocationShortfalls(actor: FinanceActor, input: { limit
       FROM finance_obligation_movements m WHERE m.account_id = a.id AND m.reverted = 0), 0)
     + COALESCE((SELECT SUM(m.amount_cents) FROM finance_goal_movements m WHERE m.destination_account_id = a.id), 0)
     - COALESCE((SELECT SUM(m.amount_cents) FROM finance_goal_movements m WHERE m.source_account_id = a.id), 0)
+    + COALESCE((SELECT SUM(i.amount_cents) FROM finance_interest_adjustments i WHERE i.account_id = a.id), 0)
   )`;
   const reservedSql = `(SELECT COALESCE(SUM(ga.amount_cents), 0) FROM finance_goal_allocations ga
     JOIN finance_goals g ON g.id = ga.goal_id AND g.archived = 0 WHERE g.linked_account_id = a.id)`;

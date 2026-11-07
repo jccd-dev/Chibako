@@ -23,7 +23,7 @@ test("legacy accounts gain included and ungrouped defaults without losing balanc
       assert.deepEqual(migrated.prepare("SELECT * FROM finance_accounts").get(), {
         id: "legacy", name: "Old savings", kind: "money", currency: "PHP", opening_balance_cents: 12345, maintaining_balance_cents: 0,
         archived: 1, version: 7, created_at: 100, updated_at: 200, account_group: "", include_in_summary: 1,
-        credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null, logo: "",
+        credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null, logo: "", payment_account_id: null,
       });
     } finally { migrated.close(); }
   } finally { rmSync(vault, { recursive: true, force: true }); }

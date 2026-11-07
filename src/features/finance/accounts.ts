@@ -4,37 +4,53 @@ import { authorizeFinance } from "../../server/auth/finance-authorization";
 import { parseFinance as parse, financeMutation } from "./mutations";
 import { exactCents, decimalCents as openingCents } from "./money";
 import { canSpendFromAccount, accountSummaryBucket, creditSettingsError, type CreditSettings } from "./account-policy";
+import { interestCalendarDate } from "./interest-calculation";
+import { readInterestSettings, saveInterestSettings } from "./interest-settings";
 import { localCalendarDate } from "./presentation";
 import { statementDate, statementDueDate } from "./credit-statement";
+import { readCreditCycles } from "./credit-cycles";
+import type { FinanceCreditCycle } from "./credit-cycle-types";
 import {
   createAccountSchema, updateAccountSchema, getAccountSchema, listAccountsSchema,
   FinanceError, type FinanceAccount, type FinanceActor, type FinanceAccountList, type FinanceSummary,
 } from "./types";
 
-type AccountRow = Omit<FinanceAccount, "archived" | "include_in_summary" | "balance_cents" | "planned_expense_cents" | "spendable_cents" | "used_credit_cents" | "available_credit_cents" | "statement_date" | "statement_balance_cents" | "remaining_due_cents" | "next_due_date"> & { archived: number; include_in_summary: number };
+type AccountRow = Omit<FinanceAccount, "archived" | "include_in_summary" | "balance_cents" | "planned_expense_cents" | "credit_hold_cents" | "spendable_cents" | "used_credit_cents" | "available_credit_cents" | "statement_date" | "statement_balance_cents" | "statement_confirmed" | "statement_version" | "estimated_statement_balance_cents" | "statement_difference_cents" | "minimum_due_cents" | "remaining_minimum_cents" | "remaining_due_cents" | "next_due_date" | "interest"> & { archived: number; include_in_summary: number };
 
-type CreditStatement = Pick<FinanceAccount, "statement_date" | "statement_balance_cents" | "remaining_due_cents" | "next_due_date">;
-const NO_STATEMENT: CreditStatement = { statement_date: null, statement_balance_cents: null, remaining_due_cents: null, next_due_date: null };
+type CreditStatement = Pick<FinanceAccount, "statement_date" | "statement_balance_cents" | "statement_confirmed" | "statement_version" | "estimated_statement_balance_cents" | "statement_difference_cents" | "minimum_due_cents" | "remaining_minimum_cents" | "remaining_due_cents" | "next_due_date">;
+const NO_STATEMENT: CreditStatement = { statement_date: null, statement_balance_cents: null, statement_confirmed: false, statement_version: null, estimated_statement_balance_cents: null, statement_difference_cents: null, minimum_due_cents: null, remaining_minimum_cents: null, remaining_due_cents: null, next_due_date: null };
 
 /** Owed as of the last statement close, less payments and credits dated after it. Opening balance predates every statement. */
-function creditStatement(row: AccountRow, asOf: string): CreditStatement {
-  if (row.kind !== "credit" || row.statement_day === null) return NO_STATEMENT;
-  const closed = statementDate(row.statement_day, asOf);
+function creditStatement(row: AccountRow, asOf: string, selected?: FinanceCreditCycle): CreditStatement {
+  if (row.kind !== "credit") return NO_STATEMENT;
+  const estimatedClose = selected?.statement_date ?? (row.statement_day === null ? null : statementDate(row.statement_day, asOf));
+  const confirmed = getDb().prepare("SELECT * FROM finance_credit_statements WHERE account_id=? AND statement_date<=? ORDER BY statement_date DESC LIMIT 1").get(row.id, selected ? selected.statement_date < asOf ? selected.statement_date : asOf : asOf) as { statement_date: string; due_date: string; balance_cents: number; minimum_due_cents: number; version: number } | undefined;
+  const bank = confirmed && (estimatedClose === null || confirmed.statement_date >= estimatedClose) ? confirmed : null;
+  const closed = bank?.statement_date ?? estimatedClose;
+  if (closed === null) return NO_STATEMENT;
   const totals = getDb().prepare(`SELECT COALESCE(SUM(CASE WHEN effective_date <= @closed THEN cents END), 0) AS through,
-    COALESCE(SUM(CASE WHEN effective_date > @closed AND cents > 0 THEN cents END), 0) AS credits FROM (
+    COALESCE(SUM(CASE WHEN effective_date > @closed AND effective_date <= @asOf AND cents > 0 THEN cents END), 0) AS credits FROM (
       SELECT transaction_date AS effective_date, CASE WHEN type = 'income' THEN amount_cents ELSE -amount_cents END AS cents FROM finance_transactions WHERE reverted = 0 AND account_id = @id
       UNION ALL SELECT transaction_date, CASE WHEN type = 'transfer' AND account_id = @id THEN -amount_cents ELSE amount_cents END FROM finance_movements WHERE reverted = 0 AND (account_id = @id OR destination_account_id = @id)
       UNION ALL SELECT transaction_date, amount_cents FROM finance_refunds WHERE reverted = 0 AND account_id = @id
       UNION ALL SELECT transaction_date, CASE WHEN type = 'borrowing' THEN amount_cents ELSE -amount_cents END FROM finance_obligation_movements WHERE reverted = 0 AND account_id = @id
-    )`).safeIntegers().get({ id: row.id, closed }) as { through: bigint; credits: bigint };
+    )`).safeIntegers().get({ id: row.id, closed, asOf }) as { through: bigint; credits: bigint };
   const balance = BigInt(row.opening_balance_cents) + totals.through;
   const owed = balance < 0n ? -balance : 0n;
-  const remaining = owed - totals.credits;
+  const statementBalance = bank ? BigInt(bank.balance_cents) : owed;
+  const remaining = statementBalance - totals.credits;
+  const minimum = bank ? BigInt(bank.minimum_due_cents) - totals.credits : null;
   return {
     statement_date: closed,
-    statement_balance_cents: exactCents(owed),
+    statement_balance_cents: exactCents(statementBalance),
+    statement_confirmed: bank !== null,
+    statement_version: bank?.version ?? null,
+    estimated_statement_balance_cents: exactCents(owed),
+    statement_difference_cents: bank ? exactCents(statementBalance - owed) : null,
+    minimum_due_cents: bank?.minimum_due_cents ?? null,
+    remaining_minimum_cents: minimum === null ? null : exactCents(minimum > 0n ? minimum : 0n),
     remaining_due_cents: exactCents(remaining > 0n ? remaining : 0n),
-    next_due_date: row.due_mode === null || row.due_value === null ? null : statementDueDate(closed, row.due_mode, row.due_value),
+    next_due_date: bank?.due_date ?? (row.due_mode === null || row.due_value === null ? null : statementDueDate(closed, row.due_mode, row.due_value)),
   };
 }
 
@@ -59,18 +75,36 @@ function accountFromRow(row: AccountRow, asOf = localCalendarDate()): FinanceAcc
     if (effect.source_account_id === row.id) balance -= effect.amount_cents;
     if (effect.destination_account_id === row.id) balance += effect.amount_cents;
   }
+  const interestAdjustments = getDb().prepare("SELECT amount_cents FROM finance_interest_adjustments WHERE account_id=?").safeIntegers()
+    .iterate(row.id) as Iterable<{ amount_cents: bigint }>;
+  for (const adjustment of interestAdjustments) balance += adjustment.amount_cents;
   const month = asOf.slice(0, 7);
   const plans = getDb().prepare("SELECT amount_cents FROM finance_plans WHERE account_id = ? AND type = 'expense' AND status = 'pending' AND due_date >= ? AND due_date <= ?")
     .safeIntegers().iterate(row.id, `${month}-01`, `${month}-31`) as Iterable<{ amount_cents: bigint }>;
   let planned = 0n;
   for (const plan of plans) planned += plan.amount_cents;
-  const spendable = row.kind === "money" ? balance - BigInt(row.maintaining_balance_cents) - planned : 0n;
+  let creditHold = 0n;
+  if (row.kind === "money") {
+    const cards = getDb().prepare("SELECT * FROM finance_accounts WHERE payment_account_id = ? AND kind = 'credit'").all(row.id) as AccountRow[];
+    for (const card of cards) creditHold += BigInt(accountFromRow(card, asOf).used_credit_cents ?? 0);
+  }
+  const spendable = row.kind === "money" ? balance - BigInt(row.maintaining_balance_cents) - planned - creditHold : 0n;
   const used = balance < 0n ? -balance : 0n;
   const available = row.credit_limit_cents === null ? 0n : BigInt(row.credit_limit_cents) + balance;
   const credit = row.kind === "credit"
     ? { used_credit_cents: exactCents(used), available_credit_cents: exactCents(available > 0n ? available : 0n) }
     : { used_credit_cents: null, available_credit_cents: null };
-  return { ...row, ...credit, ...creditStatement(row, asOf), planned_expense_cents: exactCents(planned), spendable_cents: exactCents(spendable > 0n ? spendable : 0n), archived: row.archived === 1, include_in_summary: row.include_in_summary === 1, balance_cents: exactCents(balance) };
+  const cycles = readCreditCycles(row, asOf);
+  const payable = cycles.find(cycle => cycle.remaining_due_cents > 0);
+  const statement = creditStatement(row, asOf, payable);
+  if (payable) Object.assign(statement, {
+    statement_date: payable.statement_date, statement_balance_cents: payable.balance_cents,
+    statement_confirmed: payable.confirmed, remaining_due_cents: payable.remaining_due_cents,
+    minimum_due_cents: payable.minimum_due_cents, remaining_minimum_cents: payable.remaining_minimum_cents,
+    next_due_date: payable.due_date,
+  });
+  else if (cycles.length) statement.next_due_date = null;
+  return { ...row, ...credit, ...statement, interest: row.kind === "money" ? readInterestSettings(row.id) : null, credit_hold_cents: exactCents(creditHold), planned_expense_cents: exactCents(planned), spendable_cents: exactCents(spendable > 0n ? spendable : 0n), archived: row.archived === 1, include_in_summary: row.include_in_summary === 1, balance_cents: exactCents(balance) };
 }
 
 export function readAccountBalance(id: string): FinanceAccount {
@@ -85,11 +119,18 @@ export function requireSufficientFunds(account: Pick<FinanceAccount, "kind" | "c
   throw new FinanceError("Insufficient funds in this account", 409, "insufficient_funds");
 }
 
-/** Active credit accounts whose last statement still has an amount due on a known due date. */
+/** One reminder per unpaid cycle, including the upcoming estimate. */
 export function listCreditDueAccounts(actor: FinanceActor, asOf: string): FinanceAccount[] {
   authorizeFinance(actor, "finance:read");
-  const rows = getDb().prepare("SELECT * FROM finance_accounts WHERE kind = 'credit' AND archived = 0 AND statement_day IS NOT NULL AND due_mode IS NOT NULL ORDER BY created_at, id").all() as AccountRow[];
-  return rows.map(row => accountFromRow(row, asOf)).filter(account => (account.remaining_due_cents ?? 0) > 0);
+  const rows = getDb().prepare("SELECT * FROM finance_accounts WHERE kind = 'credit' AND archived = 0 ORDER BY created_at, id").all() as AccountRow[];
+  return rows.flatMap(row => {
+    const account = accountFromRow(row, asOf);
+    return readCreditCycles(row, asOf).filter(cycle => cycle.due_date !== null && cycle.remaining_due_cents > 0).map(cycle => ({
+      ...account, statement_date: cycle.statement_date, statement_balance_cents: cycle.balance_cents,
+      statement_confirmed: cycle.confirmed, remaining_due_cents: cycle.remaining_due_cents,
+      minimum_due_cents: cycle.minimum_due_cents, remaining_minimum_cents: cycle.remaining_minimum_cents, next_due_date: cycle.due_date,
+    }));
+  });
 }
 
 export function getAccount(actor: FinanceActor, id: string): FinanceAccount {
@@ -161,6 +202,9 @@ export function getFinanceSummary(actor: FinanceActor): FinanceSummary {
       LEFT JOIN finance_accounts destination ON destination.id = m.destination_account_id`).safeIntegers()
       .iterate() as Iterable<{ amount_cents: bigint; source_included: bigint; destination_included: bigint }>;
     for (const effect of goalMovements) totals.money += effect.amount_cents * (effect.destination_included - effect.source_included);
+    const interestAdjustments = db.prepare(`SELECT i.amount_cents FROM finance_interest_adjustments i
+      JOIN finance_accounts a ON a.id=i.account_id WHERE a.include_in_summary=1`).safeIntegers().iterate() as Iterable<{ amount_cents: bigint }>;
+    for (const adjustment of interestAdjustments) totals.money += adjustment.amount_cents;
     // Unlinked savings remain money owned by the vault, outside account balances.
     const goalHoldings = db.prepare(`SELECT a.amount_cents FROM finance_goal_allocations a
       JOIN finance_goals g ON g.id = a.goal_id WHERE g.archived = 0 AND g.linked_account_id IS NULL`).safeIntegers()
@@ -182,7 +226,7 @@ function mutateAccount(actor: FinanceActor, requestId: string, operation: string
     return { result: { account: after }, affectedIds: [after.id], before, after };
   });
   // Replayed results stored before newer account fields existed get their neutral values.
-  const credit = { credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null, used_credit_cents: null, available_credit_cents: null, ...NO_STATEMENT };
+  const credit = { interest: null, payment_account_id: null, credit_hold_cents: 0, credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null, used_credit_cents: null, available_credit_cents: null, ...NO_STATEMENT };
   return { account: { ...credit, ...result.account, account_group: result.account.account_group ?? "", logo: result.account.logo ?? "", include_in_summary: result.account.include_in_summary ?? true, maintaining_balance_cents: result.account.maintaining_balance_cents ?? 0, planned_expense_cents: result.account.planned_expense_cents ?? 0, spendable_cents: result.account.spendable_cents ?? (result.account.kind === "money" ? Math.max(0, result.account.balance_cents) : 0) } };
 }
 
@@ -191,9 +235,20 @@ function requireCreditSettings(kind: FinanceAccount["kind"], settings: CreditSet
   if (error) throw new FinanceError(error, 400, "invalid_input");
 }
 
+function requirePaymentAccount(kind: FinanceAccount["kind"], paymentAccountId: string | null) {
+  if (paymentAccountId === null) return;
+  const account = getDb().prepare("SELECT kind, archived FROM finance_accounts WHERE id=?").get(paymentAccountId) as { kind: string; archived: number } | undefined;
+  if (kind !== "credit" || !account || account.kind !== "money" || account.archived) {
+    throw new FinanceError("Choose an active money account to pay this credit card", 400, "invalid_payment_account");
+  }
+}
+
 export function createAccount(actor: FinanceActor, input: unknown): { account: FinanceAccount } {
   authorizeFinance(actor, "finance:manage");
   const { request_id, ...payload } = parse(createAccountSchema, input);
+  // Interest settings authorize future automatic ledger writes.
+  if (payload.interest !== undefined) authorizeFinance(actor, "finance:write");
+  if (payload.interest && payload.kind !== "money") throw new FinanceError("Choose an active money account", 400, "invalid_account");
   const cents = openingCents(payload.opening_balance);
   const maintaining = openingCents(payload.maintaining_balance);
   if (payload.kind !== "money" && maintaining !== 0) throw new FinanceError("Maintaining balance is only available for money accounts", 400, "invalid_input");
@@ -206,10 +261,12 @@ export function createAccount(actor: FinanceActor, input: unknown): { account: F
   // Preserve retry fingerprints for accounts created before settings were added.
   const requestPayload = { ...core, ...(account_group ? { account_group } : {}), ...(logo ? { logo } : {}), ...(!include_in_summary ? { include_in_summary } : {}), ...(maintaining !== 0 ? { maintaining_balance } : {}) };
   return mutateAccount(actor, request_id, "account.create", requestPayload, () => {
+    requirePaymentAccount(payload.kind, payload.payment_account_id ?? null);
     const id = randomUUID();
     const timestamp = now();
-    getDb().prepare("INSERT INTO finance_accounts (id, name, kind, currency, opening_balance_cents, maintaining_balance_cents, account_group, logo, include_in_summary, archived, version, created_at, updated_at, credit_limit_cents, statement_day, due_mode, due_value) VALUES (?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?)")
-      .run(id, payload.name, payload.kind, payload.currency, cents, maintaining, payload.account_group, payload.logo, Number(payload.include_in_summary), timestamp, timestamp, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value);
+    getDb().prepare("INSERT INTO finance_accounts (id, name, kind, currency, opening_balance_cents, maintaining_balance_cents, account_group, logo, include_in_summary, archived, version, created_at, updated_at, credit_limit_cents, statement_day, due_mode, due_value, payment_account_id) VALUES (?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?,?)")
+      .run(id, payload.name, payload.kind, payload.currency, cents, maintaining, payload.account_group, payload.logo, Number(payload.include_in_summary), timestamp, timestamp, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value, payload.payment_account_id ?? null);
+    if (payload.interest) saveInterestSettings(actor, request_id, id, payload.interest);
     return { before: null, after: readAccountBalance(id) };
   });
 }
@@ -218,6 +275,7 @@ export function updateAccount(actor: FinanceActor, id: string, input: unknown): 
   authorizeFinance(actor, "finance:manage");
   parse(getAccountSchema, { id });
   const { request_id, ...patch } = parse(updateAccountSchema, input);
+  if (patch.interest !== undefined) authorizeFinance(actor, "finance:write");
   return mutateAccount(actor, request_id, "account.update", { id, ...patch }, () => {
     const before = readAccountBalance(id);
     if (patch.version !== before.version) throw new FinanceError("Account changed; refresh before editing", 409, "version_conflict");
@@ -231,8 +289,19 @@ export function updateAccount(actor: FinanceActor, id: string, input: unknown): 
       due_value: patch.due_value === undefined ? before.due_value : patch.due_value,
     };
     requireCreditSettings(before.kind, credit);
-    getDb().prepare("UPDATE finance_accounts SET name = ?, archived = ?, account_group = ?, logo = ?, include_in_summary = ?, maintaining_balance_cents = ?, credit_limit_cents = ?, statement_day = ?, due_mode = ?, due_value = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
-      .run(patch.name ?? before.name, Number(patch.archived ?? before.archived), patch.account_group ?? before.account_group, patch.logo ?? before.logo, Number(patch.include_in_summary ?? before.include_in_summary), maintaining, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value, now(), id, before.version);
+    const paymentAccountId = patch.payment_account_id === undefined ? before.payment_account_id : patch.payment_account_id;
+    requirePaymentAccount(before.kind, paymentAccountId);
+    if (patch.archived && getDb().prepare("SELECT 1 FROM finance_accounts WHERE payment_account_id=? LIMIT 1").get(id)) {
+      throw new FinanceError("Unlink credit cards before archiving their payment account", 409, "payment_account_in_use");
+    }
+    if (patch.archived && !before.archived) {
+      const today = interestCalendarDate(new Date());
+      getDb().prepare("UPDATE finance_interest_configurations SET end_date=MAX(start_date,?) WHERE account_id=? AND end_date IS NULL").run(today, id);
+    }
+    if (patch.interest && (before.kind !== "money" || (patch.archived ?? before.archived))) throw new FinanceError("Choose an active money account", 400, "invalid_account");
+    if (patch.interest !== undefined) saveInterestSettings(actor, request_id, id, patch.interest);
+    getDb().prepare("UPDATE finance_accounts SET name = ?, archived = ?, account_group = ?, logo = ?, include_in_summary = ?, maintaining_balance_cents = ?, credit_limit_cents = ?, statement_day = ?, due_mode = ?, due_value = ?, payment_account_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?")
+      .run(patch.name ?? before.name, Number(patch.archived ?? before.archived), patch.account_group ?? before.account_group, patch.logo ?? before.logo, Number(patch.include_in_summary ?? before.include_in_summary), maintaining, credit.credit_limit_cents, credit.statement_day, credit.due_mode, credit.due_value, paymentAccountId, now(), id, before.version);
     return { before, after: readAccountBalance(id) };
   });
 }

@@ -41,7 +41,8 @@ test("expense rejection ignores cashback, rolls back, and the same request succe
 
   postTransaction(owner, { request_id: request(), type: "income", account_id: cash.id, amount: "0.01", transaction_date: "2026-10-03" });
   const posted = postTransaction(owner, payload);
-  assert.equal(posted.balance_cents, 100);
+  assert.equal(posted.balance_cents, 0);
+  assert.equal(posted.transaction.cashback_amount_cents, 100);
   assert.deepEqual(postTransaction(owner, payload), posted);
 });
 

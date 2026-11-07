@@ -762,7 +762,7 @@ export function FinanceOverviewDashboard({
                       key={transaction.id}
                       type="button"
                       onClick={() => onInspectTransaction(transaction.id)}
-                      className="flex min-h-11 items-center gap-3 rounded-sm px-1 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                      className="grid min-h-11 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-sm px-1 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
                         <Icon
@@ -777,7 +777,7 @@ export function FinanceOverviewDashboard({
                             transaction.type}
                         </span>
                         <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                          {transaction.transaction_date}
+                          {transaction.transaction_date} · {transaction.account_name}
                         </span>
                       </span>
                       <span className="shrink-0 text-right">
@@ -793,6 +793,11 @@ export function FinanceOverviewDashboard({
                           {transaction.reverted ? "Reverted" : transaction.type}
                         </span>
                       </span>
+                      {transaction.text?.trim() && (
+                        <span className="col-span-3 min-w-0 truncate text-xs text-muted-foreground">
+                          {transaction.text}
+                        </span>
+                      )}
                     </button>
                   );
                 })}

@@ -156,7 +156,7 @@ export function matchPlan(actor: FinanceActor, id: string, input: unknown): Sati
       if (!transaction.obligation_payment || transaction.obligation_id !== obligation.id)
         throw new FinanceError("Choose a principal payment of this obligation", 409, "invalid_match");
     } else if (payload.obligation_version !== undefined || transaction.obligation_payment) throw new FinanceError("Payment matching requires its obligation reminder", 409, "invalid_match");
-    if (transaction.reverted || transaction.type !== before.type || transaction.linked_record_id) throw new FinanceError("Select compatible unreverted activity without another activity link", 409, "invalid_match");
+    if (transaction.interest_period_id || transaction.reverted || transaction.type !== before.type || transaction.linked_record_id) throw new FinanceError("Select compatible unreverted activity without another activity link", 409, "invalid_match");
     if (db.prepare("SELECT id FROM finance_plans WHERE transaction_id = ?").get(transaction.id)) throw new FinanceError("Transaction already satisfies a plan", 409, "already_matched");
     if (transaction.version !== payload.transaction_version || transaction.version === Number.MAX_SAFE_INTEGER) throw new FinanceError("Activity changed; refresh before matching", 409, "version_conflict");
     db.prepare("UPDATE finance_transactions SET version=version+1,updated_at=? WHERE id=?").run(now(), transaction.id);

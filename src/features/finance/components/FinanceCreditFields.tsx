@@ -74,6 +74,14 @@ export function FinanceCreditFields({ editor, creating, busy }: {
         <FieldDescription>The day each billing cycle closes. Later days fall on the last day of shorter months.</FieldDescription>
       </Field>
       <Field>
+        <FieldLabel htmlFor="finance-payment-account">Payment account</FieldLabel>
+        <NativeSelect id="finance-payment-account" className="w-full" value={editor.paymentAccountId} disabled={busy} onChange={event => editor.setPaymentAccountId(event.target.value)}>
+          <NativeSelectOption value="">Not linked</NativeSelectOption>
+          {editor.paymentAccounts.map(account => <NativeSelectOption key={account.id} value={account.id}>{account.name}</NativeSelectOption>)}
+        </NativeSelect>
+        <FieldDescription>The full card debt is held from this account’s spendable cash. Spending beyond free cash warns and still saves.</FieldDescription>
+      </Field>
+      <Field>
         <FieldLabel id="finance-due-type-label">Due date type</FieldLabel>
         <ToggleGroup
           aria-labelledby="finance-due-type-label"

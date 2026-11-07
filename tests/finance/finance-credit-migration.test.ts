@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { after, test } from "node:test";
-import { getDb, SchemaTooNewError } from "../../src/lib/db";
+import { getDb, SCHEMA_VERSION, SchemaTooNewError } from "../../src/lib/db";
 import { createNote } from "../../src/lib/notes";
 import { createAccount, getAccount } from "../../src/features/finance/accounts";
 import { postTransaction } from "../../src/features/finance/activity";
@@ -65,7 +65,7 @@ test("a schema 3 vault upgrades to 4 with accounts, activity and links intact", 
 
   for (let boot = 0; boot < 2; boot++) {
     const db = getDb();
-    assert.equal(db.pragma("user_version", { simple: true }), 6);
+    assert.equal(db.pragma("user_version", { simple: true }), SCHEMA_VERSION);
     assert.deepEqual(snapshot(db), before);
     assert.deepEqual(db.prepare("SELECT DISTINCT credit_limit_cents, statement_day, due_mode, due_value FROM finance_accounts").all(),
       [{ credit_limit_cents: null, statement_day: null, due_mode: null, due_value: null }]);
@@ -87,7 +87,7 @@ test("a vault stamped newer than schema 6 is still refused", () => {
   const previous = process.env.CHIBAKO_DATA_DIR;
   try {
     const seed = new Database(join(newer, "brain.db"));
-    seed.pragma("user_version = 7");
+    seed.pragma(`user_version = ${SCHEMA_VERSION + 1}`);
     seed.close();
     process.env.CHIBAKO_DATA_DIR = newer;
     assert.throws(() => getDb(), SchemaTooNewError);

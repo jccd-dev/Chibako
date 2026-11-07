@@ -58,7 +58,7 @@ test("remaining due is the statement balance less later payments and credits, fl
   charge(visa.id, "300", "2026-10-25");
   charge(visa.id, "1000", "2026-10-26"); // next cycle; not on this statement
   assert.deepEqual(cardItems("2026-11-01").map(item => [item.title, item.amount_cents, item.due_date, item.urgency, item.target]),
-    [["Visa", 50000, "2026-11-15", "upcoming", "accounts"]]);
+    [["Visa", 50000, "2026-11-15", "upcoming", "accounts"], ["Visa", 100000, "2026-12-15", "upcoming", "accounts"]]);
 
   const partial = pay(visa.id, payer.id, "120", "2026-10-30");
   postTransaction(owner, { request_id: request(), type: "income", account_id: payer.id, amount: "1", transaction_date: "2026-10-30" });
@@ -67,9 +67,10 @@ test("remaining due is the statement balance less later payments and credits, fl
   assert.equal(cardItems("2026-11-15")[0].urgency, "due");
 
   pay(visa.id, payer.id, "1000", "2026-10-31");
-  assert.deepEqual(cardItems("2026-11-01"), []);
+  assert.equal(cardItems("2026-11-01")[0].amount_cents, 38000);
+  assert.equal(cardItems("2026-11-01")[0].due_date, "2026-12-15");
   revertActivity(owner, partial.transaction.id, { request_id: request(), version: partial.transaction.version });
-  assert.deepEqual(cardItems("2026-11-01"), [], "overpayment after the statement still covers it");
+  assert.equal(cardItems("2026-11-01")[0].amount_cents, 50000, "the closed statement stays paid; the upcoming cycle remains");
 });
 
 test("cards without statement settings, archived, or with nothing owed show no reminder", () => {

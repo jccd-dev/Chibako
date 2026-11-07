@@ -186,7 +186,7 @@ export function FinanceAccounts({
                       {account.next_due_date && (
                         <p className="text-[11px] text-muted-foreground tabular-nums">
                           {account.remaining_due_cents
-                            ? `${formatPHP(account.remaining_due_cents)} ${account.next_due_date < localCalendarDate() ? "overdue since" : "due"} ${formatHistoryDate(account.next_due_date)}`
+                            ? `${formatPHP(account.remaining_due_cents)} ${account.next_due_date < localCalendarDate() && (!account.statement_confirmed || (account.remaining_minimum_cents ?? 0) > 0) ? "overdue since" : "due"} ${formatHistoryDate(account.next_due_date)}`
                             : `Next due ${formatHistoryDate(account.next_due_date)}`}
                         </p>
                       )}

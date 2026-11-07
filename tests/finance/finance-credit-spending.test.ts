@@ -1,3 +1,4 @@
+import { applyCashback } from "../../src/features/finance/cashbacks";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -6,7 +7,7 @@ import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { getDb } from "../../src/lib/db";
 import { createAccount, getAccount, getFinanceSummary } from "../../src/features/finance/accounts";
-import { listTransactions, postTransaction } from "../../src/features/finance/activity";
+import { getTransaction, listTransactions, postTransaction } from "../../src/features/finance/activity";
 import { createClassification } from "../../src/features/finance/classifications";
 import { postTransfer } from "../../src/features/finance/movements";
 import { correctActivity, recordRefund, revertActivity } from "../../src/features/finance/corrections";
@@ -88,17 +89,19 @@ test("cashback on a card expense credits the card and keeps its own corrected cr
   createClassification(owner, { request_id: request(), kind: "category", type: "income", name: "Cashback" });
   const visa = card("1000");
   const posted = expense(visa.id, "200", { cashback: { mode: "amount", value: "5" } });
-  const cashback = posted.cashback;
+  const applied = applyCashback(owner, posted.transaction.id, { request_id: request(), version: posted.transaction.version, transaction_date: "2026-11-01" });
+  posted.transaction = applied.transaction;
+  const cashback = applied.cashback;
   assert.ok(cashback);
   assert.equal(cashback.account_id, visa.id);
-  assert.equal(posted.balance_cents, -19500);
+  assert.equal(posted.balance_cents, -20000);
   assert.equal(getAccount(owner, visa.id).used_credit_cents, 19500);
 
-  const moved = correctActivity(owner, cashback.id, { request_id: request(), version: cashback.version, transaction_date: "2026-11-21" });
-  assert.equal(moved.transaction.transaction_date, "2026-11-21");
+  const moved = correctActivity(owner, cashback.id, { request_id: request(), version: cashback.version, transaction_date: "2026-11-02" });
+  assert.equal(moved.transaction.transaction_date, "2026-11-02");
   assert.throws(() => correctActivity(owner, cashback.id, { request_id: request(), version: moved.transaction.version, amount: "9" }), { status: 409, code: "linked_activity" });
 
-  const corrected = correctActivity(owner, posted.transaction.id, { request_id: request(), version: posted.transaction.version, text: "Groceries" });
-  assert.equal(corrected.cashback?.transaction_date, "2026-11-21");
+  const corrected = correctActivity(owner, posted.transaction.id, { request_id: request(), version: getTransaction(owner, posted.transaction.id).version, text: "Groceries" });
+  assert.equal(corrected.cashback?.transaction_date, "2026-11-02");
   assert.equal(balance(visa.id), -19500);
 });

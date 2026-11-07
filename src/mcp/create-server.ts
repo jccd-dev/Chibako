@@ -1,3 +1,8 @@
+import { confirmStatement } from "../features/finance/statements";
+import { getCardPaymentOptions, recordCardPayment } from "../features/finance/card-payments";
+import { recordCardPaymentSchema } from "../features/finance/credit-cycle-types";
+import { confirmStatementSchema } from "../features/finance/statement-types";
+import { applyCashback, unapplyCashback, applyCashbackSchema, cashbackActionSchema } from "../features/finance/cashbacks";
 import { getMemoryStatus, readMemory, writeMemory } from "../features/memory/memory";
 import { saveFact } from "../features/memory/facts";
 import { sessionMemory } from "../features/memory/session-memory";
@@ -37,6 +42,7 @@ import { getVaultStats } from "../features/graph/vault-stats";
 import { hasAnyScope } from "../server/auth/api-key-authorization";
 import { authorizeFinance, authorizeFinanceNotes } from "../server/auth/finance-authorization";
 import { createAccount, getAccount, listAccounts, updateAccount, getFinanceSummary } from "../features/finance/accounts";
+import { getInterestProcessingStatus } from "../features/finance/interest-processing";
 import { postTransaction, listTransactions, getTransaction, getActivityTotals } from "../features/finance/activity";
 import { postTransfer, reconcileAccount, valueAsset } from "../features/finance/movements";
 import { correctActivity, hideActivity, revertActivity, recordRefund } from "../features/finance/corrections";
@@ -549,6 +555,10 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       title: "List finance accounts", description: "Bounded PHP accounts with exact cent balances. Defaults to active accounts, 50 per page; filter archived or kind explicitly.",
       inputSchema: listAccountsSchema, annotations: READ_ONLY,
     }, args => financeResult("finance:read", actor => ({ ...listAccounts(actor, args) })));
+    server.registerTool("get_finance_account_interest", {
+      title: "Read account interest status", description: "Read a money account's unposted net accrued interest through yesterday, next_payout_date and any automatic_error. Figures are modeled, not bank-confirmed. Interest stopped by disabling or archiving still shows until its scheduled payout.",
+      inputSchema: getAccountSchema, annotations: { readOnlyHint: true },
+    }, ({ id }) => financeResult("finance:read", actor => getInterestProcessingStatus(actor, id)));
     server.registerTool("get_finance_account", {
       title: "Read finance account", description: "Read one PHP account, immutable opening, derived balance and current version. Credit accounts also return credit_limit_cents, used_credit_cents, available_credit_cents, statement/due settings, and statement_date, statement_balance_cents, remaining_due_cents and next_due_date from the last closed statement; a negative balance is the amount owed.",
       inputSchema: getAccountSchema, annotations: READ_ONLY,
@@ -605,13 +615,33 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: matchPlanSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...matchPlan(actor, id, args) })));
     server.registerTool("correct_finance_activity", {
-      title: "Correct finance activity", description: "Replace mistaken amount, account, date or details atomically. Amount is a PHP decimal; adjustments accept a signed difference, not a new target balance. Transfer source is account_id, destination is destination_account_id; a linked fee moves with it. Optional fee correction requires its version. Expense cashback follows account/date changes; percentage cashback recalculates, fixed cashback stays unchanged and cannot exceed the corrected expense. Correct the expense rather than its cashback income. Refunds retain their expense/category link. Requires current version and request_id; returns affected balances.",
+      title: "Correct finance activity", description: "Replace mistaken amount, account, date or details atomically. Amount is a PHP decimal; adjustments accept a signed difference, not a new target balance. Transfer source is account_id, destination is destination_account_id; a linked fee moves with it. Optional fee correction requires its version. Percentage cashback earnings recalculate, but actual credited amounts, dates and destinations remain unchanged. Earned rewards cannot fall below the applied total; undo applications first. Fixed rewards cannot exceed the corrected expense. Correct the expense rather than cashback income amounts. Card repayments and cashback credits cannot move into the future. Refunds retain their expense/category link. Requires current version and request_id; returns affected balances.",
       inputSchema: correctActivitySchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...correctActivity(actor, id, args) })));
     server.registerTool("hide_finance_activity", {
       title: "Delete finance activity (hide only)", description: "Hide a record from default Activity without cancelling balances or reports. Transfer fee hides with its transfer; cashback income hides with its expense. Requires current version and request_id. Inspect with hidden filters. Linked plan satisfaction is retained.",
       inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...hideActivity(actor, id, args) })));
+    server.registerTool("confirm_finance_statement", {
+      title: "Confirm bank credit statement", description: "Store the bank statement balance, minimum due and due date. Requires current account version and request_id. PHP decimals, no automatic interest calculation or balance mutation. Confirmed minimum drives overdue alerts; later credits reduce remaining balance and minimum. Corrections bump statement and account versions; retries replay atomically.",
+      inputSchema: confirmStatementSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...confirmStatement(actor, id, args) })));
+    server.registerTool("get_finance_credit_cycles", {
+      title: "Read card cycles and payment options", description: "Read upcoming and historical card cycles, unpaid balances, pending rewards and active cash accounts. Credits settle oldest outstanding cycles first.",
+      inputSchema: getAccountSchema, annotations: { readOnlyHint: true },
+    }, ({ id }) => financeResult("finance:read", actor => ({ ...getCardPaymentOptions(actor, id) })));
+    server.registerTool("record_finance_card_payment", {
+      title: "Record credit card payment", description: "Record an actual card repayment from a cash account and optionally apply selected partial cashback atomically. Amount is cash paid (zero for cashback-only). Cashback defaults off. Requires account version, cutoff statement_date and request_id; future payment/credit dates are rejected. Does not instruct a bank to pay.",
+      inputSchema: recordCardPaymentSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...recordCardPayment(actor, id, args) })));
+    server.registerTool("apply_finance_cashback", {
+      title: "Apply earned cashback", description: "Apply all or part of pending expense cashback on the actual bank credited date into an active money or credit account. Optional PHP amount defaults to remaining pending. Dates must be on or after purchase and no later than today. Requires expense version and request_id; identical retries replay the result.",
+      inputSchema: applyCashbackSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...applyCashback(actor, id, args) })));
+    server.registerTool("unapply_finance_cashback", {
+      title: "Return cashback to pending", description: "Cancel all active cashback application income effects for the expense and return the reward to pending. Requires current expense version and request_id.",
+      inputSchema: cashbackActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
+    }, ({ id, ...args }) => financeResult("finance:write", actor => ({ ...unapplyCashback(actor, id, args) })));
     server.registerTool("revert_finance_activity", {
       title: "Revert mistaken finance activity", description: "Cancel financial/reporting effects once, including a transfer's linked fee and an expense's cashback income. Revert cashback through its original expense. Revert active refunds before their expense (including fees). Refund reversion cancels its own credit and spending reduction. Linked plans reopen when their transaction is reverted. Requires current version and request_id; identical retries return the original result.",
       inputSchema: activityActionSchema.extend({ id: getAccountSchema.shape.id }), annotations,
@@ -633,7 +663,7 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: postAdjustmentSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...valueAsset(actor, args) })));
     server.registerTool("post_finance_transaction", {
-      title: "Record income or expense", description: "Post actual PHP activity to an active money account; expenses may also be charged to an active credit (card) account up to its available credit (credit_limit_exceeded otherwise). Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string, account_id?} atomically records Cashback income on the expense date, to the expense's account unless account_id names another active money or credit account (invalid_account otherwise). Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking.",
+      title: "Record income or expense", description: "Post actual PHP activity to an active money account; expenses may also be charged to an active credit (card) account up to its available credit (credit_limit_exceeded otherwise). Requires request_id, decimal-string amount and transaction_date; defaults to Expense. Optional expense cashback {mode: 'percent' | 'amount', value: decimal string, account_id?} records pending earned cashback with no income or balance effect until apply_finance_cashback credits it on the bank date, to the expense's account unless account_id names another active money or credit account (invalid_account otherwise). Percentage rounds to the nearest cent, half up; cashback must be positive and not exceed the expense. Omit cashback for Off. Returns original balance on retries and warns on negative balances without blocking. Credit expense beyond its linked payment account free cash adds payment_account_shortfall but still posts.",
       inputSchema: postTransactionSchema, annotations,
     }, args => financeResult("finance:write", actor => ({ ...postTransaction(actor, args) })));
   }
@@ -704,11 +734,11 @@ if (authorized(["notes:read"])) server.registerTool("get_stats", {
       inputSchema: updateClassificationSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateClassification(actor, id, args)));
     server.registerTool("create_finance_account", {
-      title: "Create finance account", description: "Create a PHP money (Debit in the UI), asset, or credit (card) account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Credit accounts require a positive credit_limit and take an existing owed amount as a negative opening_balance; optional statement_day (1-31) and due rule: due_mode fixed_day with due_value 1-31, or after_statement with due_value 1-60 days (needs statement_day). Credit fields are rejected on other kinds. Optional account_group, logo (a bundled bank/wallet logo id such as gcash, empty for none) and include_in_summary (default true). Requires request_id; identical retries return the original account.",
+      title: "Create finance account", description: "Create a PHP money (Debit in the UI), asset, or credit (card) account with an exact decimal-string opening_balance plus optional non-negative maintaining_balance (money accounts only, default 0). Their sum is the initial net balance; maintaining is excluded from spendable. Credit accounts require a positive credit_limit and take an existing owed amount as a negative opening_balance; optional statement_day (1-31) and due rule: due_mode fixed_day with due_value 1-31, or after_statement with due_value 1-60 days (needs statement_day). Optional payment_account_id links an active money account, holding the full card debt from its spendable balance; null unlinks. Credit fields are rejected on other kinds. Optional account_group, logo (a bundled bank/wallet logo id such as gcash, empty for none) and include_in_summary (default true). Requires request_id; identical retries return the original account. Optional interest {annual_rate, frequency, withholding_tax} on a money account starts automatic modeled interest posting today (needs finance:write too); frequency daily/monthly/quarterly/yearly defaults to monthly and tax to 20.",
       inputSchema: createAccountSchema, annotations,
     }, args => financeResult("finance:manage", actor => createAccount(actor, args)));
     server.registerTool("update_finance_account", {
-      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, edit maintaining_balance on a money account, or edit credit_limit, statement_day and due_mode/due_value on a credit account (null clears statement day or due rule). Changing maintaining_balance changes net balance by the same difference. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
+      title: "Manage finance account", description: "Rename, group, archive, set include_in_summary, edit maintaining_balance on a money account, or edit credit_limit, statement_day and due_mode/due_value on a credit account (null clears statement day or due rule). Optional payment_account_id links an active money account for card repayment; null unlinks. Unlink cards before archiving a payment account. Changing maintaining_balance changes net balance by the same difference. interest {annual_rate, frequency, withholding_tax} sets automatic modeled interest on an active money account from today and null turns it off; either needs finance:write too, and already-earned interest still pays on its original payout date. Omitted frequency and tax keep the current value. Requires request_id and current version; opening, currency and kind cannot change. Archive retains balances; explicit summary exclusion omits them from summary totals.",
       inputSchema: updateAccountSchema.safeExtend({ id: getAccountSchema.shape.id }), annotations,
     }, ({ id, ...args }) => financeResult("finance:manage", actor => updateAccount(actor, id, args)));
   }

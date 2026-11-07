@@ -8,6 +8,7 @@ import {
 } from "./editor-session-controller";
 import type { Note } from "../../../lib/notes";
 import type { EditorDocument } from "./editor-session-controller";
+import { useSavedNotes } from "./SavedNotesProvider";
 
 export interface NoteEditorSessionEffects extends Omit<EditorSessionEffects, "onSwitchBlocked"> {
   onOrganized?(): void;
@@ -25,9 +26,11 @@ export function useNoteEditorSession(
   useLayoutEffect(() => { effectsRef.current = effects; }, [effects]);
   // Route payloads can come from Next's client router cache (prefetch, back/forward)
   // and predate this tab's own saves; remember each note's last saved copy.
-  const [savedNotes] = useState(() => new Map<string, Note>());
+  const savedNotes = useSavedNotes();
   const [controller] = useState(() => {
-    const session = createEditorSessionController(initial, {
+    const saved = initial ? savedNotes.get(initial.id) : undefined;
+    const latest = saved && initial && saved.updated_at >= initial.updated_at ? saved : initial;
+    const session = createEditorSessionController(latest, {
       save: effects.save,
       onSaved: (note, created, switching) => {
         savedNotes.set(note.id, note);

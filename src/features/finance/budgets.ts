@@ -115,8 +115,9 @@ export function getFinanceReport(actor: FinanceActor, input: unknown = {}): Fina
       AND NOT EXISTS (SELECT 1 FROM finance_obligation_payments p WHERE p.cash_activity_id=t.id)
       UNION ALL SELECT 'refund', CASE WHEN c.parent_id IS NULL THEN t.category_id ELSE c.parent_id END, -r.amount_cents, r.transaction_date
       FROM finance_refunds r JOIN finance_transactions t ON t.id = r.expense_id LEFT JOIN finance_classifications c ON c.id = t.category_id
-      WHERE r.reverted = 0 AND t.reverted = 0 AND r.transaction_date BETWEEN ? AND ?`)
-      .safeIntegers().iterate(query.from, query.to, query.from, query.to) as Iterable<{ type: string; category_id: string | null; amount_cents: bigint; transaction_date: string }>;
+      WHERE r.reverted = 0 AND t.reverted = 0 AND r.transaction_date BETWEEN ? AND ?
+      UNION ALL SELECT 'income', NULL, amount_cents, transaction_date FROM finance_interest_adjustments WHERE transaction_date BETWEEN ? AND ?`)
+      .safeIntegers().iterate(query.from, query.to, query.from, query.to, query.from, query.to) as Iterable<{ type: string; category_id: string | null; amount_cents: bigint; transaction_date: string }>;
     for (const row of rows) {
       const month = row.transaction_date.slice(0, 7), totals = months.get(month)!;
       const day = days.get(row.transaction_date) ?? { income: 0n, spending: 0n };
