@@ -33,7 +33,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { FinanceTransaction } from "@/features/finance/activity-types";
 import { FinanceCorrection } from "./FinanceCorrection";
 import { FinanceHistoryFilters } from "./FinanceHistoryFilters";
-import { FinanceDateInput, FinanceMonthInput } from "./FinanceDateInputs";
+import { FinanceTransactionDays, FinanceTransactionRow } from "./FinanceTransactionRow";
+import { DateInput, MonthInput } from "@/components/ui/date-inputs";
 import { FinanceNoteLinks, FinanceNotePicker } from "./FinanceNoteLinks";
 import { FinanceTransferFields } from "./FinanceTransferFields";
 import { FinanceCashbackFields } from "./FinanceCashbackFields";
@@ -77,7 +78,7 @@ export function FinanceMonthlyTotals({
         <h2 className="text-base font-semibold">Income and spending</h2>
         <label className="flex items-center gap-3 text-sm">
           Report month
-          <FinanceMonthInput
+          <MonthInput
             aria-label="Report month"
             value={activity.month}
             min="1000-01"
@@ -175,59 +176,32 @@ export function FinanceActivityList({
               Loading history…
             </p>
           ) : activity.page?.transactions.length ? (
-            <ul className="divide-y divide-border">
-              {activity.page.transactions.map((row) => {
+            <FinanceTransactionDays
+              rows={activity.page.transactions}
+              firstComplete={activity.offset === 0}
+              lastComplete={activity.offset + activity.page.transactions.length >= activity.page.total}
+              renderRow={(row) => {
                 const titled = row.obligation_payment
                   ? principalPaymentLabel(row)
                   : row.type === "income" || row.type === "expense"
                     ? (row.category_name ?? "Uncategorized")
                     : activityLabel(row.type);
+                const context = [
+                  row.destination_account_name ? `${row.account_name} to ${row.destination_account_name}` : "",
+                  row.cashback_expense_id ? "Cashback" : row.linked_record_id ? "Transfer fee" : "",
+                ].filter(Boolean).join(" • ");
                 return (
-                  <li key={row.id}>
-                    <button
-                      type="button"
-                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted"
-                      onClick={() => onInspect(row.id)}
-                      aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}
-                    >
-                      <span className="min-w-0 truncate text-sm font-medium">
-                        {titled}
-                        {row.subcategory_name ? ` / ${row.subcategory_name}` : ""}
-                      </span>
-                      <strong className="justify-self-end text-sm tabular-nums">
-                        {formatPHP(row.amount_cents)}
-                      </strong>
-                      <span className="min-w-0 truncate text-xs text-muted-foreground">
-                        {formatHistoryDate(row.transaction_date)} · {row.account_name}
-                        {row.destination_account_name
-                          ? ` to ${row.destination_account_name}`
-                          : ""}
-                        {row.cashback_expense_id ? " · Cashback" : row.linked_record_id ? " · Transfer fee" : ""}
-                      </span>
-                      {row.type === "income" || row.type === "expense" ? (
-                        <span className="justify-self-end text-xs text-muted-foreground">
-                          {activityLabel(row.type)}
-                        </span>
-                      ) : (
-                        <span aria-hidden="true" />
-                      )}
-                      {row.text?.trim() && (
-                        <span className="col-span-2 min-w-0 truncate text-xs text-muted-foreground">
-                          {row.text}
-                        </span>
-                      )}
-                      {(row.hidden || row.reverted) && (
-                        <span className="col-span-2 text-xs">
-                          {row.hidden ? "Hidden" : ""}
-                          {row.hidden && row.reverted ? " · " : ""}
-                          {row.reverted ? "Reverted" : ""}
-                        </span>
-                      )}
-                    </button>
-                  </li>
+                  <FinanceTransactionRow
+                    row={row}
+                    title={`${titled}${row.subcategory_name ? ` / ${row.subcategory_name}` : ""}`}
+                    context={context}
+                    note={row.text?.trim()}
+                    ariaLabel={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}
+                    onClick={() => onInspect(row.id)}
+                  />
                 );
-              })}
-            </ul>
+              }}
+            />
           ) : (
             <p className="py-8 text-sm text-muted-foreground">
               No matching transactions. Add a transaction or clear your filters.
@@ -806,7 +780,7 @@ export function FinanceTransactionEntry({
                 <FieldLabel htmlFor="transaction-transaction_date">
                   Transaction date
                 </FieldLabel>
-                <FinanceDateInput
+                <DateInput
                   id="transaction-transaction_date"
                   min="1000-01-01"
                   max="9999-12-31"

@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { IconCalendarMonth, IconChartPie, IconCreditCard, IconDotsVertical, IconFold, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
+import { IconCalendarMonth, IconChartPie, IconChecklist, IconCreditCard, IconDotsVertical, IconFold, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import { useRevealActiveNote } from "./use-reveal-active-note";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
@@ -816,6 +816,17 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
       >
         <IconCalendarMonth size={16} />
+      </Link>
+      <Link
+        href="/app/tasks"
+        aria-label="Tasks"
+        title="Tasks"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          pathname === "/app/tasks" && "bg-accent text-foreground"
+        )}
+      >
+        <IconChecklist size={16} />
       </Link>
       <Link
         href="/app/finance"

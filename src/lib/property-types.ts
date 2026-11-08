@@ -42,8 +42,14 @@ export function normalizePropertyType(type: string | undefined | null): Property
 
 export const DEFAULT_PROPERTY_DEFS: PropertyDef[] = [
   { name: "layer", type: "select", options: ["raw", "wiki", "output"] },
-  { name: "type", type: "select", options: ["entity", "concept", "comparison", "query", "summary", "guide"] },
-  { name: "status", type: "select", options: ["draft", "active", "done", "archived"] },
+  { name: "type", type: "select", options: ["entity", "concept", "comparison", "query", "summary", "guide", "task"] },
+  { name: "status", type: "select", options: ["Not started", "In progress", "Done"] },
+  { name: "priority", type: "select", options: ["Low", "Medium", "High"] },
   { name: "category", type: "string" },
   { name: "tags", type: "tags" },
 ];
+
+/** Select choices plus the current value when it is off-list (e.g. a renamed option), so it is never blanked out. */
+export function selectChoices(options: string[], value: string): string[] {
+  return value && !options.includes(value) ? [...options, value] : options;
+}

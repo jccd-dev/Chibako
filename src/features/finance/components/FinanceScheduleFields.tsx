@@ -17,7 +17,7 @@ import {
   FieldSet,
   FieldLegend,
 } from "@/components/ui/field";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { FinancePlanToggle } from "./FinancePlanToggle";
 import { MoneyInput } from "./MoneyInput";
 
@@ -163,7 +163,7 @@ export function FinanceScheduleFields({
       {startLater && (
         <Field data-invalid={!!errors.start_date}>
           <FieldLabel htmlFor="schedule-start_date">Start date</FieldLabel>
-          <FinanceDateInput
+          <DateInput
             id="schedule-start_date"
             min={loggedDate}
             max="9999-12-31"
@@ -230,7 +230,7 @@ export function FinanceScheduleFields({
       {endCondition === "date" && (
         <Field data-invalid={!!errors.end_date}>
           <FieldLabel htmlFor="schedule-end_date">Last date</FieldLabel>
-          <FinanceDateInput
+          <DateInput
             id="schedule-end_date"
             min={form.start}
             max="9999-12-31"

@@ -7,7 +7,7 @@ import type { FinanceTransaction } from "../activity-types";
 import type { FinanceActivityController } from "../use-finance-activity";
 import { formatPHP, localCalendarDate, decimalPHPInput } from "../presentation";
 import { previewCents } from "../money";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { cashbackSplit } from "../cashback-split";
 import { MoneyInput } from "./MoneyInput";
 
@@ -42,7 +42,7 @@ export function FinanceCashbackAction({ record, activity, onSaved }: {
         </Field>
         <Field>
           <FieldLabel htmlFor="cashback-credited-date">Cashback credited date</FieldLabel>
-          <FinanceDateInput id="cashback-credited-date" min={record.transaction_date} max={today} value={date} onChange={setDate} disabled={activity.busy} />
+          <DateInput id="cashback-credited-date" min={record.transaction_date} max={today} value={date} onChange={setDate} disabled={activity.busy} />
           <FieldDescription>The date the bank credited the reward, on or after the purchase date.</FieldDescription>
         </Field>
         <Button type="submit" variant="outline" disabled={activity.busy || invalid}>{activity.busy ? "Saving…" : "Apply cashback"}</Button>

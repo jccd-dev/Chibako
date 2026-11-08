@@ -21,7 +21,7 @@ import {
   FieldError,
 } from "@/components/ui/field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { FinancePlanCategories } from "./FinancePlanCategories";
 import { FinancePlanToggle } from "./FinancePlanToggle";
 import { FinanceScheduleFields } from "./FinanceScheduleFields";
@@ -198,7 +198,7 @@ export function FinancePlanningForm({
             <FieldGroup className="sm:flex-row">
               <Field data-invalid={!!loggedDateError}>
                 <FieldLabel htmlFor="schedule-logged-date">Logged at</FieldLabel>
-                <FinanceDateInput
+                <DateInput
                   id="schedule-logged-date"
                   min="1000-01-01"
                   max="9999-12-31"

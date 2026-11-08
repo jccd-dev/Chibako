@@ -8,7 +8,6 @@ import {
   IconAlertTriangle,
   IconArrowDownLeft,
   IconArrowUpRight,
-  IconArrowsExchange,
   IconChartBar,
   IconChevronLeft,
   IconChevronRight,
@@ -45,6 +44,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FinanceGoals } from "./FinanceGoals";
 import { FinanceCostAnalysis } from "./FinanceCostAnalysis";
+import { FinanceTransactionRow } from "./FinanceTransactionRow";
 import { useFinanceRecentActivity } from "@/features/finance/use-finance-recent-activity";
 import {
   Empty,
@@ -749,59 +749,21 @@ export function FinanceOverviewDashboard({
           </CardHeader>
           <CardContent>
             {transactions.length ? (
-              <div className="flex flex-col divide-y divide-border/60">
-                {transactions.map((transaction) => {
-                  const Icon =
-                    transaction.type === "income"
-                      ? IconArrowDownLeft
-                      : transaction.type === "expense"
-                        ? IconArrowUpRight
-                        : IconArrowsExchange;
-                  return (
-                    <button
-                      key={transaction.id}
-                      type="button"
+              <ul className="flex flex-col gap-1.5">
+                {transactions.map((transaction) => (
+                  <li key={transaction.id}>
+                    <FinanceTransactionRow
+                      row={transaction}
+                      compact
+                      title={transaction.category_name || transaction.subcategory_name || transaction.type}
+                      context={formatHistoryDate(transaction.transaction_date)}
+                      note={transaction.text?.trim()}
+                      ariaLabel={`Inspect ${transaction.type} ${money(transaction.amount_cents)} on ${formatHistoryDate(transaction.transaction_date)}`}
                       onClick={() => onInspectTransaction(transaction.id)}
-                      className="grid min-h-11 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-sm px-1 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                    >
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                        <Icon
-                          className="size-4 text-muted-foreground"
-                          aria-hidden="true"
-                        />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium">
-                          {transaction.category_name ||
-                            transaction.subcategory_name ||
-                            transaction.type}
-                        </span>
-                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                          {transaction.transaction_date} · {transaction.account_name}
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-right">
-                        <span className="block text-xs font-medium tabular-nums">
-                          {transaction.type === "income"
-                            ? "+"
-                            : transaction.type === "expense"
-                              ? "-"
-                              : ""}
-                          {money(transaction.amount_cents)}
-                        </span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                          {transaction.reverted ? "Reverted" : transaction.type}
-                        </span>
-                      </span>
-                      {transaction.text?.trim() && (
-                        <span className="col-span-3 min-w-0 truncate text-xs text-muted-foreground">
-                          {transaction.text}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                    />
+                  </li>
+                ))}
+              </ul>
             ) : (
               <Empty className="px-0">
                 <EmptyHeader>

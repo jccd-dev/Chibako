@@ -41,6 +41,8 @@ export interface FinancePlan {
   logged_time: string; timezone: string; handling: "manual" | "automatic";
   schedule_id: string | null; occurrence_date: string | null;
   status: "pending" | "satisfied" | "cancelled"; transaction_id: string | null; version: number;
+  /** Amount of the satisfying transaction; differs from amount_cents when the payment was confirmed at another amount. */
+  recorded_amount_cents: number | null;
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;
 }
 export interface PlanPage { plans: FinancePlan[]; total: number; limit: number; offset: number }

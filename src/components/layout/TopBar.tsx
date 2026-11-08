@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   IconCalendarMonth,
+  IconChecklist,
   IconDotsVertical,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -126,6 +127,10 @@ export function TopBar({
             <DropdownMenuItem onClick={() => router.push("/app/calendar")}>
               <IconCalendarMonth />
               Calendar
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/app/tasks")}>
+              <IconChecklist />
+              Tasks
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/app/graph")}>
               <IconGraph />

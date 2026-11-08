@@ -42,7 +42,7 @@ export function FinanceSchedulePaymentRow({ plan, today, busy, onReview }: { pla
     <span className={`mt-0.5 size-2 shrink-0 rounded-full ${pending ? overdue ? "bg-destructive" : plan.due_date === today ? "bg-primary" : "bg-foreground/30" : "bg-muted-foreground/40"}`} aria-hidden />
     <button className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" disabled={busy} onClick={() => onReview(plan.id)} aria-label={`Open payment due ${humanDate(plan.due_date)}`}>
       <span className="min-w-0"><span className="block text-sm font-medium">{humanDate(plan.due_date)}</span><span className="mt-0.5 block text-xs text-muted-foreground">{status} · {plan.handling === "automatic" ? "Automatic" : "Manual"}</span></span>
-      <span className="text-sm font-medium tabular-nums">{formatPHP(plan.amount_cents)}</span>
+      <span className="shrink-0 text-right"><span className="block text-sm font-medium tabular-nums">{formatPHP(plan.recorded_amount_cents ?? plan.amount_cents)}</span>{plan.recorded_amount_cents !== null && plan.recorded_amount_cents !== plan.amount_cents && <span className="mt-0.5 block text-xs text-muted-foreground tabular-nums">Planned {formatPHP(plan.amount_cents)}</span>}</span>
     </button>
     {pending && <Button disabled={busy} onClick={() => onReview(plan.id)} aria-label={`Confirm ${plan.type === "income" ? "income" : "payment"} due ${humanDate(plan.due_date)}`}>{plan.type === "income" ? "Confirm income" : "Confirm"}</Button>}
   </li>;

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { FinanceAccountChoice } from "./FinanceAccountChoice";
 import { MoneyInput } from "./MoneyInput";
@@ -15,6 +15,7 @@ import type { FinanceActivityController } from "@/features/finance/use-finance-a
 import { obligationQuickAmounts } from "@/features/finance/obligation-quick-amounts";
 import { previewCents } from "@/features/finance/money";
 import { financeBalanceShortfall } from "@/features/finance/balance-gate";
+import { FinanceTransactionRow } from "./FinanceTransactionRow";
 import { decimalPHPInput, financeDrawerFooter, formatHistoryDate, formatPHP } from "@/features/finance/presentation";
 
 const logCopy = {
@@ -55,7 +56,7 @@ export function FinanceObligationLog({ o, activity }: { o: FinanceObligationsCon
           <FieldDescription>{text.remaining}: <span className="tabular-nums">{formatPHP(editing.outstanding_cents)}</span>. {selected ? "Taken from the linked activity." : ""}</FieldDescription>
           <FieldError id="payment-error-amount">{o.errors.amount}</FieldError></Field>
         <Field><FieldLabel htmlFor="payment-text">Description (optional)</FieldLabel><Input id="payment-text" maxLength={2000} placeholder={debt ? "e.g. Partial payment" : "e.g. Partial payment, paid after reminder"} value={o.text} disabled={disabled || !!selected} onChange={e => o.setText(e.target.value)} />{selected && <FieldDescription>A linked activity keeps its own text.</FieldDescription>}</Field>
-        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="payment-date">{text.date}</FieldLabel><FinanceDateInput id="payment-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled || !!selected} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="payment-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
+        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="payment-date">{text.date}</FieldLabel><DateInput id="payment-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled || !!selected} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="payment-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
         <Field data-invalid={!!o.errors.account_id}><FieldLabel id="payment-account-label">{text.account}</FieldLabel>
           <FinanceAccountChoice label={text.account} accounts={accounts} value={o.accountId} onChange={o.setAccountId} disabled={disabled || !!selected} />
           <FinanceOptionStatus activity={activity} />
@@ -99,12 +100,7 @@ function PaymentCandidates({ o }: { o: FinanceObligationsController }) {
   return <div className="flex flex-col gap-3">
     {o.pError ? <Alert><AlertDescription>{o.pError}<Button type="button" variant="outline" onClick={() => void o.loadCandidates(o.pOffset)}>Retry matching history</Button></AlertDescription></Alert> : o.pLoading ? <p role="status" className="text-sm text-muted-foreground">Loading matching history…</p> : o.pCandidates.length ? <>
       <p className="text-sm text-muted-foreground">{o.pTotal} eligible record{o.pTotal === 1 ? "" : "s"}. Selecting fills account, date and amount exactly as recorded.</p>
-      <ul className="divide-y divide-border border-y border-border">{o.pCandidates.map(row => <li key={row.id}><button type="button" className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted" onClick={() => o.selectCandidate(row)} aria-label={`Select ${row.type === "expense" ? "expense" : "income"} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}>
-        <span className="min-w-0 truncate text-sm font-medium">{row.category_name ?? (row.type === "expense" ? "Expense" : "Income")}</span>
-        <strong className="justify-self-end text-sm tabular-nums">{formatPHP(row.amount_cents)}</strong>
-        <span className="min-w-0 truncate text-xs text-muted-foreground">{formatHistoryDate(row.transaction_date)} · {row.account_name}</span>
-        <span aria-hidden="true" />
-      </button></li>)}</ul>
+      <ul className="flex flex-col gap-1.5">{o.pCandidates.map(row => <li key={row.id}><FinanceTransactionRow row={row} title={row.category_name ?? (row.type === "expense" ? "Expense" : "Income")} context={formatHistoryDate(row.transaction_date)} ariaLabel={`Select ${row.type === "expense" ? "expense" : "income"} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`} onClick={() => o.selectCandidate(row)} /></li>)}</ul>
       {o.pTotal > 25 && <nav aria-label="Matching history pages" className="flex flex-wrap items-center gap-3"><Button type="button" variant="outline" disabled={o.pOffset === 0 || o.pLoading} onClick={() => void o.loadCandidates(Math.max(0, o.pOffset - 25))}>Previous records</Button><span className="text-sm">{o.pOffset + 1}-{Math.min(o.pOffset + 25, o.pTotal)} of {o.pTotal}</span><Button type="button" variant="outline" disabled={o.pOffset + 25 >= o.pTotal || o.pLoading} onClick={() => void o.loadCandidates(o.pOffset + 25)}>Next records</Button></nav>}
     </> : <p className="text-sm text-muted-foreground">No eligible {o.editing?.kind === "debt" ? "expense" : "income"} history to link. Record the payment as new cash instead, or add the transaction in Activity and load this list again.</p>}
   </div>;
@@ -134,7 +130,7 @@ export function FinanceObligationAddMore({ o, activity }: { o: FinanceObligation
           <FinanceOptionStatus activity={activity} />
           <FieldError id="more-error-account_id">{o.errors.account_id}</FieldError></Field>
         {shortfall && <p role="alert" className="text-sm text-destructive">{shortfall.message}</p>}
-        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="more-date">Date the money moved</FieldLabel><FinanceDateInput id="more-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="more-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
+        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="more-date">Date the money moved</FieldLabel><DateInput id="more-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="more-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
         <Field><FieldLabel htmlFor="more-text">Description (optional)</FieldLabel><Input id="more-text" maxLength={2000} value={o.text} disabled={disabled} onChange={e => o.setText(e.target.value)} /></Field>
         <p role="status" className="rounded-xl border border-border p-4 text-sm text-muted-foreground">{preview} Kept out of income and spending.</p>
       </FieldGroup>

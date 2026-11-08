@@ -51,6 +51,9 @@ test("posting confirms actual fields once, Delete retains satisfaction and Rever
   const posted = postPlan(owner, plan.id, payload);
   assert.equal(posted.plan.status, "satisfied");
   assert.equal(posted.transaction.amount_cents, 1550);
+  assert.equal(posted.plan.recorded_amount_cents, 1550);
+  assert.equal(posted.plan.amount_cents, plan.amount_cents);
+  assert.equal(plan.recorded_amount_cents, null);
   assert.equal(posted.transaction.transaction_date, "2026-11-01");
   assert.equal(getAccount(owner, account.id).balance_cents, 10000);
   assert.equal(getAccount(owner, other.id).balance_cents, 8450);
@@ -63,6 +66,7 @@ test("posting confirms actual fields once, Delete retains satisfaction and Rever
   assert.equal(reverted.plan?.status, "pending");
   const reopened = getPlan(owner, plan.id);
   assert.equal(reopened.transaction_id, null);
+  assert.equal(reopened.recorded_amount_cents, null);
   assert.equal(reopened.version, posted.plan.version + 1);
   assert.equal(getAccount(owner, other.id).balance_cents, 10000);
   const reposted = postPlan(owner, plan.id, { ...payload, ...action(reopened.version) });

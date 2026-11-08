@@ -27,12 +27,14 @@ function spanLanes(notes: DatedNote[]) {
     });
 }
 
-export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, compact = false }: {
+export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onOpenNote, compact = false }: {
   notes: NoteSummary[];
   selected: string;
   /** Inclusive end of the current Note's range, highlighted as a band. */
   selectedEnd?: string;
   onSelect: (date: string) => void;
+  /** Open a span pill in place; without it, pills link to the Note page. */
+  onOpenNote?: (id: string) => void;
   compact?: boolean;
 }) {
   const selectedDate = noteDateToDate(selected);
@@ -51,7 +53,7 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, com
 
   // Full-bleed month grid: columns share the pane width, week tracks share the
   // pane height, hairlines draw the cell structure, dates anchor top-left.
-  const stretchClassNames = compact ? undefined : {
+  const stretchClassNames = compact ? { today: "text-foreground" } : {
     months: cn(defaultClassNames.months, "relative h-full w-full flex flex-col"),
     month: cn(defaultClassNames.month, "flex h-full w-full flex-col gap-2"),
     month_caption: cn(defaultClassNames.month_caption, "flex h-10 w-full shrink-0 items-center justify-center px-(--cell-size)"),
@@ -103,7 +105,24 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, com
           });
           const label = `${dateLabel}${count ? `, ${count} Note${count === 1 ? "" : "s"}` : ""}`;
           if (compact) {
-            return <CalendarDayButton day={day} modifiers={modifiers} {...props} aria-label={label}>{day.date.getDate()}</CalendarDayButton>;
+            // One muted fill for the Note's date or range; today is a dot so it never competes with that fill.
+            return (
+              <CalendarDayButton
+                day={day}
+                modifiers={modifiers}
+                {...props}
+                className={cn(
+                  props.className,
+                  "data-[selected-single=true]:text-foreground",
+                  band ? "data-[selected-single=true]:bg-transparent" : "data-[selected-single=true]:bg-primary/15",
+                  modifiers.today && "font-semibold",
+                )}
+                aria-label={modifiers.today ? `Today, ${label}` : label}
+              >
+                {day.date.getDate()}
+                {modifiers.today && <span aria-hidden="true" className="absolute bottom-0.5 size-1 rounded-full bg-primary opacity-100!" />}
+              </CalendarDayButton>
+            );
           }
           const visible = daySpans.filter(({ lane }) => lane < MAX_SPAN_LANES);
           const hidden = daySpans.length - visible.length;
@@ -155,6 +174,7 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, com
                     <Link
                       key={note.id}
                       href={`/app/note/${note.id}`}
+                      onClick={onOpenNote && ((event) => { event.preventDefault(); onOpenNote(note.id); })}
                       title={note.title}
                       style={{ width: `calc(${cells * 100}% + ${cells - 1}px - ${inset}rem)` }}
                       className={cn(

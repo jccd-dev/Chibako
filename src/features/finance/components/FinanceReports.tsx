@@ -31,7 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { FinanceDateInput, FinanceMonthInput } from "./FinanceDateInputs";
+import { DateInput, MonthInput } from "@/components/ui/date-inputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { FinancePlanCategories } from "./FinancePlanCategories";
 import { financeDrawerFooter, financeSheet, formatPHP as money } from "@/features/finance/presentation";
@@ -59,9 +59,9 @@ export function FinanceReports({ reports, onCategory }: { reports: FinanceReport
   }
   return <section aria-label="Spending reports" className="flex flex-col gap-4">
     <form onSubmit={event => { event.preventDefault(); reports.applyDates(dates); }} className="flex flex-wrap items-end gap-2">
-      <div className="w-auto"><Field><FieldLabel htmlFor="report-month" className="text-xs">Report month</FieldLabel><FinanceMonthInput id="report-month" aria-label="Report month" className="w-auto" value={reports.dates.date_from.slice(0, 7)} onChange={setMonth} /></Field></div>
-      <div className="w-36"><Field><FieldLabel htmlFor="report-from" className="text-xs">From</FieldLabel><FinanceDateInput id="report-from" required min="1000-01-01" max="9999-12-31" value={dates.date_from} onChange={value => setDates(current => ({ ...current, date_from: value }))} /></Field></div>
-      <div className="w-36"><Field><FieldLabel htmlFor="report-to" className="text-xs">To</FieldLabel><FinanceDateInput id="report-to" required min={dates.date_from || "1000-01-01"} max="9999-12-31" value={dates.date_to} onChange={value => setDates(current => ({ ...current, date_to: value }))} /></Field></div>
+      <div className="w-auto"><Field><FieldLabel htmlFor="report-month" className="text-xs">Report month</FieldLabel><MonthInput id="report-month" aria-label="Report month" className="w-auto" value={reports.dates.date_from.slice(0, 7)} onChange={setMonth} /></Field></div>
+      <div className="w-36"><Field><FieldLabel htmlFor="report-from" className="text-xs">From</FieldLabel><DateInput id="report-from" required min="1000-01-01" max="9999-12-31" value={dates.date_from} onChange={value => setDates(current => ({ ...current, date_from: value }))} /></Field></div>
+      <div className="w-36"><Field><FieldLabel htmlFor="report-to" className="text-xs">To</FieldLabel><DateInput id="report-to" required min={dates.date_from || "1000-01-01"} max="9999-12-31" value={dates.date_to} onChange={value => setDates(current => ({ ...current, date_to: value }))} /></Field></div>
       <Button type="submit" variant="outline">Update report</Button>
     </form>
     {reports.error ? <Alert><AlertDescription>{reports.error}<Button variant="outline" onClick={() => void reports.refresh()}>Retry reports</Button></AlertDescription></Alert> : !report ? <p role="status" className="py-2 text-sm text-muted-foreground">Loading reports…</p> : <>
@@ -174,7 +174,7 @@ export function FinanceBudgets({
         <CardTitle>Monthly budgets</CardTitle>
         <CardDescription className="max-sm:col-start-1 max-sm:row-start-2">Category limits for {monthLabel}. Limits cover whole calendar months without rollover and include every subcategory and account.</CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2 max-sm:col-start-1 max-sm:row-start-3">
-          <FinanceMonthInput
+          <MonthInput
             aria-label="Budget month"
             value={reportMonth}
             onChange={setReportMonth}
@@ -263,7 +263,7 @@ export function FinanceBudgets({
             id="budget-category"
           />
           <FieldGroup className="rounded-xl bg-muted/50 p-4">
-            <Field><FieldLabel htmlFor="budget-month">Budget month</FieldLabel><FinanceMonthInput id="budget-month" required min="1000-01" max="9999-12" disabled={busy} value={month} onChange={setMonth} /></Field>
+            <Field><FieldLabel htmlFor="budget-month">Budget month</FieldLabel><MonthInput id="budget-month" required min="1000-01" max="9999-12" disabled={busy} value={month} onChange={setMonth} /></Field>
             <Field><FieldLabel htmlFor="budget-mode">Apply change</FieldLabel><NativeSelect id="budget-mode" className="w-full" disabled={busy} value={mode} onChange={event => setMode(event.target.value)}><NativeSelectOption value="forward">From this month onward</NativeSelectOption><NativeSelectOption value="correction">Correct this month only</NativeSelectOption></NativeSelect></Field>
             <FieldDescription>{mode === "forward" ? "Replaces all limits and corrections from this month onward. Earlier months stay unchanged." : "Changes only this month, preserving earlier and later limits."}</FieldDescription>
           </FieldGroup>

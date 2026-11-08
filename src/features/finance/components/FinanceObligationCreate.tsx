@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { FinanceAccountChoice } from "./FinanceAccountChoice";
 import { MoneyInput } from "./MoneyInput";
@@ -67,12 +67,12 @@ export function FinanceObligationCreate({ obligations: o, activity }: { obligati
           <FieldError id="obligation-error-account_id">{o.errors.account_id}</FieldError></Field>
         {shortfall && <p role="alert" className="text-sm text-destructive">{shortfall.message}</p>}
         {tracked
-          ? <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="obligation-date">Date the money moved</FieldLabel><FinanceDateInput id="obligation-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="obligation-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
+          ? <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="obligation-date">Date the money moved</FieldLabel><DateInput id="obligation-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="obligation-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
           : <Field data-invalid={!!o.errors.already_paid}><FieldLabel htmlFor="obligation-already-paid">Already paid (PHP, optional)</FieldLabel><MoneyInput id="obligation-already-paid" inputMode="decimal" className="tabular-nums" placeholder="0.00" value={o.alreadyPaid} disabled={disabled} onValueChange={o.setAlreadyPaid} {...invalid("already_paid")} /><FieldDescription>Starting progress for an existing {debt ? "debt" : "entry"}. Only available without a tracked account, because a tracked account moves the full amount.</FieldDescription><FieldError id="obligation-error-already_paid">{o.errors.already_paid}</FieldError></Field>}
         <details className="rounded-xl border border-border p-4">
           <summary className="cursor-pointer text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">More details</summary>
           <FieldGroup className="mt-4 gap-6">
-            <Field data-invalid={!!o.errors.due_date}><FieldLabel htmlFor="obligation-due-date">Due date (optional)</FieldLabel><FinanceDateInput id="obligation-due-date" min="1000-01-01" max="9999-12-31" value={o.dueDate} disabled={disabled} onChange={o.setDueDate} {...invalid("due_date")} /><FieldError id="obligation-error-due_date">{o.errors.due_date}</FieldError></Field>
+            <Field data-invalid={!!o.errors.due_date}><FieldLabel htmlFor="obligation-due-date">Due date (optional)</FieldLabel><DateInput id="obligation-due-date" min="1000-01-01" max="9999-12-31" value={o.dueDate} disabled={disabled} onChange={o.setDueDate} {...invalid("due_date")} /><FieldError id="obligation-error-due_date">{o.errors.due_date}</FieldError></Field>
             <Field data-invalid={!!o.errors.notes}><FieldLabel htmlFor="obligation-notes">Notes (optional)</FieldLabel><Textarea id="obligation-notes" maxLength={2000} placeholder="Purpose, payment terms or reminders" value={o.notes} disabled={disabled} onChange={e => o.setNotes(e.target.value)} {...invalid("notes")} /><FieldError id="obligation-error-notes">{o.errors.notes}</FieldError></Field>
             {tracked && <Field><FieldLabel htmlFor="obligation-text">Transaction text (optional)</FieldLabel><Textarea id="obligation-text" maxLength={2000} value={o.text} disabled={disabled} onChange={e => o.setText(e.target.value)} /></Field>}
           </FieldGroup>

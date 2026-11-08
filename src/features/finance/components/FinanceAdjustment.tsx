@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { FinanceAccount } from "@/features/finance/types";
 import { useFinanceAdjustment } from "@/features/finance/use-finance-adjustment";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { MoneyInput } from "./MoneyInput";
 import { financeDrawerFooter, financeSheet, formatPHP } from "@/features/finance/presentation";
 
@@ -29,7 +29,7 @@ export function FinanceAdjustment({ selected, activity, onClose }: { selected: F
           <dl className="text-sm"><dt className="text-muted-foreground">Current derived {asset ? "value" : "balance"}</dt><dd className="mt-2 text-xl font-semibold tabular-nums">{formatPHP(adjustment.account.balance_cents)}</dd></dl>
           <FieldGroup className="gap-6">
             <Field data-invalid={!!adjustment.errors.actual_balance}><FieldLabel htmlFor="adjustment-actual_balance">{asset ? "Actual asset value (PHP)" : "Actual balance (PHP)"}</FieldLabel><MoneyInput id="adjustment-actual_balance" inputMode="decimal" signed value={adjustment.actual} disabled={activity.busy} onValueChange={value => adjustment.setActual(value)} {...errorProps("actual_balance")} /><FieldDescription>A signed PHP amount with up to two decimal places. Negative balances warn but are allowed.</FieldDescription><FieldError id="adjustment-error-actual_balance">{adjustment.errors.actual_balance}</FieldError></Field>
-            <Field data-invalid={!!adjustment.errors.transaction_date}><FieldLabel htmlFor="adjustment-transaction_date">{asset ? "Valuation date" : "Reconciliation date"}</FieldLabel><FinanceDateInput id="adjustment-transaction_date" min="1000-01-01" max="9999-12-31" value={adjustment.date} disabled={activity.busy} onChange={adjustment.setDate} {...errorProps("transaction_date")} /><FieldError id="adjustment-error-transaction_date">{adjustment.errors.transaction_date}</FieldError></Field>
+            <Field data-invalid={!!adjustment.errors.transaction_date}><FieldLabel htmlFor="adjustment-transaction_date">{asset ? "Valuation date" : "Reconciliation date"}</FieldLabel><DateInput id="adjustment-transaction_date" min="1000-01-01" max="9999-12-31" value={adjustment.date} disabled={activity.busy} onChange={adjustment.setDate} {...errorProps("transaction_date")} /><FieldError id="adjustment-error-transaction_date">{adjustment.errors.transaction_date}</FieldError></Field>
           </FieldGroup>
           <p role="status" className="text-sm">{adjustment.difference === null ? "Enter the actual amount to compare." : `Dated difference to record: ${formatPHP(adjustment.difference)}.${asset ? " No cash will move." : ""}`}</p>
           <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">Additional details</summary><Field className="mt-4"><FieldLabel htmlFor="adjustment-text">Adjustment text</FieldLabel><Textarea id="adjustment-text" value={adjustment.text} maxLength={2000} disabled={activity.busy} onChange={event => adjustment.setText(event.target.value)} /></Field></details>

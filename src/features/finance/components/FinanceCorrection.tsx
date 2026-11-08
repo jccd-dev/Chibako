@@ -16,7 +16,7 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { FinancePlanCategories } from "./FinancePlanCategories";
 import { MoneyInput } from "./MoneyInput";
 import type { FinanceTransaction } from "@/features/finance/activity-types";
@@ -211,7 +211,7 @@ export function FinanceCorrection({
                 <FieldLabel htmlFor="correction-date">
                   {refund ? "Refund date" : "Transaction date"}
                 </FieldLabel>
-                <FinanceDateInput
+                <DateInput
                   id="correction-date"
                   min="1000-01-01"
                   max="9999-12-31"
@@ -386,7 +386,7 @@ export function FinanceCorrection({
         <form onSubmit={submit} className="flex flex-col gap-3">
           <Field data-invalid={!!edit.errors.transaction_date}>
             <FieldLabel htmlFor="correction-cashback-date">Credited date</FieldLabel>
-            <FinanceDateInput
+            <DateInput
               id="correction-cashback-date"
               min="1000-01-01"
               max="9999-12-31"
