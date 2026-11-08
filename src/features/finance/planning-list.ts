@@ -29,14 +29,15 @@ const selection = `WITH pending AS (
   UNION ALL
   SELECT 'one-time', p.id,
     COALESCE(NULLIF(TRIM(p.text),''), c.name, CASE p.type WHEN 'income' THEN 'Income plan' ELSE 'Expense plan' END),
-    p.type, p.amount_cents, a.name, CASE p.automatic_eligible WHEN 1 THEN 'automatic' ELSE 'manual' END,
+    p.type, COALESCE(t.amount_cents, p.amount_cents), a.name, CASE p.automatic_eligible WHEN 1 THEN 'automatic' ELSE 'manual' END,
     NULL, NULL, 0, CASE WHEN p.status='pending' THEN p.due_date END,
     p.status='pending', p.status='pending' AND p.due_date<@as_of, p.status='pending' AND p.due_date=@as_of,
     p.status='pending' AND p.due_date<=@as_of AND p.automatic_eligible=0,
     CASE WHEN p.status='pending' THEN p.id END, NULL,
     CASE p.status WHEN 'satisfied' THEN 'recorded' WHEN 'cancelled' THEN 'cancelled' END
   FROM finance_plans p JOIN finance_accounts a ON a.id=p.account_id
-    LEFT JOIN finance_classifications c ON c.id=p.category_id WHERE p.schedule_id IS NULL
+    LEFT JOIN finance_classifications c ON c.id=p.category_id
+    LEFT JOIN finance_transactions t ON t.id=p.transaction_id AND p.status='satisfied' WHERE p.schedule_id IS NULL
 ), filtered AS (
   SELECT kind,id,title,type,amount_cents,account_name,handling,interval_count,interval_unit,paused,next_due_date,
     pending_count,overdue_count,due_today_count,manual_due_count,first_pending_id,automatic_error,

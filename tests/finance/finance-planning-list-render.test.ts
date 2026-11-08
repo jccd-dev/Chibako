@@ -117,7 +117,7 @@ const payment: FinancePlan = {
   id: "TEST payment", type: "expense", account_id: "TEST account", account_name: "TEST account", currency: "PHP", amount_cents: 1000,
   due_date: "2027-01-15", category_id: null, subcategory_id: null, category_name: null, obligation_id: null,
   logged_time: "00:00", timezone: "UTC", handling: "manual", schedule_id: "TEST schedule", occurrence_date: "2027-01-15",
-  status: "pending", transaction_id: null, version: 1,
+  status: "pending", transaction_id: null, version: 1, recorded_amount_cents: null,
 };
 
 function PaymentEntry({ plan }: { plan: FinancePlan }) {
@@ -177,4 +177,10 @@ test("inline logging renders the existing confirmation form without a second dra
     const standalone = renderToStaticMarkup(createElement(InlinePayment, { plan: { ...payment, handling }, inline: false }));
     assert.match(standalone, />Match activity</);
   }
+});
+
+test("a payment recorded at a different amount shows the recorded amount and the planned one", () => {
+  const html = renderToStaticMarkup(createElement(FinanceSchedulePaymentRow, { plan: { ...payment, status: "satisfied", transaction_id: "TEST tx", recorded_amount_cents: 1250 }, today: "2026-10-15", busy: false, onReview: () => undefined }));
+  assert.match(html, /12\.50/);
+  assert.match(html, /Planned [^<]*10\.00/);
 });

@@ -49,7 +49,7 @@ export function FinanceHistoryFilters({ activity }: { activity: FinanceActivityC
   );
 
   if (desktop) return (
-    <aside aria-label="History filters" className="min-w-0 border-r border-border pr-6">
+    <aside aria-label="History filters" className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 overflow-y-auto border-r border-border pr-6">
       <h3 className="mb-4 text-sm font-semibold">Filters</h3>
       {form}
     </aside>

@@ -11,8 +11,9 @@ import { decimalCents } from "./money";
 import { parseFinance, financeMutation } from "./mutations";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema, type FinancePlan, type PlanPage, type SatisfiedPlan } from "./planning-types";
 
-const selection = `SELECT p.*, a.name AS account_name, c.name AS category_name FROM finance_plans p
-  JOIN finance_accounts a ON a.id = p.account_id LEFT JOIN finance_classifications c ON c.id = p.category_id`;
+const selection = `SELECT p.*, a.name AS account_name, c.name AS category_name, t.amount_cents AS recorded_amount_cents FROM finance_plans p
+  JOIN finance_accounts a ON a.id = p.account_id LEFT JOIN finance_classifications c ON c.id = p.category_id
+  LEFT JOIN finance_transactions t ON t.id = p.transaction_id AND p.status = 'satisfied'`;
 type PlanRow = Omit<FinancePlan, "currency" | "tag_ids" | "handling"> & {
   automatic_eligible: number; text: string; tag_ids: string; created_at: number; updated_at: number; schedule_generation: number | null;
   cancel_reason: "skipped" | "boundary" | "cadence" | null;

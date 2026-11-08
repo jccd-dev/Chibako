@@ -143,7 +143,7 @@ export function PlanPanel({ plan, activity, planning, reminders, onClose, onFutu
           <h3 className="break-words text-base font-semibold">{plan.text || plan.category_name || (plan.type === "income" ? "Planned income" : "Planned expense")}</h3>
           <p className="mt-1 break-words text-sm text-muted-foreground">{plan.category_name || "Uncategorized"} · {plan.account_name}</p>
         </div>
-        <div className="shrink-0 text-right"><p className="text-base font-semibold tabular-nums">{money(plan.amount_cents)}</p></div>
+        <div className="shrink-0 text-right"><p className="text-base font-semibold tabular-nums">{money(plan.recorded_amount_cents ?? plan.amount_cents)}</p>{plan.recorded_amount_cents !== null && plan.recorded_amount_cents !== plan.amount_cents && <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">Planned {money(plan.amount_cents)}</p>}</div>
       </div>
       <p className="mt-3 text-sm">{plan.status === "pending" ? <>{plan.schedule_id ? "Due" : "Expected"} {humanDate(plan.due_date)}</> : humanDate(plan.due_date)} · {planStatus} · {plan.handling === "automatic" ? "Automatic" : "Manual"}</p>
       <p className="mt-1 text-xs text-muted-foreground">Planned time {plan.logged_time} ({plan.timezone}).{plan.status === "pending" ? plan.handling === "automatic" ? " Records automatically when due while the server is running." : " Manual confirmation required." : ""}</p>
