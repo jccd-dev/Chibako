@@ -25,8 +25,9 @@ function calendarUrl(date: string, folder: string, tasksOnly: boolean) {
   return `/app/calendar?date=${date}${folder ? `&folder=${encodeURIComponent(folder)}` : ""}${tasksOnly ? "&tasks=1" : ""}`;
 }
 
-export function CalendarView({ initialNotes, requestedDate, requestedFolder = "", requestedTasksOnly = false }: {
+export function CalendarView({ initialNotes, vaultFolders, requestedDate, requestedFolder = "", requestedTasksOnly = false }: {
   initialNotes: DatedNote[];
+  vaultFolders: string[];
   requestedDate?: string;
   requestedFolder?: string;
   requestedTasksOnly?: boolean;
@@ -39,7 +40,7 @@ export function CalendarView({ initialNotes, requestedDate, requestedFolder = ""
     () => allNotes.filter((note) => inFolder(note.folder, folder) && (!tasksOnly || isTask(note))),
     [allNotes, folder, tasksOnly]
   );
-  const folders = useMemo(() => folderChoices([...allNotes.map((note) => note.folder), folder]), [allNotes, folder]);
+  const folders = useMemo(() => folderChoices([...vaultFolders, ...allNotes.map((note) => note.folder), folder]), [vaultFolders, allNotes, folder]);
   const [chosenDate, setSelected] = useState<string | null>(() => isNoteDate(requestedDate) ? requestedDate : null);
   const [drawer, setDrawer] = useState({ open: false, noteId: null as string | null, key: 0 });
   const openTask = (noteId: string | null) => setDrawer((d) => ({ open: true, noteId, key: d.key + 1 }));
@@ -116,14 +117,9 @@ export function CalendarView({ initialNotes, requestedDate, requestedFolder = ""
               <h2 className="text-sm font-semibold">{heading}</h2>
               <p className="text-xs text-muted-foreground">{selectedNotes.length} Note{selectedNotes.length === 1 ? "" : "s"}</p>
             </div>
-            <div className="flex gap-1.5">
-              <Button size="sm" variant="outline" disabled={!selected} onClick={() => selected && router.push(`/app/note/new?date=${selected}`)}>
-                New note
-              </Button>
-              <Button size="sm" disabled={!selected} onClick={() => openTask(null)}>
-                <IconPlus data-icon="inline-start" />New task
-              </Button>
-            </div>
+            <Button size="icon" disabled={!selected} onClick={() => openTask(null)} aria-label="Add note or task" title="Add note or task">
+              <IconPlus />
+            </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="calendar-note-list">
             {selectedNotes.length ? (

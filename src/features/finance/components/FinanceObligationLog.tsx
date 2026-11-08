@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { FinanceAccountChoice } from "./FinanceAccountChoice";
 import { MoneyInput } from "./MoneyInput";
@@ -55,7 +55,7 @@ export function FinanceObligationLog({ o, activity }: { o: FinanceObligationsCon
           <FieldDescription>{text.remaining}: <span className="tabular-nums">{formatPHP(editing.outstanding_cents)}</span>. {selected ? "Taken from the linked activity." : ""}</FieldDescription>
           <FieldError id="payment-error-amount">{o.errors.amount}</FieldError></Field>
         <Field><FieldLabel htmlFor="payment-text">Description (optional)</FieldLabel><Input id="payment-text" maxLength={2000} placeholder={debt ? "e.g. Partial payment" : "e.g. Partial payment, paid after reminder"} value={o.text} disabled={disabled || !!selected} onChange={e => o.setText(e.target.value)} />{selected && <FieldDescription>A linked activity keeps its own text.</FieldDescription>}</Field>
-        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="payment-date">{text.date}</FieldLabel><FinanceDateInput id="payment-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled || !!selected} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="payment-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
+        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="payment-date">{text.date}</FieldLabel><DateInput id="payment-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled || !!selected} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="payment-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
         <Field data-invalid={!!o.errors.account_id}><FieldLabel id="payment-account-label">{text.account}</FieldLabel>
           <FinanceAccountChoice label={text.account} accounts={accounts} value={o.accountId} onChange={o.setAccountId} disabled={disabled || !!selected} />
           <FinanceOptionStatus activity={activity} />
@@ -134,7 +134,7 @@ export function FinanceObligationAddMore({ o, activity }: { o: FinanceObligation
           <FinanceOptionStatus activity={activity} />
           <FieldError id="more-error-account_id">{o.errors.account_id}</FieldError></Field>
         {shortfall && <p role="alert" className="text-sm text-destructive">{shortfall.message}</p>}
-        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="more-date">Date the money moved</FieldLabel><FinanceDateInput id="more-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="more-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
+        <Field data-invalid={!!o.errors.transaction_date}><FieldLabel htmlFor="more-date">Date the money moved</FieldLabel><DateInput id="more-date" min="1000-01-01" max="9999-12-31" value={o.date} disabled={disabled} onChange={o.setDate} {...invalid("transaction_date")} /><FieldError id="more-error-transaction_date">{o.errors.transaction_date}</FieldError></Field>
         <Field><FieldLabel htmlFor="more-text">Description (optional)</FieldLabel><Input id="more-text" maxLength={2000} value={o.text} disabled={disabled} onChange={e => o.setText(e.target.value)} /></Field>
         <p role="status" className="rounded-xl border border-border p-4 text-sm text-muted-foreground">{preview} Kept out of income and spending.</p>
       </FieldGroup>

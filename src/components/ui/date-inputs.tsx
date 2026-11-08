@@ -10,12 +10,12 @@ import { MonthPicker } from "@/components/ui/monthpicker";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 
-// Shared finance date controls for site forms. The popover trigger keeps the
+// Shared date controls for site forms. The popover trigger keeps the
 // id, labels and error wiring; a hidden native input keeps required and range
 // validation working, because the trigger itself is a button and buttons are
 // skipped by native form validation.
 
-type FinanceControlProps = Omit<ComponentPropsWithoutRef<"button">, "onChange" | "value" | "type"> & {
+type DateControlProps = Omit<ComponentPropsWithoutRef<"button">, "onChange" | "value" | "type"> & {
   required?: boolean;
   value: string;
   onChange: (value: string) => void;
@@ -28,7 +28,7 @@ function isoDate(value: string, template: string) {
   return value.match(/^\d/) ? parse(value, template, new Date()) : undefined;
 }
 
-function ValidationInput({ type, value, min, max, required, disabled, name, onChange }: FinanceControlProps & { type: "date" | "month" }) {
+function ValidationInput({ type, value, min, max, required, disabled, name, onChange }: DateControlProps & { type: "date" | "month" }) {
   if (!required) return null;
   return <input type={type} className="sr-only top-0 left-0" tabIndex={-1} value={value} onChange={event => onChange(event.target.value)} required disabled={disabled} name={name} min={min} max={max} aria-hidden="true" />;
 }
@@ -37,7 +37,7 @@ function triggerClasses(valid: boolean, hasValue: boolean, className?: string) {
   return cn("w-full justify-between text-left font-normal", valid || hasValue ? "" : "text-muted-foreground", className);
 }
 
-export function FinanceDateInput({ value, onChange, min, max, placeholder = "Choose a date", required, className, ...props }: FinanceControlProps) {
+export function DateInput({ value, onChange, min, max, placeholder = "Choose a date", required, className, ...props }: DateControlProps) {
   const [open, setOpen] = useState(false);
   const selected = useMemo(() => value ? isoDate(value, "yyyy-MM-dd") : undefined, [value]);
   const valid = selected !== undefined && isValid(selected);
@@ -82,7 +82,7 @@ export function FinanceDateInput({ value, onChange, min, max, placeholder = "Cho
   );
 }
 
-export function FinanceMonthInput({ value, onChange, min, max, placeholder = "Choose a month", required, className, ...props }: FinanceControlProps) {
+export function MonthInput({ value, onChange, min, max, placeholder = "Choose a month", required, className, ...props }: DateControlProps) {
   const [open, setOpen] = useState(false);
   const selected = useMemo(() => value ? isoDate(value, "yyyy-MM") : undefined, [value]);
   const valid = selected !== undefined && isValid(selected);

@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { listNotes } from "@/lib/notes";
 import { getPropertyDefs } from "@/lib/properties";
+import { folderTree } from "@/features/organization/folders";
 import { TasksView } from "@/features/calendar/components/TasksView";
 
 export default async function TasksPage({ searchParams }: {
@@ -15,6 +16,7 @@ export default async function TasksPage({ searchParams }: {
   return (
     <TasksView
       initialNotes={listNotes()}
+      vaultFolders={folderTree()}
       typeOptions={options("type")}
       statusOptions={options("status")}
       requestedType={requestedType}

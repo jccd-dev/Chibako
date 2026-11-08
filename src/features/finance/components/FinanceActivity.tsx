@@ -33,7 +33,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { FinanceTransaction } from "@/features/finance/activity-types";
 import { FinanceCorrection } from "./FinanceCorrection";
 import { FinanceHistoryFilters } from "./FinanceHistoryFilters";
-import { FinanceDateInput, FinanceMonthInput } from "./FinanceDateInputs";
+import { DateInput, MonthInput } from "@/components/ui/date-inputs";
 import { FinanceNoteLinks, FinanceNotePicker } from "./FinanceNoteLinks";
 import { FinanceTransferFields } from "./FinanceTransferFields";
 import { FinanceCashbackFields } from "./FinanceCashbackFields";
@@ -77,7 +77,7 @@ export function FinanceMonthlyTotals({
         <h2 className="text-base font-semibold">Income and spending</h2>
         <label className="flex items-center gap-3 text-sm">
           Report month
-          <FinanceMonthInput
+          <MonthInput
             aria-label="Report month"
             value={activity.month}
             min="1000-01"
@@ -806,7 +806,7 @@ export function FinanceTransactionEntry({
                 <FieldLabel htmlFor="transaction-transaction_date">
                   Transaction date
                 </FieldLabel>
-                <FinanceDateInput
+                <DateInput
                   id="transaction-transaction_date"
                   min="1000-01-01"
                   max="9999-12-31"

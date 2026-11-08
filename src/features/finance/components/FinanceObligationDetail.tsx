@@ -9,7 +9,7 @@ import { Field, FieldGroup, FieldError, FieldLabel } from "@/components/ui/field
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { CounterpartyChips } from "./FinanceObligationCreate";
 import type { FinanceObligationsController } from "@/features/finance/use-finance-obligations";
 import type { FinanceObligation, FinanceObligationHistoryEntry } from "@/features/finance/obligation-types";
@@ -71,7 +71,7 @@ export function FinanceObligationDetail({ o, onInspectActivity }: { o: FinanceOb
           <FieldGroup className="gap-6">
             <Field><FieldLabel id="obligation-counterparty-label">Type (optional)</FieldLabel><CounterpartyChips value={o.counterparty} onChange={o.setCounterparty} disabled={disabled} /></Field>
             <Field data-invalid={!!o.errors.name}><FieldLabel htmlFor="obligation-name">Name</FieldLabel><Input id="obligation-name" maxLength={120} value={o.name} disabled={disabled} onChange={e => o.setName(e.target.value)} {...invalid("name")} /><FieldError id="obligation-error-name">{o.errors.name}</FieldError></Field>
-            <Field data-invalid={!!o.errors.due_date}><FieldLabel htmlFor="obligation-due-date">Due date (optional)</FieldLabel><FinanceDateInput id="obligation-due-date" min="1000-01-01" max="9999-12-31" value={o.dueDate} disabled={disabled} onChange={o.setDueDate} {...invalid("due_date")} /><FieldError id="obligation-error-due_date">{o.errors.due_date}</FieldError></Field>
+            <Field data-invalid={!!o.errors.due_date}><FieldLabel htmlFor="obligation-due-date">Due date (optional)</FieldLabel><DateInput id="obligation-due-date" min="1000-01-01" max="9999-12-31" value={o.dueDate} disabled={disabled} onChange={o.setDueDate} {...invalid("due_date")} /><FieldError id="obligation-error-due_date">{o.errors.due_date}</FieldError></Field>
             <Field data-invalid={!!o.errors.notes}><FieldLabel htmlFor="obligation-notes">Notes (optional)</FieldLabel><Textarea id="obligation-notes" maxLength={2000} value={o.notes} disabled={disabled} onChange={e => o.setNotes(e.target.value)} {...invalid("notes")} /><FieldError id="obligation-error-notes">{o.errors.notes}</FieldError></Field>
           </FieldGroup>
           {o.errors.form && <Alert><AlertDescription>{o.errors.form}</AlertDescription></Alert>}

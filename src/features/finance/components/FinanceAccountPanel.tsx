@@ -29,7 +29,7 @@ import type { FinanceAccountsController } from "../use-finance-accounts";
 import type { FinanceActivityController } from "../use-finance-activity";
 import { useFinanceAccountEditor } from "../use-finance-account-editor";
 import { decimalPHP, financeDrawerFooter, financeSheet, formatPHP } from "../presentation";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { FinanceAccountHistory } from "./FinanceAccountHistory";
 import { MoneyInput } from "./MoneyInput";
 import { FinanceLogoPicker } from "./FinanceLogoPicker";
@@ -387,7 +387,7 @@ export function FinanceAccountPanel({
                             <FieldLabel htmlFor="finance-adjustment-date">
                               Balance date
                             </FieldLabel>
-                            <FinanceDateInput
+                            <DateInput
                               id="finance-adjustment-date"
                               value={adjustment.date}
                               min="1000-01-01"

@@ -13,7 +13,7 @@ import type { FinanceCreditCycle } from "../credit-cycle-types";
 import { cashbackSplit } from "../cashback-split";
 import { formatHistoryDate, formatPHP } from "../presentation";
 import { useFinanceCreditPayment } from "../use-finance-credit-payment";
-import { FinanceDateInput } from "./FinanceDateInputs";
+import { DateInput } from "@/components/ui/date-inputs";
 import { MoneyInput } from "./MoneyInput";
 
 type Props = {
@@ -60,7 +60,7 @@ function PaymentForm({ card, cycle, olderUnpaidCents, includedThroughDate, cash,
     </Field>
     <Field>
       <FieldLabel htmlFor="card-pay-date">Payment date</FieldLabel>
-      <FinanceDateInput id="card-pay-date" required max={form.today} value={form.date} onChange={form.setDate} disabled={form.busy} />
+      <DateInput id="card-pay-date" required max={form.today} value={form.date} onChange={form.setDate} disabled={form.busy} />
     </Field>
     {rewards.length > 0 && <fieldset className="flex flex-col gap-2">
       <legend className="text-sm font-medium">Use pending cashback (optional)</legend>
@@ -78,7 +78,7 @@ function PaymentForm({ card, cycle, olderUnpaidCents, includedThroughDate, cash,
             </Field>
             <Field>
               <FieldLabel htmlFor={`pay-cb-date-${reward.id}`}>Credited date</FieldLabel>
-              <FinanceDateInput id={`pay-cb-date-${reward.id}`} min={reward.transaction_date} max={form.today} value={pick.date} onChange={value => form.patch(reward.id, { date: value }, reward)} disabled={form.busy} />
+              <DateInput id={`pay-cb-date-${reward.id}`} min={reward.transaction_date} max={form.today} value={pick.date} onChange={value => form.patch(reward.id, { date: value }, reward)} disabled={form.busy} />
             </Field>
           </div>}
         </div>;

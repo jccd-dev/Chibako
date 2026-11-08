@@ -1,5 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
+/** Picks an option from a Base UI Select in the task drawer (options render in a portal). */
+async function chooseTaskOption(page: Page, label: string, option: string): Promise<void> {
+  await page.getByRole("dialog").getByLabel(label, { exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+}
+
 async function authenticate(page: Page): Promise<void> {
   const clientId = `tasks-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   await page.route("**/api/login", (route) => route.continue({
@@ -38,7 +44,7 @@ test("Tasks table lists Notes by Type, groups by status and edits in the drawer"
   await page.getByRole("button", { name: "New task" }).click();
   const drawer = page.getByRole("dialog");
   await drawer.getByLabel("Task title").fill(`Undated ${suffix}`);
-  await drawer.getByLabel("Task status").selectOption("Not started");
+  await chooseTaskOption(page, "Task status", "Not started");
   await drawer.getByRole("button", { name: "Create task" }).click();
   await expect(drawer.getByRole("status")).toHaveText("Saved");
   await page.keyboard.press("Escape");
@@ -50,7 +56,7 @@ test("Tasks table lists Notes by Type, groups by status and edits in the drawer"
 
   // Marking it Done moves it to the Done group without leaving the page.
   await notStarted.getByRole("button", { name: `Undated ${suffix}` }).click();
-  await page.getByRole("dialog").getByLabel("Task status").selectOption("Done");
+  await chooseTaskOption(page, "Task status", "Done");
   await expect(page.getByRole("dialog").getByRole("status")).toHaveText("Saved");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();

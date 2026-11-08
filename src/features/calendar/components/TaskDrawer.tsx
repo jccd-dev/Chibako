@@ -14,7 +14,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { DateInput } from "@/components/ui/date-inputs";
 
 interface TaskValues {
   title: string;
@@ -107,6 +109,7 @@ function TaskCreateForm({ date, lookups, onCreated }: {
   onCreated: (note: Note) => void;
 }) {
   const [values, setValues] = useState<TaskValues>({ title: "", folder: "", type: "task", date, endDate: "", status: "", priority: "" });
+  const [body, setBody] = useState("");
   const [nested, setNested] = useState(true);
   const [saving, setSaving] = useState(false);
   const target = nested ? taskFolder(values.folder) : values.folder;
@@ -125,7 +128,7 @@ function TaskCreateForm({ date, lookups, onCreated }: {
       const { note } = await readJson<{ note: Note }>(await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: values.title.trim(), folder: target, properties }),
+        body: JSON.stringify({ title: values.title.trim(), folder: target, content: body, properties }),
       }));
       notifyNotesChanged();
       onCreated(note);
@@ -138,10 +141,20 @@ function TaskCreateForm({ date, lookups, onCreated }: {
   return (
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <TaskFields values={values} lookups={lookups} onChange={(field, value) => setValues((v) => ({ ...v, [field]: value }))} />
-      <label className="flex items-center gap-2 text-xs">
-        <Checkbox checked={nested} onCheckedChange={(checked) => setNested(checked)} />
-        Put it in a Tasks subfolder
-      </label>
+      <div className="min-h-48 shrink-0 rounded-md border border-border px-3 py-2" aria-label="Task body">
+        <RichTextEditor
+          noteId="new"
+          markdown={body}
+          selfTitle={values.title}
+          allNotes={lookups.notes}
+          onBodyChange={setBody}
+          onNavigate={() => {}}
+        />
+      </div>
+      <Field orientation="horizontal">
+        <Checkbox id="task-nested" checked={nested} onCheckedChange={(checked) => setNested(checked)} />
+        <FieldLabel htmlFor="task-nested" className="font-normal">Put it in a Tasks subfolder</FieldLabel>
+      </Field>
       <p className="text-xs text-muted-foreground" data-testid="task-target-folder">Saves to {target || "Vault root"}</p>
       <div className="flex justify-end">
         <Button type="submit" disabled={saving || !values.title.trim()}>Create task</Button>
@@ -198,7 +211,7 @@ function TaskEditor({ initial, lookups, flushRef }: {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <TaskFields values={values} lookups={lookups} onChange={change} />
-      <div className="min-h-48 flex-1 rounded-md border border-border px-3 py-2" aria-label="Task body">
+      <div className="min-h-48 shrink-0 rounded-md border border-border px-3 py-2" aria-label="Task body">
         <RichTextEditor
           noteId={initial.id}
           markdown={body}
@@ -222,50 +235,66 @@ function TaskFields({ values, lookups, onChange }: {
   onChange: (field: keyof TaskValues, value: string) => void;
 }) {
   const optionsFor = (name: string) => lookups.defs.find((def) => def.name === name && def.type === "select")?.options ?? [];
-  const folders = selectChoices(["", ...lookups.folders], values.folder);
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <label className="flex flex-col gap-1 text-xs font-medium sm:col-span-2">
-        Title
-        <Input value={values.title} onChange={(e) => onChange("title", e.target.value)} aria-label="Task title" autoFocus />
-      </label>
-      <label className="flex flex-col gap-1 text-xs font-medium sm:col-span-2">
-        Folder
-        <NativeSelect className="w-full" value={values.folder} onChange={(e) => onChange("folder", e.target.value)} aria-label="Task folder">
-          {folders.map((f) => <NativeSelectOption key={f} value={f}>{f || "Vault root"}</NativeSelectOption>)}
-        </NativeSelect>
-      </label>
-      <label className="flex flex-col gap-1 text-xs font-medium">
-        Date
-        <Input type="date" value={values.date} onChange={(e) => onChange("date", e.target.value)} aria-label="Task date" />
-      </label>
-      <label className="flex flex-col gap-1 text-xs font-medium">
-        End date
-        <Input type="date" value={values.endDate} onChange={(e) => onChange("endDate", e.target.value)} aria-label="Task end date" />
-      </label>
+    <FieldGroup className="grid gap-3 sm:grid-cols-2">
+      <Field className="sm:col-span-2">
+        <FieldLabel htmlFor="task-title">Title</FieldLabel>
+        <Input id="task-title" value={values.title} onChange={(e) => onChange("title", e.target.value)} aria-label="Task title" autoFocus />
+      </Field>
+      <ChoiceField
+        className="sm:col-span-2"
+        label="Folder"
+        value={values.folder}
+        options={selectChoices(["", ...lookups.folders], values.folder)}
+        emptyLabel="Vault root"
+        onChange={(v) => onChange("folder", v)}
+      />
+      <Field>
+        <FieldLabel htmlFor="task-date">Date</FieldLabel>
+        <DateInput id="task-date" aria-label="Task date" value={values.date} onChange={(v) => onChange("date", v)} />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="task-end-date">End date</FieldLabel>
+        <DateInput id="task-end-date" aria-label="Task end date" min={values.date || undefined} value={values.endDate} onChange={(v) => onChange("endDate", v)} />
+      </Field>
       <ChoiceField label="Type" value={values.type} options={optionsFor("type")} onChange={(v) => onChange("type", v)} />
       <ChoiceField label="Status" value={values.status} options={optionsFor("status")} onChange={(v) => onChange("status", v)} />
       <ChoiceField label="Priority" value={values.priority} options={optionsFor("priority")} onChange={(v) => onChange("priority", v)} />
-    </div>
+    </FieldGroup>
   );
 }
 
-function ChoiceField({ label, value, options, onChange }: {
+/** A select for a property; `options` empty means the property has no select definition, so it falls back to free text. */
+function ChoiceField({ label, value, options, onChange, emptyLabel = "—", className }: {
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
+  emptyLabel?: string;
+  className?: string;
 }) {
+  const id = `task-${label.toLowerCase()}`;
+  const ariaLabel = `Task ${label.toLowerCase()}`;
+  const choices = ["", ...selectChoices(options, value).filter(Boolean)];
   return (
-    <label className="flex flex-col gap-1 text-xs font-medium">
-      {label}
+    <Field className={className}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       {options.length ? (
-        <NativeSelect className="w-full" value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Task ${label.toLowerCase()}`}>
-          {["", ...selectChoices(options, value)].map((o) => <NativeSelectOption key={o} value={o}>{o || "—"}</NativeSelectOption>)}
-        </NativeSelect>
+        <Select
+          items={Object.fromEntries(choices.map((o) => [o, o || emptyLabel]))}
+          value={value}
+          onValueChange={(next) => { if (next !== null) onChange(next); }}
+        >
+          <SelectTrigger id={id} aria-label={ariaLabel} className="w-full px-2 py-0.5 text-xs/relaxed shadow-none data-[size=default]:h-7 bg-input/20 [&_svg:not([class*='size-'])]:size-3.5">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {choices.map((o) => <SelectItem key={o} value={o}>{o || emptyLabel}</SelectItem>)}
+          </SelectContent>
+        </Select>
       ) : (
-        <Input value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Task ${label.toLowerCase()}`} />
+        <Input id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel} />
       )}
-    </label>
+    </Field>
   );
 }

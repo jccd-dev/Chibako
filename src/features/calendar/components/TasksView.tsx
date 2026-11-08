@@ -41,8 +41,9 @@ function tasksUrl(type: string, folder: string) {
 }
 
 /** Notion-style table of Notes by property, grouped by status. Type defaults to `task` but is only a filter. */
-export function TasksView({ initialNotes, typeOptions, statusOptions, requestedType, requestedFolder }: {
+export function TasksView({ initialNotes, vaultFolders, typeOptions, statusOptions, requestedType, requestedFolder }: {
   initialNotes: NoteSummary[];
+  vaultFolders: string[];
   typeOptions: string[];
   statusOptions: string[];
   requestedType: string;
@@ -55,7 +56,7 @@ export function TasksView({ initialNotes, typeOptions, statusOptions, requestedT
   const [drawer, setDrawer] = useState({ open: false, noteId: null as string | null, key: 0 });
   const openNote = (noteId: string | null) => setDrawer((d) => ({ open: true, noteId, key: d.key + 1 }));
   const groups = useMemo(() => groupByStatus(filterTable(notes, type, folder), statusOptions), [notes, type, folder, statusOptions]);
-  const folders = useMemo(() => folderChoices([...notes.map((note) => note.folder), folder]), [notes, folder]);
+  const folders = useMemo(() => folderChoices([...vaultFolders, ...notes.map((note) => note.folder), folder]), [vaultFolders, notes, folder]);
   const count = groups.reduce((sum, group) => sum + group.notes.length, 0);
 
   const refresh = useCallback(async () => {
