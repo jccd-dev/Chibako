@@ -27,12 +27,14 @@ function spanLanes(notes: DatedNote[]) {
     });
 }
 
-export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, compact = false }: {
+export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onOpenNote, compact = false }: {
   notes: NoteSummary[];
   selected: string;
   /** Inclusive end of the current Note's range, highlighted as a band. */
   selectedEnd?: string;
   onSelect: (date: string) => void;
+  /** Open a span pill in place; without it, pills link to the Note page. */
+  onOpenNote?: (id: string) => void;
   compact?: boolean;
 }) {
   const selectedDate = noteDateToDate(selected);
@@ -155,6 +157,7 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, com
                     <Link
                       key={note.id}
                       href={`/app/note/${note.id}`}
+                      onClick={onOpenNote && ((event) => { event.preventDefault(); onOpenNote(note.id); })}
                       title={note.title}
                       style={{ width: `calc(${cells * 100}% + ${cells - 1}px - ${inset}rem)` }}
                       className={cn(

@@ -1,27 +1,42 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useHydrated } from "@/lib/use-hydrated";
 import { coversDate, dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/features/calendar/components/DatedNotesCalendar";
+import { TaskDrawer } from "@/features/calendar/components/TaskDrawer";
+import { folderChoices, inFolder } from "@/features/calendar/task-folder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { cn } from "@/lib/utils";
 import { IconPlus } from "@/components/icons";
+
+const isDone = (note: DatedNote) => String(note.properties.status ?? "").toLowerCase() === "done";
 
 function formatRange(note: DatedNote) {
   const format = (value: string) => noteDateToDate(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return `${format(note.date)} – ${format(note.endDate)}`;
 }
 
-export function CalendarView({ initialNotes, requestedDate }: {
+function calendarUrl(date: string, folder: string) {
+  return `/app/calendar?date=${date}${folder ? `&folder=${encodeURIComponent(folder)}` : ""}`;
+}
+
+export function CalendarView({ initialNotes, requestedDate, requestedFolder = "" }: {
   initialNotes: DatedNote[];
   requestedDate?: string;
+  requestedFolder?: string;
 }) {
   const router = useRouter();
-  const [notes, setNotes] = useState(initialNotes);
+  const [allNotes, setNotes] = useState(initialNotes);
+  const [folder, setFolder] = useState(requestedFolder);
+  const notes = useMemo(() => allNotes.filter((note) => inFolder(note.folder, folder)), [allNotes, folder]);
+  const folders = useMemo(() => folderChoices([...allNotes.map((note) => note.folder), folder]), [allNotes, folder]);
   const [chosenDate, setSelected] = useState<string | null>(() => isNoteDate(requestedDate) ? requestedDate : null);
+  const [drawer, setDrawer] = useState({ open: false, noteId: null as string | null, key: 0 });
+  const openTask = (noteId: string | null) => setDrawer((d) => ({ open: true, noteId, key: d.key + 1 }));
   const hydrated = useHydrated();
   const [initialToday, setInitialToday] = useState<string | null>(null);
   if (hydrated && initialToday === null) setInitialToday(dateToNoteDate(new Date()));
@@ -38,8 +53,8 @@ export function CalendarView({ initialNotes, requestedDate }: {
   }, []);
 
   useEffect(() => {
-    if (!chosenDate && selected) router.replace(`/app/calendar?date=${selected}`, { scroll: false });
-  }, [router, chosenDate, selected]);
+    if (!chosenDate && selected) router.replace(calendarUrl(selected, folder), { scroll: false });
+  }, [router, chosenDate, selected, folder]);
 
   useEffect(() => {
     const onChange = () => void refresh();
@@ -53,7 +68,12 @@ export function CalendarView({ initialNotes, requestedDate }: {
 
   function selectDate(date: string) {
     setSelected(date);
-    router.replace(`/app/calendar?date=${date}`, { scroll: false });
+    router.replace(calendarUrl(date, folder), { scroll: false });
+  }
+
+  function selectFolder(next: string) {
+    setFolder(next);
+    if (selected) router.replace(calendarUrl(selected, next), { scroll: false });
   }
 
   const heading = selected ? noteDateToDate(selected).toLocaleDateString("en-US", {
@@ -65,9 +85,15 @@ export function CalendarView({ initialNotes, requestedDate }: {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="border-b border-border px-4 py-3 sm:px-6">
-        <h1 className="text-lg font-semibold tracking-tight">Calendar</h1>
-        <p className="text-xs text-muted-foreground">Browse Notes by Note date or date range (date to end_date).</p>
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Calendar</h1>
+          <p className="text-xs text-muted-foreground">Browse Notes by Note date or date range (date to end_date).</p>
+        </div>
+        <NativeSelect value={folder} onChange={(e) => selectFolder(e.target.value)} aria-label="Filter by folder">
+          <NativeSelectOption value="">All folders</NativeSelectOption>
+          {folders.map((f) => <NativeSelectOption key={f} value={f}>{f}</NativeSelectOption>)}
+        </NativeSelect>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-1 content-start overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:content-stretch lg:overflow-hidden">
         <section className="order-2 flex min-h-0 flex-col border-border lg:order-1 lg:border-r">
@@ -76,24 +102,31 @@ export function CalendarView({ initialNotes, requestedDate }: {
               <h2 className="text-sm font-semibold">{heading}</h2>
               <p className="text-xs text-muted-foreground">{selectedNotes.length} Note{selectedNotes.length === 1 ? "" : "s"}</p>
             </div>
-            <Button size="sm" disabled={!selected} onClick={() => selected && router.push(`/app/note/new?date=${selected}`)}>
-              <IconPlus data-icon="inline-start" />New note
-            </Button>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="outline" disabled={!selected} onClick={() => selected && router.push(`/app/note/new?date=${selected}`)}>
+                New note
+              </Button>
+              <Button size="sm" disabled={!selected} onClick={() => openTask(null)}>
+                <IconPlus data-icon="inline-start" />New task
+              </Button>
+            </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="calendar-note-list">
             {selectedNotes.length ? (
               <ul className="flex flex-col gap-1">
                 {selectedNotes.map((note) => (
                   <li key={note.id}>
-                    <Link href={`/app/note/${note.id}`} className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{note.title}</span>
+                    <button type="button" onClick={() => openTask(note.id)} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                      <span className={cn("min-w-0 flex-1", isDone(note) && "opacity-60")}>
+                        <span className={cn("block truncate text-sm font-medium", isDone(note) && "line-through")}>{note.title}</span>
                         <span className="block truncate text-xs text-muted-foreground">
                           {note.endDate > note.date && <>{formatRange(note)} · </>}{note.folder || "Vault root"}
                         </span>
                       </span>
+                      {typeof note.properties.status === "string" && note.properties.status && <Badge variant="secondary">{note.properties.status}</Badge>}
+                      {typeof note.properties.priority === "string" && note.properties.priority && <Badge variant="outline">{note.properties.priority}</Badge>}
                       <Badge variant="outline">{note.kind}</Badge>
-                    </Link>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -108,9 +141,18 @@ export function CalendarView({ initialNotes, requestedDate }: {
           </div>
         </section>
         <section className="order-1 flex min-h-0 p-3 sm:p-6 lg:order-2 lg:overflow-y-auto">
-          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} />}
+          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} onOpenNote={openTask} />}
         </section>
       </div>
+      {selected && (
+        <TaskDrawer
+          key={drawer.key}
+          open={drawer.open}
+          noteId={drawer.noteId}
+          date={selected}
+          onOpenChange={(open) => setDrawer((d) => ({ ...d, open }))}
+        />
+      )}
     </div>
   );
 }

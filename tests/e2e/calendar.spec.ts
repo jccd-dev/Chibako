@@ -57,7 +57,7 @@ test("Calendar groups valid Note dates and lists the selected day", async ({ pag
 
   await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   await expect(page).toHaveURL(`/app/calendar?date=${selectedDate}`);
-  const selectedNotes = page.getByTestId("calendar-note-list").getByRole("link");
+  const selectedNotes = page.getByTestId("calendar-note-list").getByRole("listitem");
   await expect(selectedNotes).toHaveCount(2);
   await expect(selectedNotes.nth(0)).toContainText(`Alpha ${suffix}`);
   await expect(selectedNotes.nth(0)).toContainText("wiki");
@@ -133,4 +133,56 @@ test("Calendar starts a dated draft without creating an abandoned Note", async (
   await expect(page).toHaveURL(/\/app\/note\/(?!new\b)[^/?]+$/, { timeout: 15_000 });
   expect(creates).toBe(1);
   await expect(page.getByRole("button", { name: "Property date", exact: true })).toHaveText(`Jun 15, ${year}`);
+});
+
+test("Calendar creates, edits and filters a task without leaving the page", async ({ page }) => {
+  await authenticate(page);
+  const suffix = Date.now();
+  const year = 7000 + suffix % 1000;
+  const day = `${year}-05-12`;
+  const folder = await page.request.post("/api/folders", { data: { path: "Projects/Acme" } });
+  expect([201, 409]).toContain(folder.status());
+  await createDatedNote(page, { title: `Elsewhere ${suffix}`, date: day, folder: "Work" });
+
+  await page.goto(`/app/calendar?date=${day}`);
+  await page.getByRole("button", { name: "New task" }).click();
+  const drawer = page.getByRole("dialog");
+  await drawer.getByLabel("Task title").fill(`Ship ${suffix}`);
+  await drawer.getByLabel("Task folder").selectOption("Projects/Acme");
+  await expect(drawer.getByLabel("Task folder")).toHaveValue("Projects/Acme/Tasks");
+  await drawer.getByLabel("Task status").selectOption("Not started");
+  await drawer.getByLabel("Task priority").selectOption("High");
+  await drawer.getByRole("button", { name: "Create task" }).click();
+  await expect(drawer.getByRole("status")).toHaveText("Saved");
+  await expect(page).toHaveURL(`/app/calendar?date=${day}`);
+
+  const folders = (await (await page.request.get("/api/folders")).json()).folders as string[];
+  expect(folders).toContain("Projects/Acme/Tasks");
+
+  // The modal drawer hides the page from the accessibility tree, so check the row once it closes.
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  const list = page.getByTestId("calendar-note-list");
+  const row = list.getByRole("listitem").filter({ hasText: `Ship ${suffix}` });
+  await expect(row).toContainText("Projects/Acme/Tasks");
+  await expect(row).toContainText("Not started");
+  await expect(row).toContainText("High");
+
+  await row.getByRole("button").click();
+  await page.getByRole("dialog").getByLabel("Task status").selectOption("Done");
+  await expect(page.getByRole("dialog").getByRole("status")).toHaveText("Saved");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(row).toContainText("Done");
+
+  await row.getByRole("button").click();
+  await expect(page.getByRole("dialog").getByLabel("Task status")).toHaveValue("Done");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
+  await page.getByLabel("Filter by folder").selectOption("Projects/Acme");
+  await expect(page).toHaveURL(`/app/calendar?date=${day}&folder=Projects%2FAcme`);
+  await expect(row).toBeVisible();
+  await expect(list.getByText(`Elsewhere ${suffix}`)).toHaveCount(0);
 });

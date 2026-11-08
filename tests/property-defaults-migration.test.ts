@@ -21,7 +21,8 @@ test('existing vaults pick up new default properties once, then can delete them'
     const names = () => getPropertyDefs().map((def) => def.name);
     assert(names().includes('layer'), 'layer merged in for an existing vault');
     assert(names().includes('type'), 'type merged in for an existing vault');
-    assert.deepEqual(names(), ['status', 'tags', 'layer', 'type', 'category'], 'stored order kept, missing defaults appended once');
+    assert.deepEqual(names(), ['status', 'tags', 'layer', 'type', 'priority', 'category'], 'stored order kept, missing defaults appended once');
+    assert.deepEqual(getPropertyDefs()[0].options, ['draft', 'active', 'done', 'archived'], 'a select status keeps its own options');
 
     // Reading again must not re-merge or duplicate.
     assert.deepEqual(names(), names());
@@ -29,6 +30,35 @@ test('existing vaults pick up new default properties once, then can delete them'
     // Deletion still works after the migration ran.
     setPropertyDefs(getPropertyDefs().filter((def) => def.name !== 'layer'));
     assert(!names().includes('layer'), 'a migrated default can still be deleted');
+  } finally {
+    getDb().close();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('v2 vaults get a select status and priority once, without resurrecting deleted defaults', async () => {
+  const vault = mkdtempSync(join(tmpdir(), 'chibako-property-migration-v3-test-'));
+  process.env.CHIBAKO_DATA_DIR = vault;
+  const { getDb } = await import('../src/lib/db');
+  const { getPropertyDefs, setPropertyDefs } = await import('../src/lib/properties');
+  try {
+    const insert = getDb().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+    // A v2 vault that typed status as free text and deleted `layer`.
+    insert.run('property_schema', JSON.stringify([
+      { name: 'status', type: 'string' },
+      { name: 'type', type: 'select', options: ['entity'] },
+      { name: 'tags', type: 'tags' },
+    ]));
+    insert.run('property_defaults_version', '2');
+
+    const defs = getPropertyDefs();
+    assert.deepEqual(defs.map((d) => d.name), ['status', 'type', 'tags', 'priority'], 'priority added, deleted layer/category stay deleted');
+    assert.deepEqual(defs[0], { name: 'status', type: 'select', options: ['Not started', 'In progress', 'Done'] });
+    assert.deepEqual(defs[3], { name: 'priority', type: 'select', options: ['Low', 'Medium', 'High'] });
+
+    // Exactly once: the owner can turn status back into text and it stays that way.
+    setPropertyDefs(defs.map((d) => d.name === 'status' ? { name: 'status', type: 'string' } : d));
+    assert.equal(getPropertyDefs()[0].type, 'string');
   } finally {
     getDb().close();
     rmSync(vault, { recursive: true, force: true });

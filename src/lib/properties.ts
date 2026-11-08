@@ -22,11 +22,14 @@ export { DEFAULT_PROPERTY_DEFS, PROPERTY_TYPES };
 export type { PropertyDef, PropertyType };
 
 const SETTINGS_KEY = "property_schema";
-// Bumped whenever DEFAULT_PROPERTY_DEFS gains entries. A vault whose saved
-// dictionary predates the bump gets the new defaults merged in exactly once,
-// so the defaults can still be deleted afterwards.
+// Bumped whenever DEFAULT_PROPERTY_DEFS gains or upgrades entries. A vault whose
+// saved dictionary predates the bump gets the change applied exactly once, so
+// the defaults can still be deleted or edited afterwards.
 const DEFAULTS_VERSION_KEY = "property_defaults_version";
-const DEFAULTS_VERSION = 2;
+const DEFAULTS_VERSION = 3;
+// Defaults added after version 2; older defaults are only merged into pre-v2 vaults,
+// so a default the owner deleted is not resurrected by a later bump.
+const DEFAULT_ADDED_IN: Record<string, number> = { priority: 3 };
 
 export class PropertySchemaError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -43,10 +46,14 @@ function writeSetting(key: string, value: string): void {
     .run(key, value);
 }
 
-/** Defaults the stored dictionary is missing, appended in canonical order. */
-function mergeMissingDefaults(stored: PropertyDef[]): PropertyDef[] {
+/** Apply default changes newer than `fromVersion`: missing defaults appended in canonical order, free-text `status` upgraded to the default select. */
+function upgradeDefaults(stored: PropertyDef[], fromVersion: number): PropertyDef[] {
   const names = new Set(stored.map((def) => def.name));
-  return [...stored, ...DEFAULT_PROPERTY_DEFS.filter((def) => !names.has(def.name))];
+  const upgraded = fromVersion < 3
+    ? stored.map((def) => def.name === "status" && def.type === "string" ? DEFAULT_PROPERTY_DEFS.find((d) => d.name === "status")! : def)
+    : stored;
+  const added = DEFAULT_PROPERTY_DEFS.filter((def) => !names.has(def.name) && (DEFAULT_ADDED_IN[def.name] ?? 2) > fromVersion);
+  return [...upgraded, ...added];
 }
 
 export function getPropertyDefs(): PropertyDef[] {
@@ -59,11 +66,12 @@ export function getPropertyDefs(): PropertyDef[] {
   } catch {
     return DEFAULT_PROPERTY_DEFS;
   }
-  if (Number(readSetting(DEFAULTS_VERSION_KEY) ?? 0) >= DEFAULTS_VERSION) return stored;
+  const version = Number(readSetting(DEFAULTS_VERSION_KEY) ?? 0);
+  if (version >= DEFAULTS_VERSION) return stored;
   // One-time lazy migration. If the stored dictionary is malformed enough to
   // fail validation, leave it untouched rather than breaking reads.
   try {
-    return setPropertyDefs(mergeMissingDefaults(stored));
+    return setPropertyDefs(upgradeDefaults(stored, version));
   } catch {
     return stored;
   }

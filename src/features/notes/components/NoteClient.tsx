@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import type { Note, NoteKind, NoteSummary } from "@/lib/notes";
 import type { Bookmark } from "@/lib/bookmarks";
 import { applyFrontmatter, parseFrontmatter, serializeFrontmatter, type PropValue } from "@/lib/markdown";
-import { PROPERTY_TYPES, type PropertyDef, type PropertyType } from "@/lib/property-types";
+import { PROPERTY_TYPES, selectChoices, type PropertyDef, type PropertyType } from "@/lib/property-types";
 import { PropDateInput } from "@/features/notes/components/PropDateInput";
 import { MarkdownPreview } from "@/features/notes/components/MarkdownPreview";
 import { RichTextEditor } from "@/features/notes/components/editor/RichTextEditor";
@@ -858,7 +858,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
                 />
               ) : type === "select" && def?.options?.length ? (
                 <Select
-                  items={{ "": "—", ...Object.fromEntries(def.options.map((o) => [o, o])) }}
+                  items={{ "": "—", ...Object.fromEntries(selectChoices(def.options, text).map((o) => [o, o])) }}
                   value={text}
                   onValueChange={(v) => { if (v !== null) setPropText(key, v); }}
                 >
@@ -871,7 +871,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">—</SelectItem>
-                    {def.options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                    {selectChoices(def.options, text).map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                   </SelectContent>
                 </Select>
               ) : type === "date" ? (
