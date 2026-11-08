@@ -158,6 +158,8 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
 
   const folders = (await (await page.request.get("/api/folders")).json()).folders as string[];
   expect(folders).toContain("Projects/Acme/Tasks");
+  const dated = (await (await page.request.get("/api/calendar")).json()).notes as { title: string; properties: Record<string, unknown> }[];
+  expect(dated.find((n) => n.title === `Ship ${suffix}`)?.properties.type).toBe("task");
 
   // The modal drawer hides the page from the accessibility tree, so check the row once it closes.
   await page.keyboard.press("Escape");
@@ -181,6 +183,13 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   await expect(page.getByRole("dialog")).toBeHidden();
 
   await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
+  await page.getByRole("button", { name: "Tasks only" }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${day}&tasks=1`);
+  await expect(row).toBeVisible();
+  await expect(list.getByText(`Elsewhere ${suffix}`)).toHaveCount(0);
+  await page.getByRole("button", { name: "Tasks only" }).click();
+  await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
+
   await page.getByLabel("Filter by folder").selectOption("Projects/Acme");
   await expect(page).toHaveURL(`/app/calendar?date=${day}&folder=Projects%2FAcme`);
   await expect(row).toBeVisible();

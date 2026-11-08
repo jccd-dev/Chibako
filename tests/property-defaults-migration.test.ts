@@ -55,10 +55,38 @@ test('v2 vaults get a select status and priority once, without resurrecting dele
     assert.deepEqual(defs.map((d) => d.name), ['status', 'type', 'tags', 'priority'], 'priority added, deleted layer/category stay deleted');
     assert.deepEqual(defs[0], { name: 'status', type: 'select', options: ['Not started', 'In progress', 'Done'] });
     assert.deepEqual(defs[3], { name: 'priority', type: 'select', options: ['Low', 'Medium', 'High'] });
+    assert.deepEqual(defs[1].options, ['entity', 'task'], 'task added to a select type');
 
     // Exactly once: the owner can turn status back into text and it stays that way.
     setPropertyDefs(defs.map((d) => d.name === 'status' ? { name: 'status', type: 'string' } : d));
     assert.equal(getPropertyDefs()[0].type, 'string');
+  } finally {
+    getDb().close();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('v3 vaults get task added to a select type exactly once', async () => {
+  const vault = mkdtempSync(join(tmpdir(), 'chibako-property-migration-v4-test-'));
+  process.env.CHIBAKO_DATA_DIR = vault;
+  const { getDb } = await import('../src/lib/db');
+  const { getPropertyDefs, setPropertyDefs } = await import('../src/lib/properties');
+  try {
+    const insert = getDb().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+    insert.run('property_schema', JSON.stringify([
+      { name: 'type', type: 'select', options: ['entity', 'concept'] },
+      { name: 'status', type: 'select', options: ['Not started', 'Done'] },
+    ]));
+    insert.run('property_defaults_version', '3');
+
+    const defs = getPropertyDefs();
+    assert.deepEqual(defs.map((d) => d.name), ['type', 'status'], 'no deleted defaults resurrected');
+    assert.deepEqual(defs[0].options, ['entity', 'concept', 'task']);
+    assert.deepEqual(defs[1].options, ['Not started', 'Done'], 'status options untouched');
+
+    // Exactly once: the owner can remove task again and it stays removed.
+    setPropertyDefs(defs.map((d) => d.name === 'type' ? { ...d, options: ['entity', 'concept'] } : d));
+    assert.deepEqual(getPropertyDefs()[0].options, ['entity', 'concept']);
   } finally {
     getDb().close();
     rmSync(vault, { recursive: true, force: true });

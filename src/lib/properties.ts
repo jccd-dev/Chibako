@@ -26,7 +26,7 @@ const SETTINGS_KEY = "property_schema";
 // saved dictionary predates the bump gets the change applied exactly once, so
 // the defaults can still be deleted or edited afterwards.
 const DEFAULTS_VERSION_KEY = "property_defaults_version";
-const DEFAULTS_VERSION = 3;
+const DEFAULTS_VERSION = 4;
 // Defaults added after version 2; older defaults are only merged into pre-v2 vaults,
 // so a default the owner deleted is not resurrected by a later bump.
 const DEFAULT_ADDED_IN: Record<string, number> = { priority: 3 };
@@ -46,12 +46,14 @@ function writeSetting(key: string, value: string): void {
     .run(key, value);
 }
 
-/** Apply default changes newer than `fromVersion`: missing defaults appended in canonical order, free-text `status` upgraded to the default select. */
+/** Apply default changes newer than `fromVersion`: missing defaults appended in canonical order, free-text `status` upgraded to the default select, `task` added to a select `type`. */
 function upgradeDefaults(stored: PropertyDef[], fromVersion: number): PropertyDef[] {
   const names = new Set(stored.map((def) => def.name));
-  const upgraded = fromVersion < 3
-    ? stored.map((def) => def.name === "status" && def.type === "string" ? DEFAULT_PROPERTY_DEFS.find((d) => d.name === "status")! : def)
-    : stored;
+  const upgraded = stored.map((def) => {
+    if (fromVersion < 3 && def.name === "status" && def.type === "string") return DEFAULT_PROPERTY_DEFS.find((d) => d.name === "status")!;
+    if (fromVersion < 4 && def.name === "type" && def.type === "select" && !def.options?.includes("task")) return { ...def, options: [...(def.options ?? []), "task"] };
+    return def;
+  });
   const added = DEFAULT_PROPERTY_DEFS.filter((def) => !names.has(def.name) && (DEFAULT_ADDED_IN[def.name] ?? 2) > fromVersion);
   return [...upgraded, ...added];
 }

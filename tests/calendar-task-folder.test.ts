@@ -10,6 +10,15 @@ test("task folder rule keeps Tasks folders and nests others under Tasks", () => 
   assert.equal(taskFolder("Projects/Acme/"), "Projects/Acme/Tasks");
   assert.equal(taskFolder("Projects/Acme/Tasks"), "Projects/Acme/Tasks");
   assert.equal(taskFolder("MyTasks"), "MyTasks/Tasks");
+  assert.equal(taskFolder("Projects/Acme/Tasks/Design"), "Projects/Acme/Tasks/Design");
+});
+
+test("a Note is a task only when its type is task", async () => {
+  const { isTask } = await import("../src/features/calendar/task-folder");
+  assert.equal(isTask({ properties: { type: "task" } }), true);
+  assert.equal(isTask({ properties: { type: "Task" } }), true);
+  assert.equal(isTask({ properties: { type: "concept", status: "Not started" } }), false);
+  assert.equal(isTask({ properties: {} }), false);
 });
 
 test("calendar folder filter includes subfolders and lists ancestors", async () => {

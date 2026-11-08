@@ -1,8 +1,13 @@
-/** Where a task lives for a chosen folder: a `Tasks` folder is used as is, any other folder gets a `Tasks` child, the vault root maps to `Tasks`. */
+/** Where a task lives for a chosen folder: a `Tasks` folder (or one inside it) is used as is, any other folder gets a `Tasks` child, the vault root maps to `Tasks`. */
 export function taskFolder(folder: string): string {
   const path = folder.trim().replace(/^\/+|\/+$/g, "");
   if (!path) return "Tasks";
-  return path === "Tasks" || path.endsWith("/Tasks") ? path : `${path}/Tasks`;
+  return path.split("/").includes("Tasks") ? path : `${path}/Tasks`;
+}
+
+/** A Note is a task when its `type` property is `task`, wherever it lives. */
+export function isTask(note: { properties: Record<string, unknown> }): boolean {
+  return String(note.properties.type ?? "").toLowerCase() === "task";
 }
 
 /** True when `noteFolder` is `folder` or one of its subfolders; an empty filter matches everything. */

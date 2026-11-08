@@ -112,7 +112,7 @@ function TaskCreateForm({ date, lookups, onCreated }: {
     if (!values.title.trim()) return;
     setSaving(true);
     try {
-      const properties: Record<string, PropValue> = { date: values.date };
+      const properties: Record<string, PropValue> = { type: "task", date: values.date };
       if (values.endDate) properties.end_date = values.endDate;
       if (values.status) properties.status = values.status;
       if (values.priority) properties.priority = values.priority;

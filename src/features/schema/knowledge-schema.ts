@@ -33,7 +33,7 @@ Every note belongs to one layer, recorded in the "layer" property:
 - Check the property dictionary first (get_property_defs / GET /api/properties)
   and reuse its names and values — consistency beats inventing new keys.
 - layer (raw/wiki/output): which layer the note belongs to, as described above.
-- type (entity/concept/comparison/query/summary/guide): what the note is.
+- type (entity/concept/comparison/query/summary/guide/task): what the note is; "task" marks a task shown on the Tasks page and calendar.
 - status (Not started/In progress/Done) and priority (Low/Medium/High) for
   tasks, category, tags (a list).
 - Tags are lowercase, hyphenated, and reused. Tags mark cross-cutting themes,
@@ -120,7 +120,7 @@ export const ORGANIZE_GUIDE_MARKDOWN = [
   "## Properties",
   "",
   "- `layer` — raw | wiki | output",
-  "- `type` — entity | concept | comparison | query | summary | guide",
+  "- `type` — entity | concept | comparison | query | summary | guide | task (a to-do; pair with status, priority, date)",
   "- `status` — Not started | In progress | Done",
   "- `priority` — Low | Medium | High",
   "- `tags` — cross-cutting themes (a list)",
