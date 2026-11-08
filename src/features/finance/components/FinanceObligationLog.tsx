@@ -15,6 +15,7 @@ import type { FinanceActivityController } from "@/features/finance/use-finance-a
 import { obligationQuickAmounts } from "@/features/finance/obligation-quick-amounts";
 import { previewCents } from "@/features/finance/money";
 import { financeBalanceShortfall } from "@/features/finance/balance-gate";
+import { FinanceTransactionRow } from "./FinanceTransactionRow";
 import { decimalPHPInput, financeDrawerFooter, formatHistoryDate, formatPHP } from "@/features/finance/presentation";
 
 const logCopy = {
@@ -99,12 +100,7 @@ function PaymentCandidates({ o }: { o: FinanceObligationsController }) {
   return <div className="flex flex-col gap-3">
     {o.pError ? <Alert><AlertDescription>{o.pError}<Button type="button" variant="outline" onClick={() => void o.loadCandidates(o.pOffset)}>Retry matching history</Button></AlertDescription></Alert> : o.pLoading ? <p role="status" className="text-sm text-muted-foreground">Loading matching history…</p> : o.pCandidates.length ? <>
       <p className="text-sm text-muted-foreground">{o.pTotal} eligible record{o.pTotal === 1 ? "" : "s"}. Selecting fills account, date and amount exactly as recorded.</p>
-      <ul className="divide-y divide-border border-y border-border">{o.pCandidates.map(row => <li key={row.id}><button type="button" className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted active:bg-muted" onClick={() => o.selectCandidate(row)} aria-label={`Select ${row.type === "expense" ? "expense" : "income"} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}>
-        <span className="min-w-0 truncate text-sm font-medium">{row.category_name ?? (row.type === "expense" ? "Expense" : "Income")}</span>
-        <strong className="justify-self-end text-sm tabular-nums">{formatPHP(row.amount_cents)}</strong>
-        <span className="min-w-0 truncate text-xs text-muted-foreground">{formatHistoryDate(row.transaction_date)} · {row.account_name}</span>
-        <span aria-hidden="true" />
-      </button></li>)}</ul>
+      <ul className="flex flex-col gap-1.5">{o.pCandidates.map(row => <li key={row.id}><FinanceTransactionRow row={row} title={row.category_name ?? (row.type === "expense" ? "Expense" : "Income")} context={formatHistoryDate(row.transaction_date)} ariaLabel={`Select ${row.type === "expense" ? "expense" : "income"} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`} onClick={() => o.selectCandidate(row)} /></li>)}</ul>
       {o.pTotal > 25 && <nav aria-label="Matching history pages" className="flex flex-wrap items-center gap-3"><Button type="button" variant="outline" disabled={o.pOffset === 0 || o.pLoading} onClick={() => void o.loadCandidates(Math.max(0, o.pOffset - 25))}>Previous records</Button><span className="text-sm">{o.pOffset + 1}-{Math.min(o.pOffset + 25, o.pTotal)} of {o.pTotal}</span><Button type="button" variant="outline" disabled={o.pOffset + 25 >= o.pTotal || o.pLoading} onClick={() => void o.loadCandidates(o.pOffset + 25)}>Next records</Button></nav>}
     </> : <p className="text-sm text-muted-foreground">No eligible {o.editing?.kind === "debt" ? "expense" : "income"} history to link. Record the payment as new cash instead, or add the transaction in Activity and load this list again.</p>}
   </div>;

@@ -133,9 +133,11 @@ export function CalendarView({ initialNotes, vaultFolders, requestedDate, reques
                           {note.endDate > note.date && <>{formatRange(note)} · </>}{note.folder || "Vault root"}
                         </span>
                       </span>
-                      {typeof note.properties.status === "string" && note.properties.status && <Badge variant="secondary">{note.properties.status}</Badge>}
-                      {typeof note.properties.priority === "string" && note.properties.priority && <Badge variant="outline">{note.properties.priority}</Badge>}
-                      <Badge variant="outline">{isTask(note) ? "task" : note.kind}</Badge>
+                      <span className="flex shrink-0 items-center gap-1">
+                        {typeof note.properties.status === "string" && note.properties.status && <Badge variant="secondary">{note.properties.status}</Badge>}
+                        {typeof note.properties.priority === "string" && note.properties.priority && <Badge variant="outline">{note.properties.priority}</Badge>}
+                        <Badge variant="outline">{isTask(note) ? "task" : note.kind}</Badge>
+                      </span>
                     </button>
                   </li>
                 ))}

@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { ActivityPage } from "../activity-types";
 import { financeJson } from "../client-json";
 import { formatPHP, formatHistoryDate } from "../presentation";
+import { FinanceTransactionRow } from "./FinanceTransactionRow";
 
 const labels = {
   income: "Income",
@@ -86,39 +87,21 @@ export function FinanceAccountHistory({
           No recorded activity. The opening balance is shown above.
         </p>
       ) : (
-        <ul className="divide-y divide-border">
+        <ul className="flex flex-col gap-1.5">
           {visiblePage.transactions.map((row) => (
             <li key={row.id}>
-              <button
-                type="button"
-                onClick={() => onInspect(row.id)}
-                aria-label={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}
-                className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-              >
-              <span className="min-w-0 truncate text-sm font-medium">
-                {row.obligation_payment
-                  ? row.type === "expense"
-                    ? "Debt payment"
-                    : "Receivable collection"
+              <FinanceTransactionRow
+                row={row}
+                title={row.obligation_payment
+                  ? row.type === "expense" ? "Debt payment" : "Receivable collection"
                   : (row.category_name ?? labels[row.type])}
-              </span>
-              <p className="justify-self-end text-sm tabular-nums">
-                {formatPHP(row.amount_cents)}
-              </p>
-              <span className="min-w-0 truncate text-xs text-muted-foreground">
-                {formatHistoryDate(row.transaction_date)}
-                {row.destination_account_name
-                  ? ` · ${row.account_name} to ${row.destination_account_name}`
-                  : ""}
-              </span>
-              {row.hidden || row.reverted ? (
-                <span className="col-span-2 text-xs text-muted-foreground">
-                  {row.hidden ? "Hidden" : ""}
-                  {row.hidden && row.reverted ? " · " : ""}
-                  {row.reverted ? "Reverted" : ""}
-                </span>
-              ) : null}
-              </button>
+                context={[
+                  formatHistoryDate(row.transaction_date),
+                  row.destination_account_name ? `${row.account_name} to ${row.destination_account_name}` : "",
+                ].filter(Boolean).join(" · ")}
+                ariaLabel={`Inspect ${row.type} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`}
+                onClick={() => onInspect(row.id)}
+              />
             </li>
           ))}
         </ul>
