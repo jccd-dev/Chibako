@@ -44,7 +44,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return data as T;
 }
 
-/** Half-screen task form + rich-text body. `noteId` null starts a new task on `date`. */
+/** Half-screen task form + rich-text body. `noteId` null starts a new task on `date` ("" = undated). */
 export function TaskDrawer({ open, noteId, date, onOpenChange }: {
   open: boolean;
   noteId: string | null;
@@ -116,7 +116,8 @@ function TaskCreateForm({ date, lookups, onCreated }: {
     if (!values.title.trim()) return;
     setSaving(true);
     try {
-      const properties: Record<string, PropValue> = { date: values.date };
+      const properties: Record<string, PropValue> = {};
+      if (values.date) properties.date = values.date;
       if (values.type) properties.type = values.type;
       if (values.endDate) properties.end_date = values.endDate;
       if (values.status) properties.status = values.status;
@@ -143,7 +144,7 @@ function TaskCreateForm({ date, lookups, onCreated }: {
       </label>
       <p className="text-xs text-muted-foreground" data-testid="task-target-folder">Saves to {target || "Vault root"}</p>
       <div className="flex justify-end">
-        <Button type="submit" disabled={saving || !values.title.trim() || !values.date}>Create task</Button>
+        <Button type="submit" disabled={saving || !values.title.trim()}>Create task</Button>
       </div>
     </form>
   );
@@ -236,7 +237,7 @@ function TaskFields({ values, lookups, onChange }: {
       </label>
       <label className="flex flex-col gap-1 text-xs font-medium">
         Date
-        <Input type="date" value={values.date} onChange={(e) => e.target.value && onChange("date", e.target.value)} aria-label="Task date" />
+        <Input type="date" value={values.date} onChange={(e) => onChange("date", e.target.value)} aria-label="Task date" />
       </label>
       <label className="flex flex-col gap-1 text-xs font-medium">
         End date
