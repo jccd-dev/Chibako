@@ -13,11 +13,13 @@ import { taskFolder } from "@/features/calendar/task-folder";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
 interface TaskValues {
   title: string;
   folder: string;
+  type: string;
   date: string;
   endDate: string;
   status: string;
@@ -83,7 +85,7 @@ export function TaskDrawer({ open, noteId, date, onOpenChange }: {
       <SheetContent side="right" className="w-full! gap-0 sm:w-1/2! sm:max-w-none!">
         <SheetHeader className="border-b border-border">
           <SheetTitle>{note ? "Task" : "New task"}</SheetTitle>
-          <SheetDescription>{note ? "Changes save automatically." : "Tasks are saved in a Tasks folder inside the folder you pick."}</SheetDescription>
+          <SheetDescription>{note ? "Changes save automatically." : "A task is a Note with Type set to task. Save it in any folder."}</SheetDescription>
         </SheetHeader>
         {loadError ? (
           <p className="p-4 text-sm text-destructive" role="alert">{loadError}</p>
@@ -104,22 +106,25 @@ function TaskCreateForm({ date, lookups, onCreated }: {
   lookups: TaskLookups;
   onCreated: (note: Note) => void;
 }) {
-  const [values, setValues] = useState<TaskValues>({ title: "", folder: taskFolder(""), date, endDate: "", status: "", priority: "" });
+  const [values, setValues] = useState<TaskValues>({ title: "", folder: "", type: "task", date, endDate: "", status: "", priority: "" });
+  const [nested, setNested] = useState(true);
   const [saving, setSaving] = useState(false);
+  const target = nested ? taskFolder(values.folder) : values.folder;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!values.title.trim()) return;
     setSaving(true);
     try {
-      const properties: Record<string, PropValue> = { type: "task", date: values.date };
+      const properties: Record<string, PropValue> = { date: values.date };
+      if (values.type) properties.type = values.type;
       if (values.endDate) properties.end_date = values.endDate;
       if (values.status) properties.status = values.status;
       if (values.priority) properties.priority = values.priority;
       const { note } = await readJson<{ note: Note }>(await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: values.title.trim(), folder: values.folder, properties }),
+        body: JSON.stringify({ title: values.title.trim(), folder: target, properties }),
       }));
       notifyNotesChanged();
       onCreated(note);
@@ -132,6 +137,11 @@ function TaskCreateForm({ date, lookups, onCreated }: {
   return (
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <TaskFields values={values} lookups={lookups} onChange={(field, value) => setValues((v) => ({ ...v, [field]: value }))} />
+      <label className="flex items-center gap-2 text-xs">
+        <Checkbox checked={nested} onCheckedChange={(checked) => setNested(checked)} />
+        Put it in a Tasks subfolder
+      </label>
+      <p className="text-xs text-muted-foreground" data-testid="task-target-folder">Saves to {target || "Vault root"}</p>
       <div className="flex justify-end">
         <Button type="submit" disabled={saving || !values.title.trim() || !values.date}>Create task</Button>
       </div>
@@ -170,8 +180,8 @@ function TaskEditor({ initial, lookups, flushRef }: {
     const value = props[key];
     return Array.isArray(value) ? value.join(", ") : String(value ?? "");
   };
-  const values: TaskValues = { title, folder, date: prop("date"), endDate: prop("end_date"), status: prop("status"), priority: prop("priority") };
-  const propKeys = { date: "date", endDate: "end_date", status: "status", priority: "priority" } as const;
+  const values: TaskValues = { title, folder, type: prop("type"), date: prop("date"), endDate: prop("end_date"), status: prop("status"), priority: prop("priority") };
+  const propKeys = { type: "type", date: "date", endDate: "end_date", status: "status", priority: "priority" } as const;
 
   function change(field: keyof TaskValues, value: string) {
     if (field === "title") return patch({ title: value });
@@ -220,7 +230,7 @@ function TaskFields({ values, lookups, onChange }: {
       </label>
       <label className="flex flex-col gap-1 text-xs font-medium sm:col-span-2">
         Folder
-        <NativeSelect className="w-full" value={values.folder} onChange={(e) => onChange("folder", taskFolder(e.target.value))} aria-label="Task folder">
+        <NativeSelect className="w-full" value={values.folder} onChange={(e) => onChange("folder", e.target.value)} aria-label="Task folder">
           {folders.map((f) => <NativeSelectOption key={f} value={f}>{f || "Vault root"}</NativeSelectOption>)}
         </NativeSelect>
       </label>
@@ -232,6 +242,7 @@ function TaskFields({ values, lookups, onChange }: {
         End date
         <Input type="date" value={values.endDate} onChange={(e) => onChange("endDate", e.target.value)} aria-label="Task end date" />
       </label>
+      <ChoiceField label="Type" value={values.type} options={optionsFor("type")} onChange={(v) => onChange("type", v)} />
       <ChoiceField label="Status" value={values.status} options={optionsFor("status")} onChange={(v) => onChange("status", v)} />
       <ChoiceField label="Priority" value={values.priority} options={optionsFor("priority")} onChange={(v) => onChange("priority", v)} />
     </div>

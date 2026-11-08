@@ -149,7 +149,11 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   const drawer = page.getByRole("dialog");
   await drawer.getByLabel("Task title").fill(`Ship ${suffix}`);
   await drawer.getByLabel("Task folder").selectOption("Projects/Acme");
-  await expect(drawer.getByLabel("Task folder")).toHaveValue("Projects/Acme/Tasks");
+  await expect(drawer.getByTestId("task-target-folder")).toHaveText("Saves to Projects/Acme/Tasks");
+  await drawer.getByRole("checkbox", { name: "Put it in a Tasks subfolder" }).click();
+  await expect(drawer.getByTestId("task-target-folder")).toHaveText("Saves to Projects/Acme");
+  await drawer.getByRole("checkbox", { name: "Put it in a Tasks subfolder" }).click();
+  await expect(drawer.getByLabel("Task type")).toHaveValue("task");
   await drawer.getByLabel("Task status").selectOption("Not started");
   await drawer.getByLabel("Task priority").selectOption("High");
   await drawer.getByRole("button", { name: "Create task" }).click();
@@ -189,6 +193,16 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   await expect(list.getByText(`Elsewhere ${suffix}`)).toHaveCount(0);
   await page.getByRole("button", { name: "Tasks only" }).click();
   await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
+
+  // Any Note becomes a task by setting its Type in the drawer.
+  await list.getByRole("listitem").filter({ hasText: `Elsewhere ${suffix}` }).getByRole("button").click();
+  await page.getByRole("dialog").getByLabel("Task type").selectOption("task");
+  await expect(page.getByRole("dialog").getByRole("status")).toHaveText("Saved");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.getByRole("button", { name: "Tasks only" }).click();
+  await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
+  await page.getByRole("button", { name: "Tasks only" }).click();
 
   await page.getByLabel("Filter by folder").selectOption("Projects/Acme");
   await expect(page).toHaveURL(`/app/calendar?date=${day}&folder=Projects%2FAcme`);
