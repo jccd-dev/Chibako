@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { NoteSummary } from "@/lib/notes";
-import { selectChoices } from "@/lib/property-types";
 import { isNoteDate, noteDateToDate } from "@/features/calendar/note-dates";
 import { folderChoices } from "@/features/calendar/task-folder";
 import { filterTable, groupByStatus, type ChoiceFilters } from "@/features/calendar/task-table";
@@ -12,12 +11,10 @@ import { TaskDrawer } from "@/features/calendar/components/TaskDrawer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FolderPicker } from "@/components/FolderPicker";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { IconPlus } from "@/components/icons";
 
-const ALL_TYPES = "all";
 const prop = (note: NoteSummary, key: string) => {
   const value = note.properties[key];
   return Array.isArray(value) ? value.join(", ") : String(value ?? "");
@@ -34,35 +31,31 @@ function dateCell(note: NoteSummary) {
   return end && end > date ? `${formatDate(date)} – ${formatDate(end)}` : formatDate(date);
 }
 
-function tasksUrl(type: string, folder: string, choices: ChoiceFilters) {
+function tasksUrl(folder: string, choices: ChoiceFilters) {
   const params = new URLSearchParams();
-  if (type !== "task") params.set("type", type || ALL_TYPES);
   if (folder) params.set("folder", folder);
   for (const [key, chosen] of Object.entries(choices)) if (chosen.length) params.set(key, chosen.join(","));
   const query = params.toString();
   return `/app/tasks${query ? `?${query}` : ""}`;
 }
 
-/** Notion-style table of Notes by property, grouped by status. Type defaults to `task` but is only a filter. */
-export function TasksView({ initialNotes, vaultFolders, typeOptions, statusOptions, priorityOptions, requestedType, requestedFolder, requestedChoices }: {
+/** Tasks grouped by status. */
+export function TasksView({ initialNotes, vaultFolders, statusOptions, priorityOptions, requestedFolder, requestedChoices }: {
   initialNotes: NoteSummary[];
   vaultFolders: string[];
-  typeOptions: string[];
   statusOptions: string[];
   priorityOptions: string[];
-  requestedType: string;
   requestedFolder: string;
   requestedChoices: { status: string[]; priority: string[] };
 }) {
   const router = useRouter();
   const [notes, setNotes] = useState(initialNotes);
-  const [type, setType] = useState(requestedType);
   const [folder, setFolder] = useState(requestedFolder);
   const [choices, setChoices] = useState(requestedChoices);
   const [drawer, setDrawer] = useState({ open: false, noteId: null as string | null, key: 0 });
   const openNote = (noteId: string | null) => setDrawer((d) => ({ open: true, noteId, key: d.key + 1 }));
-  const groups = useMemo(() => groupByStatus(filterTable(notes, type, folder, choices), statusOptions, priorityOptions),
-    [notes, type, folder, choices, statusOptions, priorityOptions],
+  const groups = useMemo(() => groupByStatus(filterTable(notes, "task", folder, choices), statusOptions, priorityOptions),
+    [notes, folder, choices, statusOptions, priorityOptions],
   );
   const folders = useMemo(() => folderChoices([...vaultFolders, ...notes.map((note) => note.folder), folder]), [vaultFolders, notes, folder]);
   const count = groups.reduce((sum, group) => sum + group.notes.length, 0);
@@ -84,20 +77,15 @@ export function TasksView({ initialNotes, vaultFolders, typeOptions, statusOptio
     };
   }, [refresh]);
 
-  function selectType(next: string) {
-    setType(next);
-    router.replace(tasksUrl(next, folder, choices), { scroll: false });
-  }
-
   function selectFolder(next: string) {
     setFolder(next);
-    router.replace(tasksUrl(type, next, choices), { scroll: false });
+    router.replace(tasksUrl(next, choices), { scroll: false });
   }
 
   function selectFilter(key: keyof typeof choices, chosen: string[]) {
     const next = { ...choices, [key]: chosen };
     setChoices(next);
-    router.replace(tasksUrl(type, folder, next), { scroll: false });
+    router.replace(tasksUrl(folder, next), { scroll: false });
   }
 
   return (
@@ -105,13 +93,9 @@ export function TasksView({ initialNotes, vaultFolders, typeOptions, statusOptio
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
-          <p className="text-xs text-muted-foreground">{count} Note{count === 1 ? "" : "s"} · Type is a filter, any Note can be a task.</p>
+          <p className="text-xs text-muted-foreground">{count} task{count === 1 ? "" : "s"}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <NativeSelect value={type} onChange={(e) => selectType(e.target.value)} aria-label="Filter by type">
-            <NativeSelectOption value="">All types</NativeSelectOption>
-            {selectChoices(typeOptions, type).map((t) => <NativeSelectOption key={t} value={t}>{t}</NativeSelectOption>)}
-          </NativeSelect>
           <FolderPicker aria-label="Filter by folder" folders={folders} value={folder} emptyLabel="All folders" onChange={selectFolder} />
           <Button size="sm" onClick={() => openNote(null)}>
             <IconPlus data-icon="inline-start" />New task
@@ -132,9 +116,8 @@ export function TasksView({ initialNotes, vaultFolders, typeOptions, statusOptio
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[40%]">Title</TableHead>
+                  <TableHead className="w-[51%]">Title</TableHead>
                   <TableHead className="w-[22%]">Folder</TableHead>
-                  <TableHead className="w-[11%]">Type</TableHead>
                   <TableHead className="w-[10%]">Priority</TableHead>
                   <TableHead className="w-[17%]">Date</TableHead>
                 </TableRow>
@@ -150,7 +133,6 @@ export function TasksView({ initialNotes, vaultFolders, typeOptions, statusOptio
                         </button>
                       </TableCell>
                       <TableCell className="truncate text-muted-foreground">{note.folder || "Vault root"}</TableCell>
-                      <TableCell>{prop(note, "type") && <Badge variant="outline">{prop(note, "type")}</Badge>}</TableCell>
                       <TableCell>{prop(note, "priority") && <Badge variant="outline">{prop(note, "priority")}</Badge>}</TableCell>
                       <TableCell className="truncate text-muted-foreground">{dateCell(note)}</TableCell>
                     </TableRow>

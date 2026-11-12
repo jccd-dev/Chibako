@@ -16,6 +16,7 @@ export default async function CalendarPage({ searchParams }: {
   const options = (name: string) => defs.find((def) => def.name === name && def.type === "select")?.options ?? [];
   return (
     <CalendarView
+      key={JSON.stringify([folder, tasks, status, priority])}
       initialNotes={listDatedNotes()}
       vaultFolders={folderTree()}
       statusOptions={options("status")}

@@ -131,6 +131,10 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   await page.getByRole("button", { name: "Add note or task" }).click();
   const drawer = page.getByRole("dialog");
   await drawer.getByLabel("Task title").fill(`Ship ${suffix}`);
+  const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/calendar" && response.request().method() === "GET");
+  await page.evaluate(() => window.dispatchEvent(new Event("chibako:notes-changed")));
+  await refreshed;
+  await expect(drawer.getByLabel("Task title")).toHaveValue(`Ship ${suffix}`);
   await drawer.getByLabel("Task body").locator("[contenteditable=true]").fill(`Body ${suffix}`);
   // The folder picker searches anywhere in the path.
   await drawer.getByLabel("Task folder", { exact: true }).click();
@@ -183,6 +187,7 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   await expect(row).toBeVisible();
   await expect(list.getByText(`Elsewhere ${suffix}`)).toHaveCount(0);
   await page.getByRole("button", { name: "Tasks only" }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${day}`);
   await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
 
   // Any Note becomes a task by setting its Type in the drawer.
@@ -192,8 +197,10 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
   await page.getByRole("button", { name: "Tasks only" }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${day}`);
   await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
   await page.getByRole("button", { name: "Tasks only" }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${day}`);
 
   // The folder picked in the drawer is offered first as a recent folder.
   await page.getByLabel("Filter by folder").click();
@@ -222,4 +229,27 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   await page.getByRole("group", { name: "Filter by priority" }).getByRole("button", { name: "High" }).click();
   await expect(page).toHaveURL(`/app/calendar?date=${day}&status=Done&priority=Low%2CHigh`);
   await expect(list.getByText(`Ship ${suffix}`)).toBeVisible();
+});
+
+test("Calendar sidebar resets folder, task and chip filters", async ({ page }) => {
+  await authenticate(page);
+  const suffix = Date.now();
+  const today = new Date().toLocaleDateString("en-CA");
+  await createDatedNote(page, { title: `Reset ordinary ${suffix}`, date: today, folder: "Work" });
+  await page.goto(`/app/calendar?date=${today}`);
+  await page.getByLabel("Filter by folder").click();
+  await page.getByRole("option", { name: "Work", exact: true }).click();
+  await page.getByRole("button", { name: "Tasks only" }).click();
+  const status = page.getByRole("group", { name: "Filter by status" });
+  const priority = page.getByRole("group", { name: "Filter by priority" });
+  await status.getByRole("button", { name: "Done" }).click();
+  await priority.getByRole("button", { name: "High" }).click();
+  await expect(page.getByTestId("calendar-note-list").getByText(`Reset ordinary ${suffix}`)).toHaveCount(0);
+  await page.getByRole("link", { name: "Calendar", exact: true }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${today}`);
+  await expect(page.getByLabel("Filter by folder")).toContainText("All folders");
+  await expect(page.getByRole("button", { name: "Tasks only" })).toHaveAttribute("aria-pressed", "false");
+  await expect(status.getByRole("button", { pressed: true })).toHaveCount(0);
+  await expect(priority.getByRole("button", { pressed: true })).toHaveCount(0);
+  await expect(page.getByTestId("calendar-note-list").getByText(`Reset ordinary ${suffix}`)).toBeVisible();
 });
