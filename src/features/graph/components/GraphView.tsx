@@ -24,7 +24,7 @@ import { useGraphPattern } from "@/features/graph/use-graph-pattern";
 import { GraphLegend } from "@/features/graph/components/GraphLegend";
 import { GraphPatternSwitch } from "@/features/graph/components/GraphPatternSwitch";
 import { useGraphViewport, type GraphBounds } from "@/features/graph/use-graph-viewport";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FolderPicker } from "@/components/FolderPicker";
 
 interface GraphNode extends SimulationNodeDatum {
   id: string;
@@ -355,29 +355,14 @@ export function GraphView() {
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
       <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
-        <Select
-          items={{ "": "All folders", ...Object.fromEntries(folders.map((f) => [f, f])) }}
+        <FolderPicker
+          aria-label="Filter by folder"
+          folders={folders}
           value={folder}
-          onValueChange={(value) => {
-            if (value !== null) setFolder(value);
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="Filter by folder"
-            className="h-auto! rounded-lg border-border bg-popover px-2.5! py-1.5! text-xs text-muted-foreground shadow-none! hover:text-foreground dark:bg-popover dark:hover:bg-popover"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">All folders</SelectItem>
-            {folders.map((f) => (
-              <SelectItem key={f} value={f}>
-                {f}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          emptyLabel="All folders"
+          onChange={setFolder}
+          className="h-auto rounded-lg border-border bg-popover px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground dark:bg-popover dark:hover:bg-popover"
+        />
         <button
           className={cn(
             "rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
