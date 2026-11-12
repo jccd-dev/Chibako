@@ -28,8 +28,8 @@ test("Tasks table lists Notes by Type, groups by status and edits in the drawer"
   await authenticate(page);
   const suffix = Date.now();
   for (const data of [
-    { title: `Api task ${suffix}`, folder: "Work", properties: { type: "task", status: "In progress" } },
-    { title: `Plain ${suffix}`, folder: "Work", properties: { status: "Not started" } },
+    { title: `Api task ${suffix}`, folder: "Work", properties: { type: "task", status: "In progress", priority: "High" } },
+    { title: `Plain ${suffix}`, folder: "Work", properties: { status: "Not started", priority: "Low" } },
   ]) {
     expect((await page.request.post("/api/notes", { data })).ok()).toBeTruthy();
   }
@@ -68,7 +68,28 @@ test("Tasks table lists Notes by Type, groups by status and edits in the drawer"
   await page.getByLabel("Filter by type").selectOption("");
   await expect(page).toHaveURL("/app/tasks?type=all");
   await expect(table.getByRole("region", { name: "Not started" })).toContainText(`Plain ${suffix}`);
-  await page.getByLabel("Filter by folder").selectOption("Work");
+  await page.getByLabel("Filter by folder").click();
+  await page.getByLabel("Search folders").fill("wor");
+  await page.getByRole("option", { name: "Work", exact: true }).click();
   await expect(page).toHaveURL("/app/tasks?type=all&folder=Work");
   await expect(table.getByText(`Undated ${suffix}`)).toHaveCount(0);
+
+  // Status and priority chips narrow the table, combine with other filters and survive a reload.
+  const statusChips = page.getByRole("group", { name: "Filter by status" });
+  const priorityChips = page.getByRole("group", { name: "Filter by priority" });
+  await statusChips.getByRole("button", { name: "Not started" }).click();
+  await statusChips.getByRole("button", { name: "In progress" }).click();
+  await expect(page).toHaveURL("/app/tasks?type=all&folder=Work&status=Not+started%2CIn+progress");
+  await expect(table).toContainText(`Api task ${suffix}`);
+  await expect(table).toContainText(`Plain ${suffix}`);
+  await priorityChips.getByRole("button", { name: "High" }).click();
+  await expect(page).toHaveURL("/app/tasks?type=all&folder=Work&status=Not+started%2CIn+progress&priority=High");
+  await expect(table).toContainText(`Api task ${suffix}`);
+  await expect(table.getByText(`Plain ${suffix}`)).toHaveCount(0);
+  await page.reload();
+  await expect(priorityChips.getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "true");
+  await expect(table.getByText(`Plain ${suffix}`)).toHaveCount(0);
+  await statusChips.getByRole("button", { name: "In progress" }).click();
+  await expect(table.getByText(`Api task ${suffix}`)).toHaveCount(0);
+  await expect(page.getByText("No Notes match these filters")).toBeVisible();
 });

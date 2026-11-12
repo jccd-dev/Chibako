@@ -132,7 +132,11 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   const drawer = page.getByRole("dialog");
   await drawer.getByLabel("Task title").fill(`Ship ${suffix}`);
   await drawer.getByLabel("Task body").locator("[contenteditable=true]").fill(`Body ${suffix}`);
-  await chooseTaskOption(page, "Task folder", "Projects/Acme");
+  // The folder picker searches anywhere in the path.
+  await drawer.getByLabel("Task folder", { exact: true }).click();
+  await page.getByLabel("Search folders").fill("acme");
+  await expect(page.getByRole("option", { name: "Work", exact: true })).toHaveCount(0);
+  await page.getByRole("option", { name: "Projects/Acme", exact: true }).click();
   await expect(drawer.getByTestId("task-target-folder")).toHaveText("Saves to Projects/Acme/Tasks");
   await drawer.getByRole("checkbox", { name: "Put it in a Tasks subfolder" }).click();
   await expect(drawer.getByTestId("task-target-folder")).toHaveText("Saves to Projects/Acme");
@@ -191,8 +195,31 @@ test("Calendar creates, edits and filters a task without leaving the page", asyn
   await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
   await page.getByRole("button", { name: "Tasks only" }).click();
 
-  await page.getByLabel("Filter by folder").selectOption("Projects/Acme");
+  // The folder picked in the drawer is offered first as a recent folder.
+  await page.getByLabel("Filter by folder").click();
+  await page.getByRole("group", { name: "Recent" }).getByRole("option", { name: "Projects/Acme", exact: true }).click();
   await expect(page).toHaveURL(`/app/calendar?date=${day}&folder=Projects%2FAcme`);
   await expect(row).toBeVisible();
   await expect(list.getByText(`Elsewhere ${suffix}`)).toHaveCount(0);
+  // Status and priority chips narrow the day list and the grid counts, and survive a reload.
+  await page.getByLabel("Filter by folder").click();
+  await page.getByRole("option", { name: "All folders", exact: true }).click();
+  await expect(list.getByText(`Elsewhere ${suffix}`)).toBeVisible();
+  const dayCell = (count: string) => page.getByRole("button", { name: `May 12, ${year}${count}`, exact: true });
+  await expect(dayCell(", 2 Notes")).toBeVisible();
+  await page.getByRole("group", { name: "Filter by status" }).getByRole("button", { name: "Done" }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${day}&status=Done`);
+  await expect(row).toBeVisible();
+  await expect(list.getByText(`Elsewhere ${suffix}`)).toHaveCount(0);
+  await expect(dayCell(", 1 Note")).toBeVisible();
+  await page.getByRole("group", { name: "Filter by priority" }).getByRole("button", { name: "Low" }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${day}&status=Done&priority=Low`);
+  await expect(list.getByText(`Ship ${suffix}`)).toHaveCount(0);
+  await expect(dayCell("")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("group", { name: "Filter by priority" }).getByRole("button", { name: "Low" })).toHaveAttribute("aria-pressed", "true");
+  await expect(list.getByText(`Ship ${suffix}`)).toHaveCount(0);
+  await page.getByRole("group", { name: "Filter by priority" }).getByRole("button", { name: "High" }).click();
+  await expect(page).toHaveURL(`/app/calendar?date=${day}&status=Done&priority=Low%2CHigh`);
+  await expect(list.getByText(`Ship ${suffix}`)).toBeVisible();
 });
