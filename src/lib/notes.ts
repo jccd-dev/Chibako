@@ -332,7 +332,15 @@ export function filterByProperties<T extends NoteSummary>(notes: T[], filters: P
 }
 
 // anyTerm: natural-sentence queries (recall) match notes containing any term, ranked by bm25; UI search keeps all-terms.
-export function searchNotes(query: string, propertyFilters: PropertyFilter[] = [], options: { anyTerm?: boolean } = {}): SearchResult[] {
+export interface SearchOptions {
+  anyTerm?: boolean;
+  /** Only this folder and its subfolders. */
+  folder?: string;
+  /** Match titles only. */
+  titleOnly?: boolean;
+}
+
+export function searchNotes(query: string, propertyFilters: PropertyFilter[] = [], options: SearchOptions = {}): SearchResult[] {
   if (!query.trim() && !propertyFilters.length) return [];
   const db = getDb();
   const clean = query.trim().replace(/[^A-Za-z0-9_\-\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af ]/g, " ").slice(0, options.anyTerm ? 300 : 60);
@@ -345,15 +353,18 @@ export function searchNotes(query: string, propertyFilters: PropertyFilter[] = [
   }
   if (!terms.length) return [];
   // Quoting keeps hyphens and FTS keywords (AND/OR/NOT/NEAR) literal.
-  const q = terms.map((t) => `"${t}"*`).join(options.anyTerm ? " OR " : " AND ");
+  const match = terms.map((t) => `"${t}"*`).join(options.anyTerm ? " OR " : " AND ");
+  const q = options.titleOnly ? `title : (${match})` : match;
+  // Folder scope is part of the query so the 50-row limit applies inside it.
+  const folder = options.folder ? normalizeFolder(options.folder) : "";
   const rows = db
     .prepare(`
       SELECT id, bm25(notes_fts, 0.0, 2.0, 1.0, 0.5) AS score, snippet(notes_fts, 2, '<mark>', '</mark>', '…', 14) AS snippet
       FROM notes_fts
-      WHERE notes_fts MATCH ?
+      WHERE notes_fts MATCH ?${folder ? " AND (folder = ? COLLATE NOCASE OR lower(substr(folder, 1, length(?) + 1)) = lower(? || '/'))" : ""}
       ORDER BY score LIMIT 50
     `)
-    .all(q) as Array<{ id: string; score: number; snippet: string }>;
+    .all(q, ...(folder ? [folder, folder, folder] : [])) as Array<{ id: string; score: number; snippet: string }>;
   const byId = new Map<string, NoteSummary>(listNotes().map((n) => [n.id, n]));
   return rows
     .map((r) => {

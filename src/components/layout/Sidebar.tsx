@@ -6,8 +6,11 @@ import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { IconCalendarMonth, IconChartPie, IconChecklist, IconCreditCard, IconDotsVertical, IconFold, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
-import type { NoteSummary, SearchResult } from "@/lib/notes";
+import type { NoteSummary } from "@/lib/notes";
 import { useRevealActiveNote } from "./use-reveal-active-note";
+import { useTreeFilter } from "./use-tree-filter";
+import { folderQualifier } from "@/features/notes/search-query";
+import { openCommandPalette } from "./CommandPalette";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import { copyTitle, downloadMarkdown, fetchCurrentNote } from "@/features/notes/note-file-actions";
 import { notifyOrganizationChanged as notifyChanged, requestOrganizationChange as request } from "@/features/organization/organization-client";
@@ -63,16 +66,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const [dropBookmarkId, setDropBookmarkId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [fileView, setFileView] = useState<"files" | "trash">("files");
+  const [filter, setFilter] = useState("");
 
-  // Search state
-  const [searchMode, setSearchMode] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searchActive, setSearchActive] = useState(0);
-  const [searchBusy, setSearchBusy] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const searchAbort = useRef<AbortController | null>(null);
 
   const [action, setAction] = useState<Action | null>(null);
   const [name, setName] = useState("");
@@ -94,6 +89,9 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const treeRef = useRef<HTMLDivElement>(null);
 
   useRevealActiveNote(pathname, notes, setExpanded, treeRef);
+  const filterView = useTreeFilter(filter, notes, folders);
+  const shownFolder = (path: string) => !filterView || filterView.showFolder(path);
+  const shownNote = (note: NoteSummary) => !filterView || filterView.showNote(note);
 
   const treeCache = useMemo(() => noteTreeCache(async () => {
     const response = await fetch("/api/notes");
@@ -135,98 +133,10 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     if ([...selected].some(id => !live.has(id))) setSelected(new Set([...selected].filter(id => live.has(id))));
   }
 
-  const [previousSearchQuery, setPreviousSearchQuery] = useState(searchQuery);
-  if (previousSearchQuery !== searchQuery) {
-    setPreviousSearchQuery(searchQuery);
-    setSearchBusy(Boolean(searchQuery.trim()));
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setSearchActive(0);
-    }
-  }
-
-  // Live search effect
-  useEffect(() => {
-    searchAbort.current?.abort();
-    if (!searchQuery.trim()) {
-      return;
-    }
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(async () => {
-      searchAbort.current?.abort();
-      const ctrl = new AbortController();
-      searchAbort.current = ctrl;
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`, { signal: ctrl.signal });
-        if (res.ok) {
-          const data = await res.json();
-          setSearchResults(data.results);
-          setSearchActive(0);
-        }
-      } catch {
-        // aborted or error
-      } finally {
-        if (searchAbort.current === ctrl) setSearchBusy(false);
-      }
-    }, 180);
-    return () => {
-      clearTimeout(searchTimer.current);
-      searchAbort.current?.abort();
-    };
-  }, [searchQuery]);
-
-  // Focus search input when search mode is activated
-  useEffect(() => {
-    if (searchMode && (!collapsed || mobileOpen)) {
-      const t = setTimeout(() => searchInputRef.current?.focus(), 50);
-      return () => clearTimeout(t);
-    }
-  }, [searchMode, collapsed, mobileOpen]);
-
-  // Auto-scroll selected search result item into view
-  useEffect(() => {
-    if (searchMode && searchResults.length > 0) {
-      const el = document.getElementById(`search-result-${searchActive}`);
-      el?.scrollIntoView({ block: "nearest" });
-    }
-  }, [searchActive, searchMode, searchResults.length]);
-
   function activateSearch() {
-    setSearchMode(true);
-    if (collapsed) {
-      onExpand();
-    }
-    if (mobile && !mobileOpen) {
-      onMobileOpenChange(true);
-    }
-    // Finance swaps the panel for its own nav, so recovery lands on Notes.
-    if (onFinance) router.push("/app");
-  }
-
-  function handleSearchKeyDown(e: React.KeyboardEvent) {
-    if (searchResults.length === 0 && e.key !== "Escape") return;
-
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSearchActive((prev) => (searchResults.length ? (prev + 1) % searchResults.length : 0));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSearchActive((prev) => (searchResults.length ? (prev - 1 + searchResults.length) % searchResults.length : 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const selected = searchResults[searchActive];
-      if (selected) {
-        router.push(`/app/note/${selected.id}`);
-        if (mobile) onMobileOpenChange(false);
-      }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      if (searchQuery) {
-        setSearchQuery("");
-      } else {
-        setSearchMode(false);
-      }
-    }
+    // Close the mobile sheet first so the palette is not stacked under it.
+    if (mobile && mobileOpen) onMobileOpenChange(false);
+    openCommandPalette();
   }
 
   function start(mode: Action["mode"], item: Item) {
@@ -243,6 +153,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     });
   }
   function clearSelection() { setSelected(prev => (prev.size ? new Set() : prev)); }
+  function changeFilter(value: string) { setFilter(value); clearSelection(); }
   async function bulk(input: NoteBatchInput, failure = "Could not complete the action.", navigateAway = true) {
     if (!input.ids.length || busy) return false;
     setBusy(true);
@@ -371,7 +282,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   function actions(item: Item) {
     const mark = item.type === "note" ? bookmarkByNote.get(item.id) : undefined;
     return <ContextMenuGroup>
-      {item.type === "folder" && <><ContextMenuItem disabled={busy} onClick={() => create("note", item.id)}>New file</ContextMenuItem><ContextMenuItem disabled={busy} onClick={() => create("folder", item.id)}>New folder</ContextMenuItem></>}
+      {item.type === "folder" && <><ContextMenuItem disabled={busy} onClick={() => create("note", item.id)}>New file</ContextMenuItem><ContextMenuItem disabled={busy} onClick={() => create("folder", item.id)}>New folder</ContextMenuItem><ContextMenuItem onClick={() => changeFilter(folderQualifier(item.id))}>Focus folder</ContextMenuItem></>}
       {item.type === "note" && <ContextMenuItem disabled={busy} onClick={() => openBookmarkDialog(item.id)}>{mark ? "Edit bookmark" : "Bookmark"}</ContextMenuItem>}
       <ContextMenuItem disabled={busy} onClick={() => start("rename", item)}>Rename</ContextMenuItem>
       <ContextMenuItem disabled={busy} onClick={() => start("move", item)}>Move to…</ContextMenuItem>
@@ -521,7 +432,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   }
   function folderRow(path: string): React.ReactNode {
     const item: Item = { type: "folder", id: path, name: nameOf(path), parent: parentOf(path) };
-    const open = expanded.has(path);
+    const open = expanded.has(path) || !!filterView?.open.has(path);
     return <div key={path}>
       <div data-accented={(dropTarget === path || selectedFolder === path) || undefined} className={cn("group/sidebar-row flex items-center rounded-md", (dropTarget === path || selectedFolder === path) && "bg-accent", dropTarget === path && "ring-1 ring-primary")} {...dropProps(path)} {...dragProps(item)}>
         <ContextMenu>
@@ -541,106 +452,30 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           <ContextMenuContent>{actions(item)}</ContextMenuContent>
         </ContextMenu>{menu(item)}
       </div>
-      {open && <div {...dropProps(path)} className="ml-3 min-h-8 border-l border-border pl-1">{folders.filter(f => parentOf(f) === path).map(folderRow)}{notes.filter(n => n.folder === path).map(noteRow)}</div>}
+      {open && <div {...dropProps(path)} className="ml-3 min-h-8 border-l border-border pl-1">{folders.filter(f => parentOf(f) === path && shownFolder(f)).map(folderRow)}{notes.filter(n => n.folder === path && shownNote(n)).map(noteRow)}</div>}
     </div>;
   }
 
-
-
-  const searchView = (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-2 pb-1 pt-2">
-        <div className="relative flex items-center">
-          <IconSearch size={13} className="pointer-events-none absolute left-2.5 text-muted-foreground" />
-          <Input
-            ref={searchInputRef}
-            aria-label="Search all notes"
-            placeholder="Search notes…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            className="h-8 border-transparent bg-muted/50 pl-8 pr-7 text-xs shadow-none focus-visible:border-border"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => { setSearchQuery(""); searchInputRef.current?.focus(); }}
-              className="absolute right-2 text-muted-foreground hover:text-foreground"
-              aria-label="Clear search"
-            >
-              <IconX size={13} />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1.5" role="listbox" id="sidebar-search-results">
-        {searchQuery.trim() === "" ? (
-          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-            <p>Search across titles and note content.</p>
-            <p className="mt-1 text-[11px]">Use ↑↓ to navigate results, ↵ to open.</p>
-          </div>
-        ) : searchResults.length === 0 && !searchBusy ? (
-          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-            No notes found for &quot;{searchQuery}&quot;.
-          </div>
-        ) : (
-          searchResults.map((r, i) => (
-            <NoteLink
-              key={r.id}
-              noteId={r.id}
-              prefetch={i === searchActive}
-              id={`search-result-${i}`}
-              role="option"
-              tabIndex={-1}
-              aria-selected={i === searchActive}
-              className={cn(
-                "block w-full rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent",
-                i === searchActive && "bg-accent ring-1 ring-primary/40"
-              )}
-              onMouseEnter={() => setSearchActive(i)}
-              onClick={(event) => {
-                event.preventDefault();
-                router.push(`/app/note/${r.id}`);
-                if (mobile) onMobileOpenChange(false);
-              }}
-            >
-              <div className="flex items-center gap-1.5 font-medium text-foreground">
-                <IconFile size={13} className="shrink-0 text-muted-foreground" />
-                <span className="min-w-0 truncate">{r.title}</span>
-                {r.folder && (
-                  <span className="ml-auto max-w-[50%] shrink-0 truncate rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground" title={r.folder}>
-                    {r.folder}
-                  </span>
-                )}
-              </div>
-              {r.snippet && (
-                <div className="mt-0.5 line-clamp-2 pl-4 text-[11px] leading-tight wrap-anywhere text-muted-foreground">
-                  {r.snippet.split(/(<mark>|<\/mark>)/).map((part, idx, parts) =>
-                    part === "<mark>" || part === "</mark>"
-                      ? null
-                      : parts[idx - 1] === "<mark>"
-                      ? <mark key={idx}>{part}</mark>
-                      : part
-                  )}
-                </div>
-              )}
-            </NoteLink>
-          ))
-        )}
-      </div>
-      {searchResults.length > 0 && (
-        <div className="border-t border-border px-3 py-1.5 text-[10.5px] text-muted-foreground">
-          ↑↓ navigate · ↵ open · esc close
-        </div>
-      )}
-    </div>
-  );
-
   const fileTree = (
     <>
+      <div className="relative mx-2 mb-1 flex items-center">
+        <Input
+          aria-label="Filter files"
+          placeholder="Filter… (note:, folder:)"
+          value={filter}
+          onChange={e => changeFilter(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape" && filter) { e.preventDefault(); changeFilter(""); } }}
+          className="h-7 border-transparent bg-muted/50 pr-7 text-xs shadow-none focus-visible:border-border"
+        />
+        {filter && (
+          <button type="button" aria-label="Clear filter" onClick={() => changeFilter("")}
+            className="absolute right-2 text-muted-foreground hover:text-foreground">
+            <IconX size={13} />
+          </button>
+        )}
+      </div>
       <nav aria-label="Files and folders" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
-        {bookmarks.length > 0 && (
+        {!filterView && bookmarks.length > 0 && (
           <details open className="mb-1">
             <summary className="tree-item"><IconBookmark size={14} />Bookmarks</summary>
             {flatBookmarks.map(bookmarkRow)}
@@ -652,8 +487,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
             ))}
           </details>
         )}
-        {notes.some(n => n.is_pinned) && <details><summary className="tree-item">Pinned</summary>{notes.filter(n => n.is_pinned).map(noteRow)}</details>}
-        <details><summary className="tree-item">Recent</summary>{[...notes].sort((a,b) => b.updated_at - a.updated_at).slice(0,5).map(noteRow)}</details>
+        {!filterView && notes.some(n => n.is_pinned) && <details><summary className="tree-item">Pinned</summary>{notes.filter(n => n.is_pinned).map(noteRow)}</details>}
+        {!filterView && <details><summary className="tree-item">Recent</summary>{[...notes].sort((a,b) => b.updated_at - a.updated_at).slice(0,5).map(noteRow)}</details>}
         <div ref={treeRef} {...dropProps("")} className="min-h-16 shrink-0 grow" onClick={e => { if (e.target === e.currentTarget) { clearSelection(); setSelectedFolder(null); } }}>
           <div className="group/sidebar-row sticky top-0 z-10 my-1 flex items-center bg-sidebar">
             <button type="button" aria-pressed={selectedFolder === ""} onClick={() => { setSelectedFolder(""); clearSelection(); }}
@@ -662,8 +497,9 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
             </button>
             <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Collapse folders" title="Collapse folders" onClick={() => setExpanded(new Set())}><IconFold /></Button>
           </div>
-          {folders.filter(f => !parentOf(f)).map(folderRow)}
-          {notes.filter(n => !n.folder).map(noteRow)}
+          {folders.filter(f => !parentOf(f) && shownFolder(f)).map(folderRow)}
+          {notes.filter(n => !n.folder && shownNote(n)).map(noteRow)}
+          {filterView?.empty && <p className="px-2 py-3 text-xs text-muted-foreground">No matching notes.</p>}
         </div>
       </nav>
       {selected.size > 0 && (
@@ -747,7 +583,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           </>
         )}
       </div>
-      {onFinance ? financeNav : searchMode ? searchView : fileView === "trash" ? trashView : fileTree}
+      {onFinance ? financeNav : fileView === "trash" ? trashView : fileTree}
     </div>
   );
 
@@ -759,7 +595,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Home"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          pathname === "/app" && !searchMode && "bg-accent text-foreground"
+          pathname === "/app" && "bg-accent text-foreground"
         )}
       >
         <IconHome size={16} />
@@ -771,10 +607,9 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Files"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          !onFinance && !searchMode && fileView === "files" && !collapsed && "bg-accent text-foreground"
+          !onFinance && fileView === "files" && !collapsed && "bg-accent text-foreground"
         )}
         onClick={() => {
-          if (searchMode) { setSearchMode(false); setSearchQuery(""); }
           setFileView("files");
           clearSelection();
           if (collapsed) onExpand();
@@ -787,10 +622,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         type="button"
         aria-label="Search notes"
         title="Search notes"
-        className={cn(
-          "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          !onFinance && searchMode && (!collapsed || mobileOpen) && "bg-accent text-foreground"
-        )}
+        className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         onClick={activateSearch}
       >
         <IconSearch size={16} />
@@ -801,11 +633,9 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Trash"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          !onFinance && !searchMode && fileView === "trash" && !collapsed && "bg-accent text-foreground"
+          !onFinance && fileView === "trash" && !collapsed && "bg-accent text-foreground"
         )}
         onClick={() => {
-          setSearchMode(false);
-          if (searchQuery) setSearchQuery("");
           setFileView("trash");
           clearSelection();
           if (collapsed) onExpand();

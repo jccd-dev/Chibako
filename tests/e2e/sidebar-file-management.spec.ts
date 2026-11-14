@@ -366,3 +366,68 @@ test("Export .md downloads the note and re-importing restores its properties", a
   const find = async () => ((await (await page.request.get("/api/notes")).json()).notes as Array<{ title: string; properties: Record<string, unknown> }>).find(n => n.title === reimported);
   await expect.poll(async () => (await find())?.properties).toEqual({ status: "done", priority: 2 });
 });
+
+test("filtering the file tree shows matches with their folders and clearing restores it", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  const outer = `Filter ${stamp}`;
+  const inner = `Inner ${stamp}`;
+  await createNote(page.request, `Match ${stamp}`, `${outer}/${inner}`);
+  expect((await page.request.patch(`/api/notes/${(await createNote(page.request, `Hit body ${stamp}`, `${outer}/${inner}`)).id}`, { data: { content: `# x\n\nnarwhal${stamp}` } })).ok()).toBeTruthy();
+  await createNote(page.request, `Sibling ${stamp}`, outer);
+  await createNote(page.request, `Root ${stamp}`);
+  await page.goto("/app");
+
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+  const root = page.getByRole("navigation", { name: "Files and folders" }).locator("xpath=./div").last();
+  const folder = (name: string) => root.getByRole("button", { name, exact: true });
+  const row = (title: string) => root.getByRole("link", { name: title, exact: true });
+  await folder(outer).click();
+  await expect(folder(inner)).toHaveAttribute("aria-expanded", "false");
+  await row(`Root ${stamp}`).click({ modifiers: ["Meta"] });
+  await row(`Sibling ${stamp}`).click({ modifiers: ["Meta"] });
+  await expect(page.getByText("2 selected")).toBeVisible();
+
+  const filter = sidebar.getByRole("textbox", { name: "Filter files" });
+  await filter.fill(`narwhal${stamp}`);
+  await expect(row(`Hit body ${stamp}`)).toBeVisible();
+  await expect(folder(inner)).toHaveAttribute("aria-expanded", "true");
+  await expect(row(`Match ${stamp}`)).toHaveCount(0);
+  await expect(row(`Sibling ${stamp}`)).toHaveCount(0);
+  await expect(row(`Root ${stamp}`)).toHaveCount(0);
+  await expect(page.getByText("2 selected")).toHaveCount(0);
+
+  await filter.press("Escape");
+  await expect(filter).toHaveValue("");
+  await expect(row(`Sibling ${stamp}`)).toBeVisible();
+  await expect(row(`Root ${stamp}`)).toBeVisible();
+  await expect(folder(inner)).toHaveAttribute("aria-expanded", "false");
+});
+
+test("Focus folder shows only that folder's subtree", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  const guides = `Guides ${stamp}`;
+  await createNote(page.request, `Guide note ${stamp}`, guides);
+  await createNote(page.request, `Deep guide ${stamp}`, `${guides}/Deep ${stamp}`);
+  await createNote(page.request, `Outside ${stamp}`);
+  await page.goto("/app");
+
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+  const root = page.getByRole("navigation", { name: "Files and folders" }).locator("xpath=./div").last();
+  await root.getByRole("button", { name: `Actions for ${guides}`, exact: true }).click();
+  await page.getByRole("menuitem", { name: "Focus folder" }).click();
+
+  await expect(sidebar.getByRole("textbox", { name: "Filter files" })).toHaveValue(`folder:"${guides}"`);
+  await expect(root.getByRole("link", { name: `Guide note ${stamp}`, exact: true })).toBeVisible();
+  await expect(root.getByRole("button", { name: `Deep ${stamp}`, exact: true })).toBeVisible();
+  await expect(root.getByRole("link", { name: `Outside ${stamp}`, exact: true })).toHaveCount(0);
+
+  await sidebar.getByRole("button", { name: "Clear filter" }).click();
+  await expect(root.getByRole("link", { name: `Outside ${stamp}`, exact: true })).toBeVisible();
+
+  // Folder names match regardless of case.
+  await sidebar.getByRole("textbox", { name: "Filter files" }).fill(`folder:"${guides.toLowerCase()}"`);
+  await expect(root.getByRole("link", { name: `Guide note ${stamp}`, exact: true })).toBeVisible();
+  await expect(root.getByRole("link", { name: `Outside ${stamp}`, exact: true })).toHaveCount(0);
+});
