@@ -21,6 +21,7 @@ import { galaxyLayout, type GalaxyLayout } from "@/lib/graph-layout";
 import { radialLayout } from "@/lib/graph-radial-layout";
 import { nodeRadius, placementColor, sameGroup, type GraphPattern } from "@/features/graph/galaxy-style";
 import { useGraphPattern } from "@/features/graph/use-graph-pattern";
+import { useGraphLabels } from "@/features/graph/use-graph-labels";
 import { GraphLegend } from "@/features/graph/components/GraphLegend";
 import { GraphPatternSwitch } from "@/features/graph/components/GraphPatternSwitch";
 import { useGraphViewport, type GraphBounds } from "@/features/graph/use-graph-viewport";
@@ -83,6 +84,7 @@ export function GraphView() {
   const [folder, setFolder] = useState("");
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [pattern, setPattern] = useGraphPattern();
+  const [labels, setLabels] = useGraphLabels();
 
   useEffect(() => {
     fetch("/api/graph")
@@ -322,10 +324,10 @@ export function GraphView() {
       if (!hovered) return base;
       return related(d.id) ? Math.max(base, 0.95) : Math.min(base, HOVER_DIM);
     };
-    // Labels: index notes always, everyone else only inside the hovered neighborhood.
+    // Labels: index notes unless toggled off, everyone else only inside the hovered neighborhood.
     const labelOpacity = (d: GraphNode) => {
       if (hovered) return related(d.id) ? nodeOpacity(d) : 0;
-      return d.kind === "index" ? baseOpacity(d) : 0;
+      return labels && d.kind === "index" ? baseOpacity(d) : 0;
     };
 
     root.selectAll<SVGCircleElement, GraphNode>("circle.node")
@@ -350,7 +352,7 @@ export function GraphView() {
         return touchesHovered(d) ? 0.95 : Math.min(base, 0.05);
       })
       .attr("stroke-width", (d) => (touchesHovered(d) ? 0.9 : 0.5));
-  }, [hovered, orphansOnly, folder, nodes, links, neighbors, degree, nodesById, layout, pattern]);
+  }, [hovered, orphansOnly, folder, nodes, links, neighbors, degree, nodesById, layout, pattern, labels]);
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
@@ -377,6 +379,19 @@ export function GraphView() {
           Orphans ({orphanCount})
         </button>
         <GraphPatternSwitch value={pattern} onChange={setPattern} />
+        <button
+          className={cn(
+            "rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+            labels
+              ? "border-primary bg-primary/12 text-primary"
+              : "border-border bg-popover text-muted-foreground"
+          )}
+          onClick={() => setLabels(!labels)}
+          title="Show index note labels"
+          aria-pressed={labels}
+        >
+          Labels
+        </button>
         <button
           className="rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
           onClick={resetView}

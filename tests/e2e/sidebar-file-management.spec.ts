@@ -306,3 +306,63 @@ test("Collapse folders stays reachable after scrolling a long file tree", async 
   await tree.evaluate(el => { el.scrollTop = el.scrollHeight; });
   await expect(tree.getByRole("button", { name: "Collapse folders" })).toBeInViewport();
 });
+
+test("Duplicate opens a copy with the same body and properties", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  const folder = `Dup ${stamp}`;
+  const title = `Original ${stamp}`;
+  const content = `---\nstatus: draft\n---\n# ${title}\n\nduplicated body`;
+  const res = await page.request.post("/api/notes", { data: { title, folder, content } });
+  expect(res.ok()).toBeTruthy();
+  await page.goto("/app");
+
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+  await sidebar.getByRole("button", { name: folder, exact: true }).click();
+  const readCopy = async (copy: string) => {
+    const before = page.url();
+    await sidebar.getByRole("button", { name: `Actions for ${title}`, exact: true }).click();
+    await page.getByRole("menuitem", { name: "Duplicate" }).click();
+    await page.waitForURL(url => url.href !== before && /\/app\/note\/[^/]+$/.test(url.pathname));
+    const id = page.url().split("/").pop()!;
+    await expect.poll(async () => (await (await page.request.get(`/api/notes/${id}`)).json()).note?.title).toBe(copy);
+    return (await (await page.request.get(`/api/notes/${id}`)).json()).note as { folder: string; content: string; properties: Record<string, unknown> };
+  };
+
+  const first = await readCopy(`${title} copy`);
+  expect(first.folder).toBe(folder);
+  expect(first.content).toBe(content);
+  expect(first.properties).toEqual({ status: "draft" });
+  await expect(sidebar.getByRole("button", { name: `Actions for ${title} copy`, exact: true })).toBeVisible();
+  const second = await readCopy(`${title} copy 2`);
+  expect(second.content).toBe(content);
+});
+
+test("Export .md downloads the note and re-importing restores its properties", async ({ page }) => {
+  await authenticate(page);
+  const stamp = Date.now().toString(36);
+  const title = `Export: ${stamp}?`;
+  const content = `---\nstatus: done\npriority: 2\n---\n# Export ${stamp}\n\nexported body`;
+  expect((await page.request.post("/api/notes", { data: { title, content } })).ok()).toBeTruthy();
+  await page.goto("/app");
+
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+  await sidebar.getByRole("button", { name: `Actions for ${title}`, exact: true }).click();
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("menuitem", { name: "Export .md" }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe(`Export ${stamp}.md`);
+  const text = await new Promise<string>(async (resolve, reject) => {
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    stream.on("data", chunk => chunks.push(Buffer.from(chunk)));
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.on("error", reject);
+  });
+  expect(text).toBe(content);
+
+  const reimported = `Reimported ${stamp}`;
+  await sidebar.locator('input[type="file"]').setInputFiles({ name: `${reimported}.md`, mimeType: "text/markdown", buffer: Buffer.from(text) });
+  const find = async () => ((await (await page.request.get("/api/notes")).json()).notes as Array<{ title: string; properties: Record<string, unknown> }>).find(n => n.title === reimported);
+  await expect.poll(async () => (await find())?.properties).toEqual({ status: "done", priority: 2 });
+});

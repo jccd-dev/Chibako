@@ -9,6 +9,7 @@ import { IconCalendarMonth, IconChartPie, IconChecklist, IconCreditCard, IconDot
 import type { NoteSummary, SearchResult } from "@/lib/notes";
 import { useRevealActiveNote } from "./use-reveal-active-note";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
+import { copyTitle, downloadMarkdown, fetchCurrentNote } from "@/features/notes/note-file-actions";
 import { notifyOrganizationChanged as notifyChanged, requestOrganizationChange as request } from "@/features/organization/organization-client";
 import type { NoteBatchInput } from "@/features/organization/note-batch";
 import type { Bookmark } from "@/lib/bookmarks";
@@ -276,6 +277,23 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       else if (created.length) toast.success(`Imported ${created.length} files.`);
     } finally { setBusy(false); }
   }
+  async function duplicate(item: Item) {
+    setBusy(true);
+    try {
+      const note = await fetchCurrentNote(item.id);
+      // Only one index note exists; its copy is an ordinary note.
+      const data = await request("/api/notes", "POST", { title: copyTitle(note.title, note.folder, notes), folder: note.folder, content: note.content, kind: note.kind === "index" ? "note" : note.kind });
+      if (!data.note) throw new Error("Could not create Note.");
+      router.push(`/app/note/${data.note.id}`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not duplicate Note."); }
+    finally { setBusy(false); }
+  }
+  async function exportNote(item: Item) {
+    try {
+      const note = await fetchCurrentNote(item.id);
+      downloadMarkdown(note.title, note.content);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not export Note."); }
+  }
   async function move(item: Item, destination: string) {
     if (item.parent === destination) return;
     if (item.type === "folder") await request("/api/folders", "PATCH", { from: item.id, to: join(destination, item.name) });
@@ -357,6 +375,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       {item.type === "note" && <ContextMenuItem disabled={busy} onClick={() => openBookmarkDialog(item.id)}>{mark ? "Edit bookmark" : "Bookmark"}</ContextMenuItem>}
       <ContextMenuItem disabled={busy} onClick={() => start("rename", item)}>Rename</ContextMenuItem>
       <ContextMenuItem disabled={busy} onClick={() => start("move", item)}>Move to…</ContextMenuItem>
+      {item.type === "note" && <><ContextMenuItem disabled={busy} onClick={() => void duplicate(item)}>Duplicate</ContextMenuItem><ContextMenuItem onClick={() => void exportNote(item)}>Export .md</ContextMenuItem></>}
       {item.type === "folder"
         ? <ContextMenuItem disabled={busy} variant="destructive" onClick={() => setDeleteFolderTarget(item)}>Delete folder</ContextMenuItem>
         : <ContextMenuItem disabled={busy} variant="destructive" onClick={() => { if (selected.size > 1 && selected.has(item.id)) setBulkDeleteOpen(true); else setDeleteNoteTarget(item); }}>Delete</ContextMenuItem>}

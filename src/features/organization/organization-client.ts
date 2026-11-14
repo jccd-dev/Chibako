@@ -8,10 +8,15 @@ export function notifyOrganizationChanged(): void {
   window.dispatchEvent(new Event("chibako:organized"));
 }
 
-export async function requestOrganizationChange(url: string, method: string, body?: object, quiet = false) {
+/** Waits for open editors to save, so reads and writes see the latest content. */
+export async function flushPendingSaves(): Promise<void> {
   const saves: Promise<void>[] = [];
   window.dispatchEvent(new CustomEvent("chibako:before-organize", { detail: saves }));
   await Promise.all(saves);
+}
+
+export async function requestOrganizationChange(url: string, method: string, body?: object, quiet = false) {
+  await flushPendingSaves();
   const response = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
