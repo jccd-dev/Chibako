@@ -3,13 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useHydrated } from "@/lib/use-hydrated";
-import { coversDate, dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote } from "@/features/calendar/note-dates";
+import { toast } from "sonner";
+import type { NoteProperties } from "@/lib/markdown";
+import { coversDate, dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote, type NoteDateRange } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/features/calendar/components/DatedNotesCalendar";
 import { TaskDrawer } from "@/features/calendar/components/TaskDrawer";
-import { folderChoices, inFolder, isTask } from "@/features/calendar/task-folder";
+import { folderChoices, isTask } from "@/features/calendar/task-folder";
+import { filterTable, type ChoiceFilters } from "@/features/calendar/task-table";
+import { ChoiceFilter } from "@/features/calendar/components/ChoiceFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { FolderPicker } from "@/components/FolderPicker";
 import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
 import { IconPlus } from "@/components/icons";
@@ -21,24 +25,34 @@ function formatRange(note: DatedNote) {
   return `${format(note.date)} – ${format(note.endDate)}`;
 }
 
-function calendarUrl(date: string, folder: string, tasksOnly: boolean) {
-  return `/app/calendar?date=${date}${folder ? `&folder=${encodeURIComponent(folder)}` : ""}${tasksOnly ? "&tasks=1" : ""}`;
+function calendarUrl(date: string, folder: string, tasksOnly: boolean, choices: ChoiceFilters) {
+  const params = new URLSearchParams({ date });
+  if (folder) params.set("folder", folder);
+  if (tasksOnly) params.set("tasks", "1");
+  for (const [key, chosen] of Object.entries(choices)) if (chosen.length) params.set(key, chosen.join(","));
+  return `/app/calendar?${params}`;
 }
 
-export function CalendarView({ initialNotes, vaultFolders, requestedDate, requestedFolder = "", requestedTasksOnly = false }: {
+export function CalendarView({
+  initialNotes, vaultFolders, statusOptions, priorityOptions, requestedDate, requestedFolder = "", requestedTasksOnly = false, requestedChoices,
+}: {
   initialNotes: DatedNote[];
   vaultFolders: string[];
+  statusOptions: string[];
+  priorityOptions: string[];
   requestedDate?: string;
   requestedFolder?: string;
   requestedTasksOnly?: boolean;
+  requestedChoices: { status: string[]; priority: string[] };
 }) {
   const router = useRouter();
   const [allNotes, setNotes] = useState(initialNotes);
   const [folder, setFolder] = useState(requestedFolder);
   const [tasksOnly, setTasksOnly] = useState(requestedTasksOnly);
+  const [choices, setChoices] = useState(requestedChoices);
   const notes = useMemo(
-    () => allNotes.filter((note) => inFolder(note.folder, folder) && (!tasksOnly || isTask(note))),
-    [allNotes, folder, tasksOnly]
+    () => filterTable(allNotes, tasksOnly ? "task" : "", folder, choices),
+    [allNotes, folder, tasksOnly, choices]
   );
   const folders = useMemo(() => folderChoices([...vaultFolders, ...allNotes.map((note) => note.folder), folder]), [vaultFolders, allNotes, folder]);
   const [chosenDate, setSelected] = useState<string | null>(() => isNoteDate(requestedDate) ? requestedDate : null);
@@ -60,8 +74,8 @@ export function CalendarView({ initialNotes, vaultFolders, requestedDate, reques
   }, []);
 
   useEffect(() => {
-    if (!chosenDate && selected) router.replace(calendarUrl(selected, folder, tasksOnly), { scroll: false });
-  }, [router, chosenDate, selected, folder, tasksOnly]);
+    if (!chosenDate && selected) router.replace(calendarUrl(selected, folder, tasksOnly, choices), { scroll: false });
+  }, [router, chosenDate, selected, folder, tasksOnly, choices]);
 
   useEffect(() => {
     const onChange = () => void refresh();
@@ -73,19 +87,43 @@ export function CalendarView({ initialNotes, vaultFolders, requestedDate, reques
     };
   }, [refresh]);
 
+  async function reschedule(id: string, range: NoteDateRange) {
+    // Show the drop at once; the server copy replaces it on refresh.
+    setNotes((current) => current.map((note) => {
+      if (note.id !== id) return note;
+      const properties: NoteProperties = { ...note.properties, date: range.date };
+      if (range.end_date) properties.end_date = range.end_date;
+      else delete properties.end_date;
+      return { ...note, date: range.date, endDate: range.end_date ?? range.date, properties };
+    }));
+    const response = await fetch(`/api/notes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ properties: range }),
+    }).catch(() => null);
+    if (!response?.ok) toast.error("Could not change the date");
+    window.dispatchEvent(new Event("chibako:notes-changed"));
+  }
+
   function selectDate(date: string) {
     setSelected(date);
-    router.replace(calendarUrl(date, folder, tasksOnly), { scroll: false });
+    router.replace(calendarUrl(date, folder, tasksOnly, choices), { scroll: false });
   }
 
   function selectFolder(next: string) {
     setFolder(next);
-    if (selected) router.replace(calendarUrl(selected, next, tasksOnly), { scroll: false });
+    if (selected) router.replace(calendarUrl(selected, next, tasksOnly, choices), { scroll: false });
   }
 
   function selectTasksOnly(next: boolean) {
     setTasksOnly(next);
-    if (selected) router.replace(calendarUrl(selected, folder, next), { scroll: false });
+    if (selected) router.replace(calendarUrl(selected, folder, next, choices), { scroll: false });
+  }
+
+  function selectFilter(key: keyof typeof choices, chosen: string[]) {
+    const next = { ...choices, [key]: chosen };
+    setChoices(next);
+    if (selected) router.replace(calendarUrl(selected, folder, tasksOnly, next), { scroll: false });
   }
 
   const heading = selected ? noteDateToDate(selected).toLocaleDateString("en-US", {
@@ -104,12 +142,13 @@ export function CalendarView({ initialNotes, vaultFolders, requestedDate, reques
         </div>
         <div className="flex items-center gap-2">
           <Toggle variant="outline" pressed={tasksOnly} onPressedChange={selectTasksOnly}>Tasks only</Toggle>
-          <NativeSelect value={folder} onChange={(e) => selectFolder(e.target.value)} aria-label="Filter by folder">
-            <NativeSelectOption value="">All folders</NativeSelectOption>
-            {folders.map((f) => <NativeSelectOption key={f} value={f}>{f}</NativeSelectOption>)}
-          </NativeSelect>
+          <FolderPicker aria-label="Filter by folder" folders={folders} value={folder} emptyLabel="All folders" onChange={selectFolder} />
         </div>
       </header>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border px-4 py-2 sm:px-6">
+        <ChoiceFilter label="Status" options={statusOptions} value={choices.status} onChange={(next) => selectFilter("status", next)} />
+        <ChoiceFilter label="Priority" options={priorityOptions} value={choices.priority} onChange={(next) => selectFilter("priority", next)} />
+      </div>
       <div className="grid min-h-0 flex-1 grid-cols-1 content-start overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:content-stretch lg:overflow-hidden">
         <section className="order-2 flex min-h-0 flex-col border-border lg:order-1 lg:border-r">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
@@ -153,7 +192,7 @@ export function CalendarView({ initialNotes, vaultFolders, requestedDate, reques
           </div>
         </section>
         <section className="order-1 flex min-h-0 p-3 sm:p-6 lg:order-2 lg:overflow-y-auto">
-          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} onOpenNote={openTask} />}
+          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} onOpenNote={openTask} onReschedule={(id, range) => void reschedule(id, range)} />}
         </section>
       </div>
       {selected && (

@@ -17,6 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-inputs";
+import { FolderPicker } from "@/components/FolderPicker";
 
 interface TaskValues {
   title: string;
@@ -241,14 +242,18 @@ function TaskFields({ values, lookups, onChange }: {
         <FieldLabel htmlFor="task-title">Title</FieldLabel>
         <Input id="task-title" value={values.title} onChange={(e) => onChange("title", e.target.value)} aria-label="Task title" autoFocus />
       </Field>
-      <ChoiceField
-        className="sm:col-span-2"
-        label="Folder"
-        value={values.folder}
-        options={selectChoices(["", ...lookups.folders], values.folder)}
-        emptyLabel="Vault root"
-        onChange={(v) => onChange("folder", v)}
-      />
+      <Field className="sm:col-span-2">
+        <FieldLabel htmlFor="task-folder">Folder</FieldLabel>
+        <FolderPicker
+          id="task-folder"
+          aria-label="Task folder"
+          className="w-full max-w-none"
+          folders={selectChoices(lookups.folders, values.folder).filter(Boolean)}
+          value={values.folder}
+          emptyLabel="Vault root"
+          onChange={(v) => onChange("folder", v)}
+        />
+      </Field>
       <Field>
         <FieldLabel htmlFor="task-date">Date</FieldLabel>
         <DateInput id="task-date" aria-label="Task date" value={values.date} onChange={(v) => onChange("date", v)} />
