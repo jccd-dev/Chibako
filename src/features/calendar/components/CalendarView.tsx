@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useHydrated } from "@/lib/use-hydrated";
-import { coversDate, dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote } from "@/features/calendar/note-dates";
+import { toast } from "sonner";
+import type { NoteProperties } from "@/lib/markdown";
+import { coversDate, dateToNoteDate, isNoteDate, noteDateToDate, sortDatedNotes, type DatedNote, type NoteDateRange } from "@/features/calendar/note-dates";
 import { DatedNotesCalendar } from "@/features/calendar/components/DatedNotesCalendar";
 import { TaskDrawer } from "@/features/calendar/components/TaskDrawer";
 import { folderChoices, isTask } from "@/features/calendar/task-folder";
@@ -84,6 +86,24 @@ export function CalendarView({
       window.removeEventListener("focus", onChange);
     };
   }, [refresh]);
+
+  async function reschedule(id: string, range: NoteDateRange) {
+    // Show the drop at once; the server copy replaces it on refresh.
+    setNotes((current) => current.map((note) => {
+      if (note.id !== id) return note;
+      const properties: NoteProperties = { ...note.properties, date: range.date };
+      if (range.end_date) properties.end_date = range.end_date;
+      else delete properties.end_date;
+      return { ...note, date: range.date, endDate: range.end_date ?? range.date, properties };
+    }));
+    const response = await fetch(`/api/notes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ properties: range }),
+    }).catch(() => null);
+    if (!response?.ok) toast.error("Could not change the date");
+    window.dispatchEvent(new Event("chibako:notes-changed"));
+  }
 
   function selectDate(date: string) {
     setSelected(date);
@@ -172,7 +192,7 @@ export function CalendarView({
           </div>
         </section>
         <section className="order-1 flex min-h-0 p-3 sm:p-6 lg:order-2 lg:overflow-y-auto">
-          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} onOpenNote={openTask} />}
+          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} onOpenNote={openTask} onReschedule={(id, range) => void reschedule(id, range)} />}
         </section>
       </div>
       {selected && (

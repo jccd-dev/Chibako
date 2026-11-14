@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { NoteSummary } from "@/lib/notes";
 import { getDefaultClassNames } from "react-day-picker";
-import { coversDate, dateToNoteDate, datedNotes, noteDateToDate, type DatedNote } from "@/features/calendar/note-dates";
+import { coversDate, dateToNoteDate, datedNotes, noteDateToDate, rescheduleRange, type DatedNote, type NoteDateRange } from "@/features/calendar/note-dates";
+import { useRangeDrag } from "@/features/calendar/use-range-drag";
 import { Calendar, CalendarDayButton } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -13,11 +14,10 @@ import { cn } from "@/lib/utils";
 const defaultClassNames = getDefaultClassNames();
 const MAX_SPAN_LANES = 3;
 
-/** Greedy lane per multi-day Note so a span keeps one row across the days it covers. */
+/** Greedy lane per dated Note so a span keeps one row across the days it covers. */
 function spanLanes(notes: DatedNote[]) {
   const lanes: string[] = [];
   return [...notes]
-    .filter((note) => note.endDate > note.date)
     .sort((a, b) => a.date.localeCompare(b.date) || b.endDate.localeCompare(a.endDate))
     .map((note) => {
       let lane = lanes.findIndex((end) => end < note.date);
@@ -27,7 +27,7 @@ function spanLanes(notes: DatedNote[]) {
     });
 }
 
-export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onOpenNote, compact = false }: {
+export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onOpenNote, onReschedule, compact = false }: {
   notes: NoteSummary[];
   selected: string;
   /** Inclusive end of the current Note's range, highlighted as a band. */
@@ -35,11 +35,20 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
   onSelect: (date: string) => void;
   /** Open a span pill in place; without it, pills link to the Note page. */
   onOpenNote?: (id: string) => void;
+  /** Enables dragging pills to move or resize their range. */
+  onReschedule?: (id: string, range: NoteDateRange) => void;
   compact?: boolean;
 }) {
   const selectedDate = noteDateToDate(selected);
   const [month, setMonth] = useState(selectedDate);
-  const dated = useMemo(() => datedNotes(notes), [notes]);
+  const { drag, start, isDragClick } = useRangeDrag((id, range) => onReschedule?.(id, range));
+  const dated = useMemo(() => {
+    const all = datedNotes(notes);
+    if (!drag) return all;
+    // The dragged pill previews its new range in place.
+    const next = rescheduleRange(drag.note, drag.mode, drag.from, drag.over);
+    return all.map((note) => note.id === drag.note.id ? { ...note, date: next.date, endDate: next.end_date ?? next.date } : note);
+  }, [notes, drag]);
   const spans = useMemo(() => compact ? [] : spanLanes(dated), [compact, dated]);
   const band = selectedEnd && selectedEnd > selected
     ? { from: selectedDate, to: noteDateToDate(selectedEnd) }
@@ -133,6 +142,7 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
                 day={day}
                 modifiers={modifiers}
                 {...props}
+                data-note-date={date}
                 // The cell stays unfilled when selected so pills remain readable.
                 className={cn(
                   props.className,
@@ -170,20 +180,42 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
                   const cells = Math.min(daysToEnd, daysLeftInWeek);
                   const isEnd = daysToEnd <= daysLeftInWeek;
                   const inset = (isStart ? 0.375 : 0) + (isEnd ? 0.375 : 0);
+                  // Drags always start from the saved range, not the in-flight preview.
+                  const original = drag?.note.id === note.id ? drag.note : note;
+                  const handle = (edge: "start" | "end") => onReschedule && (
+                    <span
+                      aria-hidden="true"
+                      data-testid={`calendar-pill-${edge}`}
+                      onPointerDown={(event) => start(event, original, edge)}
+                      className={cn("absolute inset-y-0 w-3 cursor-ew-resize", edge === "start" ? "left-0" : "right-0")}
+                    />
+                  );
                   return (
                     <Link
                       key={note.id}
                       href={`/app/note/${note.id}`}
-                      onClick={onOpenNote && ((event) => { event.preventDefault(); onOpenNote(note.id); })}
+                      draggable={false}
+                      onPointerDown={onReschedule && ((event) => start(event, original, "move"))}
+                      onClick={(event) => {
+                        if (isDragClick()) return event.preventDefault();
+                        if (onOpenNote) { event.preventDefault(); onOpenNote(note.id); }
+                      }}
                       title={note.title}
+                      data-testid="calendar-pill"
                       style={{ width: `calc(${cells * 100}% + ${cells - 1}px - ${inset}rem)` }}
                       className={cn(
-                        "pointer-events-auto h-4 shrink-0 truncate bg-primary/30 px-1.5 text-[11px] leading-4 font-medium text-foreground transition-colors hover:bg-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                        isStart && "ml-1.5 rounded-l-sm border-l-2 border-primary",
+                        "pointer-events-auto relative h-4 shrink-0 truncate bg-primary/30 px-1.5 text-[11px] leading-4 font-medium text-foreground transition-colors select-none [-webkit-touch-callout:none] hover:bg-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                        // No browser panning from a pill, so touch drags keep their pointer stream.
+                        onReschedule && "cursor-grab touch-none",
+                        drag?.note.id === note.id && "cursor-grabbing bg-primary/50 shadow-sm",
+                        // Rounded, inset ends mark where a range starts and stops; week continuations stay square and flush.
+                        isStart && "ml-1.5 rounded-l-sm",
                         isEnd && "rounded-r-sm",
                       )}
                     >
+                      {isStart && handle("start")}
                       {note.title}
+                      {isEnd && handle("end")}
                     </Link>
                   );
                 })}

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /** Picks an option from a Base UI Select in the task drawer (options render in a portal). */
 async function chooseTaskOption(page: Page, label: string, option: string): Promise<void> {
@@ -49,6 +49,33 @@ async function createDatedNote(page: Page, input: {
   return note;
 }
 
+/** Grid cell for a day; pills render inside the cell where their week segment starts. */
+const dayCell = (page: Page, day: string) => page.locator("td", { has: page.locator(`[data-note-date="${day}"]`) });
+
+async function center(locator: Locator): Promise<{ x: number; y: number }> {
+  // The grid remounts its cells on every render, so a found element can be replaced before it is measured.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const box = await locator.boundingBox();
+    if (box) return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await locator.page().waitForTimeout(100);
+  }
+  throw new Error("Element has no box");
+}
+
+async function mouseDrag(page: Page, from: Locator, to: Locator): Promise<void> {
+  const start = await center(from);
+  const end = await center(to);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
+}
+
+async function savedRange(page: Page, id: string) {
+  const { note } = await (await page.request.get(`/api/notes/${id}`)).json() as { note: { properties: Record<string, unknown> } };
+  return { date: note.properties.date, end_date: note.properties.end_date };
+}
+
 test("Calendar groups valid Note dates and lists the selected day", async ({ page }) => {
   await authenticate(page);
   const suffix = Date.now();
@@ -71,6 +98,8 @@ test("Calendar groups valid Note dates and lists the selected day", async ({ pag
   await expect(selectedNotes.nth(1)).toContainText("Work");
   await expect(page.getByRole("button", { name: new RegExp(`February 3, ${year}, 2 Notes`) })).toBeVisible();
   await expect(page.getByTestId("calendar-note-list").getByText(`Impossible ${suffix}`)).not.toBeVisible();
+  // A Note with only `date` still draws a pill in its grid cell.
+  await expect(dayCell(page, `${year}-02-04`).getByTestId("calendar-pill").filter({ hasText: `Other day ${suffix}` })).toBeVisible();
 
   await page.getByRole("button", { name: new RegExp(`February 4, ${year}, 1 Note`) }).click();
   await expect(page).toHaveURL(`/app/calendar?date=${year}-02-04`);
@@ -252,4 +281,69 @@ test("Calendar sidebar resets folder, task and chip filters", async ({ page }) =
   await expect(status.getByRole("button", { pressed: true })).toHaveCount(0);
   await expect(priority.getByRole("button", { pressed: true })).toHaveCount(0);
   await expect(page.getByTestId("calendar-note-list").getByText(`Reset ordinary ${suffix}`)).toBeVisible();
+});
+
+test("Calendar drags a pill to move it and drags its edges to resize the range", async ({ page }) => {
+  await authenticate(page);
+  const suffix = Date.now();
+  const year = 5000 + suffix % 1000;
+  const title = `Drag ${suffix}`;
+  const { id } = await createDatedNote(page, { title, date: `${year}-06-10` });
+  await page.goto(`/app/calendar?date=${year}-06-10`);
+  // Server-rendered pills appear before their drag handlers hydrate.
+  await page.waitForLoadState("networkidle");
+  const pills = page.getByTestId("calendar-pill").filter({ hasText: title });
+
+  await mouseDrag(page, pills.first(), page.locator(`[data-note-date="${year}-06-12"]`));
+  await expect.poll(() => savedRange(page, id)).toEqual({ date: `${year}-06-12`, end_date: undefined });
+  // The drop must not also open the Note drawer.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await mouseDrag(page, pills.getByTestId("calendar-pill-end"), page.locator(`[data-note-date="${year}-06-15"]`));
+  await expect.poll(() => savedRange(page, id)).toEqual({ date: `${year}-06-12`, end_date: `${year}-06-15` });
+
+  // Dragging the start past the end collapses to one day and removes end_date.
+  await mouseDrag(page, pills.getByTestId("calendar-pill-start"), page.locator(`[data-note-date="${year}-06-20"]`));
+  await expect.poll(() => savedRange(page, id)).toEqual({ date: `${year}-06-15`, end_date: undefined });
+
+  await page.reload();
+  await expect(dayCell(page, `${year}-06-15`).getByTestId("calendar-pill").filter({ hasText: title })).toBeVisible();
+  // A plain click still opens the Note.
+  await pills.first().click();
+  await expect(page.getByRole("dialog").getByLabel("Task title")).toHaveValue(title);
+});
+
+test.describe("on a touch tablet", () => {
+  test.use({ hasTouch: true, viewport: { width: 1024, height: 1366 } });
+
+  test("Calendar moves a pill after a long press and ignores a quick swipe", async ({ page }) => {
+    await authenticate(page);
+    const suffix = Date.now();
+    const year = 6000 + suffix % 1000;
+    const title = `Touch ${suffix}`;
+    const { id } = await createDatedNote(page, { title, date: `${year}-06-10` });
+    await page.goto(`/app/calendar?date=${year}-06-10`);
+    await page.waitForLoadState("networkidle");
+    const pill = page.getByTestId("calendar-pill").filter({ hasText: title }).first();
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: "touchStart" | "touchMove" | "touchEnd", point?: { x: number; y: number }) =>
+      cdp.send("Input.dispatchTouchEvent", { type, touchPoints: point ? [point] : [] });
+    const touchDrag = async (target: string, holdMs: number) => {
+      const start = await center(pill);
+      const end = await center(page.locator(`[data-note-date="${target}"]`));
+      await touch("touchStart", start);
+      await page.waitForTimeout(holdMs);
+      for (let step = 1; step <= 8; step++) {
+        await touch("touchMove", { x: start.x + (end.x - start.x) * step / 8, y: start.y + (end.y - start.y) * step / 8 });
+      }
+      await touch("touchEnd");
+    };
+
+    await touchDrag(`${year}-06-13`, 0);
+    await page.waitForTimeout(300);
+    expect(await savedRange(page, id)).toEqual({ date: `${year}-06-10`, end_date: undefined });
+
+    await touchDrag(`${year}-06-13`, 400);
+    await expect.poll(() => savedRange(page, id)).toEqual({ date: `${year}-06-13`, end_date: undefined });
+  });
 });

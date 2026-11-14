@@ -43,6 +43,37 @@ export function datedNotes(notes: NoteSummary[]): DatedNote[] {
   });
 }
 
+/** Which part of a calendar pill is dragged: the whole range or one edge. */
+export type DragMode = "move" | "start" | "end";
+
+/** Frontmatter values for a rescheduled range; `end_date: null` removes it for a single day. */
+export interface NoteDateRange {
+  date: string;
+  end_date: string | null;
+}
+
+function addDays(day: string, days: number): string {
+  const date = noteDateToDate(day);
+  date.setDate(date.getDate() + days);
+  return dateToNoteDate(date);
+}
+
+/** Range after dragging `mode` from day `from` to day `to`; an edge never passes the other edge. */
+export function rescheduleRange(note: { date: string; endDate: string }, mode: DragMode, from: string, to: string): NoteDateRange {
+  let { date, endDate } = note;
+  if (mode === "move") {
+    // Rounding absorbs DST hours between local midnights.
+    const days = Math.round((noteDateToDate(to).getTime() - noteDateToDate(from).getTime()) / 86_400_000);
+    date = addDays(date, days);
+    endDate = addDays(endDate, days);
+  } else if (mode === "start") {
+    date = to < endDate ? to : endDate;
+  } else {
+    endDate = to > date ? to : date;
+  }
+  return { date, end_date: endDate > date ? endDate : null };
+}
+
 export function coversDate(note: DatedNote, day: string): boolean {
   return note.date <= day && day <= note.endDate;
 }
