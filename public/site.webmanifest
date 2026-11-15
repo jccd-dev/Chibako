@@ -1,6 +1,10 @@
 {
   "name": "Chibako",
   "short_name": "Chibako",
+  "description": "Your self-hosted notes, calendar, and finance workspace.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
   "icons": [
     {
       "src": "/favicon_io/android-chrome-192x192.png",
@@ -13,7 +17,7 @@
       "type": "image/png"
     }
   ],
-  "theme_color": "#ffffff",
-  "background_color": "#ffffff",
+  "theme_color": "#19191a",
+  "background_color": "#19191a",
   "display": "standalone"
 }

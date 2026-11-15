@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Source_Sans_3, Figtree } from "next/font/google";
 import { AppearanceProvider } from "@/components/providers/AppearanceProvider";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { ChibakoToaster } from "@/components/providers/ChibakoToaster";
+import { AppInstallProvider } from "@/features/pwa/components/AppInstallProvider";
 import { APPEARANCE_INIT_SCRIPT } from "@/lib/appearance";
 import { cn } from "@/lib/utils";
 import "./globals.css";
@@ -63,6 +64,11 @@ export const metadata: Metadata = {
     apple: "/favicon_io/apple-touch-icon.png",
   },
   manifest: "/site.webmanifest",
+  appleWebApp: { capable: true, title: "Chibako", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#19191a",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -83,7 +89,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head><AppearanceInitScript /></head>
       <body>
         <ThemeProvider>
-          <AppearanceProvider>{children}<ChibakoToaster /></AppearanceProvider>
+          <AppearanceProvider>
+            <AppInstallProvider>{children}</AppInstallProvider>
+            <ChibakoToaster />
+          </AppearanceProvider>
         </ThemeProvider>
       </body>
     </html>
