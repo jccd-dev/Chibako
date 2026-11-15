@@ -17,6 +17,7 @@ import { previewCents } from "@/features/finance/money";
 import { financeBalanceShortfall } from "@/features/finance/balance-gate";
 import { FinanceTransactionRow } from "./FinanceTransactionRow";
 import { decimalPHPInput, financeDrawerFooter, formatHistoryDate, formatPHP } from "@/features/finance/presentation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 const logCopy = {
   debt: { amount: "Payment amount", date: "Payment date", account: "Pay from", submit: "Save payment", remaining: "Remaining debt" },
@@ -86,7 +87,7 @@ export function FinanceObligationLog({ o, activity }: { o: FinanceObligationsCon
       </FieldGroup>
       {o.saveError && <Alert><AlertDescription>{o.saveError} Your entries are kept. Retry safely, or close and reopen to refresh a stale version.</AlertDescription></Alert>}
       {o.errors.form && <Alert><AlertDescription>{o.errors.form}</AlertDescription></Alert>}
-      <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back</Button><Button type="submit" disabled={disabled || !!o.paymentShortfall}>{o.busy ? "Saving…" : o.pSource === "existing" ? "Review link" : text.submit}</Button></div>
+      <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back</Button><Button loading={o.busy} type="submit" disabled={disabled || !!o.paymentShortfall}>{o.busy ? "Saving…" : o.pSource === "existing" ? "Review link" : text.submit}</Button></div>
     </form>
     <ConfirmDialog open={o.paymentReview !== null} onOpenChange={open => { if (!open) o.setPaymentReview(null); }}
       title="Link this existing activity?"
@@ -98,7 +99,7 @@ export function FinanceObligationLog({ o, activity }: { o: FinanceObligationsCon
 
 function PaymentCandidates({ o }: { o: FinanceObligationsController }) {
   return <div className="flex flex-col gap-3">
-    {o.pError ? <Alert><AlertDescription>{o.pError}<Button type="button" variant="outline" onClick={() => void o.loadCandidates(o.pOffset)}>Retry matching history</Button></AlertDescription></Alert> : o.pLoading ? <p role="status" className="text-sm text-muted-foreground">Loading matching history…</p> : o.pCandidates.length ? <>
+    {o.pError ? <Alert><AlertDescription>{o.pError}<Button type="button" variant="outline" onClick={() => void o.loadCandidates(o.pOffset)}>Retry matching history</Button></AlertDescription></Alert> : o.pLoading ? <LoadingStatus className="text-sm text-muted-foreground">Loading matching history…</LoadingStatus> : o.pCandidates.length ? <>
       <p className="text-sm text-muted-foreground">{o.pTotal} eligible record{o.pTotal === 1 ? "" : "s"}. Selecting fills account, date and amount exactly as recorded.</p>
       <ul className="flex flex-col gap-1.5">{o.pCandidates.map(row => <li key={row.id}><FinanceTransactionRow row={row} title={row.category_name ?? (row.type === "expense" ? "Expense" : "Income")} context={formatHistoryDate(row.transaction_date)} ariaLabel={`Select ${row.type === "expense" ? "expense" : "income"} ${formatPHP(row.amount_cents)} on ${formatHistoryDate(row.transaction_date)}`} onClick={() => o.selectCandidate(row)} /></li>)}</ul>
       {o.pTotal > 25 && <nav aria-label="Matching history pages" className="flex flex-wrap items-center gap-3"><Button type="button" variant="outline" disabled={o.pOffset === 0 || o.pLoading} onClick={() => void o.loadCandidates(Math.max(0, o.pOffset - 25))}>Previous records</Button><span className="text-sm">{o.pOffset + 1}-{Math.min(o.pOffset + 25, o.pTotal)} of {o.pTotal}</span><Button type="button" variant="outline" disabled={o.pOffset + 25 >= o.pTotal || o.pLoading} onClick={() => void o.loadCandidates(o.pOffset + 25)}>Next records</Button></nav>}
@@ -136,7 +137,7 @@ export function FinanceObligationAddMore({ o, activity }: { o: FinanceObligation
       </FieldGroup>
       {o.saveError && <Alert><AlertDescription>{o.saveError} Your entries are kept. Retry safely, or close and reopen to refresh a stale version.</AlertDescription></Alert>}
       {o.errors.form && <Alert><AlertDescription>{o.errors.form}</AlertDescription></Alert>}
-      <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back</Button><Button type="submit" disabled={disabled || !!shortfall}>{o.busy ? "Saving…" : debt ? "Save borrowing" : "Save lending"}</Button></div>
+      <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={disabled} onClick={() => o.setPanel("definition")}>Back</Button><Button loading={o.busy} type="submit" disabled={disabled || !!shortfall}>{o.busy ? "Saving…" : debt ? "Save borrowing" : "Save lending"}</Button></div>
     </form>
   </div>;
 }

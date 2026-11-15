@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import { useUpdates } from "../use-updates";
 import { UPDATE_PHASE_LABEL, UPDATE_RESTART_NOTICE, UPDATES_RECOVERY_DOCS_URL, UPDATES_RECOVERY_NOTICE, UpdateStatusDialog, updateNotesSummary } from "./UpdateNotice";
 
@@ -21,7 +22,7 @@ export function UpdatesPanel() {
     checkForUpdates, checking, checkMessage, checkError,
   } = useUpdates();
   const [open, setOpen] = useState(false);
-  if (!view) return <p className="pt-3 text-sm text-muted-foreground">Checking…</p>;
+  if (!view) return <LoadingStatus className="pt-3">Checking for updates…</LoadingStatus>;
 
   const phase = view.operation?.phase;
   const needsAttention = phase === "needs_attention";
@@ -45,7 +46,7 @@ export function UpdatesPanel() {
       <p className="text-muted-foreground">{view.message ?? STATE_TEXT[view.state]}</p>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" onClick={() => void checkForUpdates()} disabled={!canCheck}>
+        <Button variant="outline" onClick={() => void checkForUpdates()} disabled={!canCheck} loading={checking}>
           {checking ? "Checking…" : "Check for updates"}
         </Button>
         {checking && <span role="status" className="text-xs text-muted-foreground">Asking the updater for the latest release…</span>}
@@ -64,9 +65,9 @@ export function UpdatesPanel() {
       )}
 
       {busy && (
-        <p role="status" className="text-muted-foreground">
+        <LoadingStatus state={reconnecting ? "waiting" : "working"}>
           {reconnecting ? "Restarting Chibako…" : `Update in progress — ${phaseLabel ?? "starting"}…`}
-        </p>
+        </LoadingStatus>
       )}
 
       {needsAttention && (

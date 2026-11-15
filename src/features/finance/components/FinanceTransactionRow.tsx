@@ -7,7 +7,7 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "cn";
 import type { FinanceTransaction } from "../activity-types";
-import { formatHistoryDate, formatPHP, localCalendarDate } from "../presentation";
+import { flowTile as tile, flowTone as tone, formatHistoryDate, formatPHP, localCalendarDate } from "../presentation";
 import { directionOf, groupByDay, relativeDayLabel } from "../transaction-days";
 
 const icons = {
@@ -15,8 +15,6 @@ const icons = {
   reconciliation: IconScale, valuation: IconChartLine, borrowing: IconArrowBarDown, lending: IconArrowBarUp,
 };
 
-const tone = { in: "text-success", out: "text-destructive", neutral: "text-muted-foreground" };
-const tile = { in: "bg-success/15 text-success", out: "bg-destructive/15 text-destructive", neutral: "bg-muted text-muted-foreground" };
 
 /** One transaction as a card; the whole card is the inspect/select button. */
 export function FinanceTransactionRow({ row, title, context, note, compact, ariaLabel, onClick }: {

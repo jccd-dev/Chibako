@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
 import { folderQualifier, parseSearchQuery } from "@/features/notes/search-query";
 import { useNoteSearch } from "@/features/notes/use-note-search";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import { IconBot, IconFile, IconFolder, IconGear, IconGraph, IconHome, IconPlus } from "@/components/icons";
 
 const OPEN_EVENT = "chibako:open-palette";
@@ -44,7 +45,7 @@ export function CommandPalette() {
   const [idx, setIdx] = useState(0);
   const [folders, setFolders] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { results: notes, busy } = useNoteSearch(open ? q : "");
+  const { results: notes, busy, error } = useNoteSearch(open ? q : "");
   const parsed = useMemo(() => parseSearchQuery(q), [q]);
 
   const [shownNotes, setShownNotes] = useState(notes);
@@ -230,7 +231,7 @@ export function CommandPalette() {
     );
   }
 
-  const noMatches = searching && !busy && !notes.length && !suggestions.length && parsed.text;
+  const noMatches = searching && !busy && !error && !notes.length && !suggestions.length && parsed.text;
   return (
     <Dialog open={open} onOpenChange={value => value ? setOpen(true) : close()}>
       <DialogContent showCloseButton={false} className="sm:max-w-lg">
@@ -248,6 +249,8 @@ export function CommandPalette() {
           aria-autocomplete="list"
           aria-label="Command palette"
         />
+        {busy && <LoadingStatus state="searching" className="px-3 text-xs">Searching notes…</LoadingStatus>}
+        {error && <p role="alert" className="px-3 text-sm text-destructive">{error}</p>}
         <div className="max-h-96 overflow-y-auto p-1.5" role="listbox" id="command-results" aria-busy={busy}>
           {!searching && (
             <p className="px-3 pb-2 pt-1 text-xs text-muted-foreground">

@@ -22,7 +22,7 @@ export function GraphPatternSwitch({ value, onChange }: { value: GraphPattern; o
             // Roving tabindex: arrow keys move between options like native radios.
             tabIndex={active ? 0 : -1}
             className={cn(
-              "px-2.5 py-1.5 font-medium transition",
+              "flex-1 px-2.5 py-2.5 font-medium transition sm:py-1.5",
               active ? "bg-primary/12 text-primary" : "text-muted-foreground hover:text-foreground"
             )}
             onClick={() => onChange(option.value)}

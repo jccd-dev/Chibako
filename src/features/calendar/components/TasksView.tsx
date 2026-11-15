@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import type { NoteSummary } from "@/lib/notes";
 import { isNoteDate, noteDateToDate } from "@/features/calendar/note-dates";
 import { folderChoices } from "@/features/calendar/task-folder";
@@ -49,6 +51,7 @@ export function TasksView({ initialNotes, vaultFolders, statusOptions, priorityO
   requestedChoices: { status: string[]; priority: string[] };
 }) {
   const router = useRouter();
+  const [pendingRequests, setPendingRequests] = useState(0);
   const [notes, setNotes] = useState(initialNotes);
   const [folder, setFolder] = useState(requestedFolder);
   const [choices, setChoices] = useState(requestedChoices);
@@ -61,10 +64,17 @@ export function TasksView({ initialNotes, vaultFolders, statusOptions, priorityO
   const count = groups.reduce((sum, group) => sum + group.notes.length, 0);
 
   const refresh = useCallback(async () => {
-    const response = await fetch("/api/notes");
-    if (!response.ok) return;
-    const data = await response.json() as { notes?: NoteSummary[] };
-    if (data.notes) setNotes(data.notes);
+    setPendingRequests((count) => count + 1);
+    try {
+      const response = await fetch("/api/notes");
+      if (!response.ok) throw new Error("Refresh failed");
+      const data = await response.json() as { notes?: NoteSummary[] };
+      if (data.notes) setNotes(data.notes);
+    } catch {
+      toast.error("Could not refresh tasks. Try again.");
+    } finally {
+      setPendingRequests((count) => count - 1);
+    }
   }, []);
 
   useEffect(() => {
@@ -92,7 +102,10 @@ export function TasksView({ initialNotes, vaultFolders, statusOptions, priorityO
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
+            {pendingRequests > 0 && <LoadingStatus state="background" size={16} className="text-xs"><span className="sr-only">Updating tasks…</span></LoadingStatus>}
+          </div>
           <p className="text-xs text-muted-foreground">{count} task{count === 1 ? "" : "s"}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

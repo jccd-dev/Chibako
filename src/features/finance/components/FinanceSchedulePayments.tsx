@@ -8,6 +8,7 @@ import { useFinanceSchedulePayments } from "../use-finance-schedule-payments";
 import { formatPHP, localCalendarDate } from "../presentation";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 function humanDate(iso: string | null | undefined) {
   return iso ? format(new Date(`${iso}T12:00:00`), "MMMM d, yyyy") : "";
@@ -23,7 +24,7 @@ export function FinanceSchedulePayments({ scheduleId, paused, nextDueDate, pendi
   return <section aria-label="Plan payments" className="flex flex-col gap-2">
     {planning.notice && <p role="status" className="text-sm">{planning.notice}</p>}
     {selected && renderPayment(selected, () => { setSelectedId(null); retry(); }, () => { planning.resetSave(); retry(); })}
-    {error ? <Alert><AlertDescription>{error}<Button variant="outline" onClick={retry}>Retry payments</Button></AlertDescription></Alert> : loading ? <p role="status" className="text-sm">Loading payments…</p> : page?.plans.length ? <>
+    {error ? <Alert><AlertDescription>{error}<Button variant="outline" onClick={retry}>Retry payments</Button></AlertDescription></Alert> : loading ? <LoadingStatus className="text-sm">Loading payments…</LoadingStatus> : page?.plans.length ? <>
       <h3 className="text-sm font-medium text-muted-foreground">Payments, newest to oldest</h3>
       <ul className="flex flex-col divide-y divide-border">{page.plans.map(plan => <FinanceSchedulePaymentRow key={plan.id} plan={plan} today={today} busy={planning.busy} onReview={id => { planning.resetSave(); setSelectedId(id); }} />)}</ul>
     </>

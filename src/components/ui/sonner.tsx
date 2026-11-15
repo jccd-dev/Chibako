@@ -3,7 +3,8 @@
 import { useHydrated } from "@/lib/use-hydrated"
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon, IconLoader } from "@tabler/icons-react"
+import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon } from "@tabler/icons-react"
+import { ActivityOrb } from "@/components/LoadingStatus"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   // next-themes resolves the stored theme during the first client render, which
@@ -31,7 +32,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <IconAlertOctagon className="size-4" />
         ),
         loading: (
-          <IconLoader className="size-4 animate-spin" />
+          <ActivityOrb size={16} />
         ),
       }}
       style={

@@ -19,6 +19,7 @@ import type { FinanceAttentionItem } from "@/features/finance/overview-types";
 import { MAX_FINANCE_ATTENTION_OFFSET } from "@/features/finance/overview-types";
 import type { FinanceAttentionController } from "@/features/finance/use-finance-attention";
 import { formatPHP } from "@/features/finance/presentation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 interface FinanceAttentionQueueProps {
   attention: FinanceAttentionController;
@@ -79,9 +80,9 @@ export function FinanceAttentionQueue({ attention, onReview }: FinanceAttentionQ
           </AlertDescription>
         </Alert>
       ) : attention.loading && !attention.page ? (
-        <p role="status" className="py-5 text-sm text-muted-foreground">
+        <LoadingStatus className="py-5 text-sm text-muted-foreground">
           Loading attention queue…
-        </p>
+        </LoadingStatus>
       ) : !page?.items.length ? (
         <Empty className="border border-border bg-card px-4 py-6">
           <EmptyHeader>

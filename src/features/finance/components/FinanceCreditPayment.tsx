@@ -97,7 +97,7 @@ function PaymentForm({ card, cycle, olderUnpaidCents, includedThroughDate, cash,
     {form.error && <Alert><AlertDescription>{form.error} Your entries are kept.</AlertDescription></Alert>}
     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
       <Button type="button" variant="outline" onClick={onCancel} disabled={form.busy}>Cancel</Button>
-      <Button type="submit" disabled={form.busy}>{form.busy ? "Recording…" : "Record payment"}</Button>
+      <Button loading={form.busy} type="submit" disabled={form.busy}>{form.busy ? "Recording…" : "Record payment"}</Button>
     </div>
   </form>;
 }

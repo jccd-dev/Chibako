@@ -14,6 +14,7 @@ import { CounterpartyChips } from "./FinanceObligationCreate";
 import type { FinanceObligationsController } from "@/features/finance/use-finance-obligations";
 import type { FinanceObligation, FinanceObligationHistoryEntry } from "@/features/finance/obligation-types";
 import { financeDrawerFooter, formatHistoryDate, formatPHP } from "@/features/finance/presentation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 export const obligationStatus = (status: FinanceObligation["status"]) => ({ open: "Open", paid: "Paid in full", written_off: "Written off", settled: "Settled" })[status];
 const counterpartyLabel = { person: "Person", entity: "Entity", organization: "Organization" } as const;
@@ -31,7 +32,7 @@ export function FinanceObligationDetail({ o, onInspectActivity }: { o: FinanceOb
     await o.save();
   }
   return <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
-    {o.inspecting && <p role="status">Loading obligation…</p>}
+    {o.inspecting && <LoadingStatus>Loading obligation…</LoadingStatus>}
     {o.inspectError && <Alert><AlertDescription>{o.inspectError}<Button variant="outline" onClick={() => { if (editing) void o.openEdit(editing); }}>Retry obligation inspection</Button></AlertDescription></Alert>}
     {editing && <>
       <section aria-label="Progress" className="flex flex-col gap-3">
@@ -75,7 +76,7 @@ export function FinanceObligationDetail({ o, onInspectActivity }: { o: FinanceOb
             <Field data-invalid={!!o.errors.notes}><FieldLabel htmlFor="obligation-notes">Notes (optional)</FieldLabel><Textarea id="obligation-notes" maxLength={2000} value={o.notes} disabled={disabled} onChange={e => o.setNotes(e.target.value)} {...invalid("notes")} /><FieldError id="obligation-error-notes">{o.errors.notes}</FieldError></Field>
           </FieldGroup>
           {o.errors.form && <Alert><AlertDescription>{o.errors.form}</AlertDescription></Alert>}
-          <div className="flex justify-end"><Button type="submit" disabled={disabled}>{o.busy ? "Saving…" : "Save changes"}</Button></div>
+          <div className="flex justify-end"><Button loading={o.busy} type="submit" disabled={disabled}>{o.busy ? "Saving…" : "Save changes"}</Button></div>
         </form>
       </details>
       <ConfirmDialog open={confirmDelete} onOpenChange={setConfirmDelete} destructive
@@ -93,7 +94,7 @@ function ObligationHistory({ o }: { o: FinanceObligationsController }) {
   return <section aria-label="Money movement history" className="border-t border-border pt-5">
     <h3 className="font-semibold">Money movements</h3>
     <p className="mt-1 text-sm text-muted-foreground">Newest first. Borrowing, lending and principal payments stay outside income and spending reports.</p>
-    {o.historyError ? <Alert className="mt-4"><AlertDescription>{o.historyError}<Button variant="outline" onClick={() => o.changeHistoryOffset(o.historyOffset)}>Retry history</Button></AlertDescription></Alert> : o.historyLoading && !o.history ? <p role="status" className="py-4 text-sm text-muted-foreground">Loading history…</p> : o.history?.entries.length ? <>
+    {o.historyError ? <Alert className="mt-4"><AlertDescription>{o.historyError}<Button variant="outline" onClick={() => o.changeHistoryOffset(o.historyOffset)}>Retry history</Button></AlertDescription></Alert> : o.historyLoading && !o.history ? <LoadingStatus className="py-4 text-sm text-muted-foreground">Loading history…</LoadingStatus> : o.history?.entries.length ? <>
       <ul className="divide-y divide-border">{o.history.entries.map(entry => <li key={entry.id}>
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 py-2.5">
           <p className="min-w-0 truncate text-sm font-medium">{entryLabel(entry)}</p>

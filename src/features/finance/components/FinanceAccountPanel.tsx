@@ -458,7 +458,7 @@ export function FinanceAccountPanel({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={busy || !editor.name.trim()}>
+              <Button loading={busy} type="submit" disabled={busy || !editor.name.trim()}>
                 {busy ? "Saving…" : account ? "Save changes" : "Create account"}
               </Button>
             </div>

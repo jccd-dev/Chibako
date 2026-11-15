@@ -22,7 +22,7 @@ test("owed-to-me and debt create flows record with or without a tracked account"
   const created = await page.request.post("/api/finance/accounts", { data: { request_id: randomUUID(), name: "TEST OBL cash", kind: "money", currency: "PHP", opening_balance: "100" } });
   expect(created.ok()).toBe(true);
   const { account } = await created.json();
-  await page.getByRole("link", { name: "Finance", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Finance", exact: true }).click();
   await page.getByRole("link", { name: "Planning", exact: true }).click();
   const dialog = page.getByRole("dialog");
 
@@ -67,7 +67,7 @@ test("logging a collection, quick amounts, history and safe delete", async ({ pa
   const { account } = await accountResponse.json();
   const created = await page.request.post("/api/finance/obligations", { data: { request_id: randomUUID(), kind: "receivable", name: "TEST LOG Louie", principal: "1500" } });
   const { obligation } = await created.json();
-  await page.getByRole("link", { name: "Finance", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Finance", exact: true }).click();
   await page.getByRole("link", { name: "Planning", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await page.getByRole("button", { name: "Inspect obligation TEST LOG Louie", exact: true }).click();

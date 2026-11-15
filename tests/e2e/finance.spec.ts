@@ -135,7 +135,7 @@ test("goal withdrawals validate available money and show progress", async ({ pag
     ...movement, request_id: randomUUID(), version: funded.version, direction: "withdrawal", amount: "25.01",
   } });
   expect(rejected.status()).toBe(409);
-  await page.getByRole("link", { name: "Finance", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Finance", exact: true }).click();
   await page.getByRole("link", { name: "Planning", exact: true }).click();
   const row = page.getByRole("button", { name: new RegExp(`^Edit goal ${goal.name}:`) });
   await expect(row).toContainText("25%");
@@ -172,8 +172,17 @@ for (const device of ["desktop", "mobile"]) test(device + " finance account work
   if (device === "mobile") {
     await page.getByRole("button", { name: "More workspace actions" }).click();
     await page.getByRole("menuitem", { name: "Finance", exact: true }).click();
-  } else await page.getByRole("link", { name: "Finance", exact: true }).click();
+  } else await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Finance", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Finance", exact: true })).toBeVisible();
+  // Phones get a floating bottom bar; desktop keeps Add transaction in the sidebar.
+  const bar = page.getByRole("navigation", { name: "Finance shortcuts" });
+  if (device === "mobile") {
+    await bar.getByRole("link", { name: "History", exact: true }).click();
+    await expect(bar.getByRole("link", { name: "History", exact: true })).toHaveAttribute("aria-current", "page");
+    // The Next dev indicator covers the bottom-left corner in dev builds, so activate by keyboard.
+    await bar.getByRole("link", { name: "Overview", exact: true }).press("Enter");
+    await expect(page).toHaveURL(/tab=overview/);
+  } else await expect(bar).toBeHidden();
   const before = await (await page.request.get("/api/finance/summary")).json();
   // The vault is shared across runs, so suffix names to keep "View <name>" unique.
   const run = randomUUID().slice(0, 8);
@@ -253,7 +262,7 @@ for (const device of ["desktop", "mobile"]) test(device + " planned activity pos
   if (device === "mobile") {
     await page.getByRole("button", { name: "More workspace actions" }).click();
     await page.getByRole("menuitem", { name: "Finance", exact: true }).click();
-  } else await page.getByRole("link", { name: "Finance", exact: true }).click();
+  } else await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Finance", exact: true }).click();
   await openFinanceTab(page, "accounts");
   const run = randomUUID().slice(0, 8);
   const cash = `${device} planned cash ${run}`, planText = `${device} expected expense ${run}`;

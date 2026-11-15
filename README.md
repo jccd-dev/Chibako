@@ -19,6 +19,8 @@ agent can read and write your vault without blowing token budgets.
 
 **[How agent memory works](docs/AGENT-MEMORY.md)** · architecture, retrieval flow, token-efficiency evidence, and tradeoffs
 
+**[Install as an app](docs/PWA.md)** · Android, iPhone/iPad, and desktop installation (online only)
+
 </div>
 
 ---

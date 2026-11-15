@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import { useHydrated } from "@/lib/use-hydrated";
 import { toast } from "sonner";
 import type { NoteProperties } from "@/lib/markdown";
@@ -46,6 +47,7 @@ export function CalendarView({
   requestedChoices: { status: string[]; priority: string[] };
 }) {
   const router = useRouter();
+  const [pendingRequests, setPendingRequests] = useState(0);
   const [allNotes, setNotes] = useState(initialNotes);
   const [folder, setFolder] = useState(requestedFolder);
   const [tasksOnly, setTasksOnly] = useState(requestedTasksOnly);
@@ -67,10 +69,17 @@ export function CalendarView({
     [notes, selected]
   );
   const refresh = useCallback(async () => {
-    const response = await fetch("/api/calendar");
-    if (!response.ok) return;
-    const data = await response.json() as { notes?: DatedNote[] };
-    if (data.notes) setNotes(data.notes);
+    setPendingRequests((count) => count + 1);
+    try {
+      const response = await fetch("/api/calendar");
+      if (!response.ok) throw new Error("Refresh failed");
+      const data = await response.json() as { notes?: DatedNote[] };
+      if (data.notes) setNotes(data.notes);
+    } catch {
+      toast.error("Could not refresh calendar. Try again.");
+    } finally {
+      setPendingRequests((count) => count - 1);
+    }
   }, []);
 
   useEffect(() => {
@@ -88,21 +97,42 @@ export function CalendarView({
   }, [refresh]);
 
   async function reschedule(id: string, range: NoteDateRange) {
-    // Show the drop at once; the server copy replaces it on refresh.
-    setNotes((current) => current.map((note) => {
-      if (note.id !== id) return note;
-      const properties: NoteProperties = { ...note.properties, date: range.date };
-      if (range.end_date) properties.end_date = range.end_date;
-      else delete properties.end_date;
-      return { ...note, date: range.date, endDate: range.end_date ?? range.date, properties };
-    }));
-    const response = await fetch(`/api/notes/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ properties: range }),
-    }).catch(() => null);
-    if (!response?.ok) toast.error("Could not change the date");
-    window.dispatchEvent(new Event("chibako:notes-changed"));
+    setPendingRequests((count) => count + 1);
+    try {
+      // Show the drop at once; the server copy replaces it on refresh.
+      setNotes((current) => current.map((note) => {
+        if (note.id !== id) return note;
+        const properties: NoteProperties = { ...note.properties, date: range.date };
+        if (range.end_date) properties.end_date = range.end_date;
+        else delete properties.end_date;
+        return { ...note, date: range.date, endDate: range.end_date ?? range.date, properties };
+      }));
+      const response = await fetch(`/api/notes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: range }),
+      }).catch(() => null);
+      if (!response?.ok) toast.error("Could not change the date");
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+    } finally {
+      setPendingRequests((count) => count - 1);
+    }
+  }
+
+  async function duplicate(id: string, range: NoteDateRange) {
+    setPendingRequests((count) => count + 1);
+    try {
+      const response = await fetch(`/api/notes/${id}/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ properties: range }),
+      }).catch(() => null);
+      if (!response?.ok) return void toast.error("Could not duplicate the Note");
+      toast.success("Note duplicated");
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+    } finally {
+      setPendingRequests((count) => count - 1);
+    }
   }
 
   function selectDate(date: string) {
@@ -137,8 +167,11 @@ export function CalendarView({
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">Calendar</h1>
-          <p className="text-xs text-muted-foreground">Browse Notes by Note date or date range (date to end_date).</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight">Calendar</h1>
+            {pendingRequests > 0 && <LoadingStatus state="background" size={16} className="text-xs"><span className="sr-only">Updating calendar…</span></LoadingStatus>}
+          </div>
+          <p className="text-xs text-muted-foreground">Browse Notes by Note date or date range (date to end_date). Hold Option or Alt while dragging to duplicate.</p>
         </div>
         <div className="flex items-center gap-2">
           <Toggle variant="outline" pressed={tasksOnly} onPressedChange={selectTasksOnly}>Tasks only</Toggle>
@@ -153,7 +186,7 @@ export function CalendarView({
         <section className="order-2 flex min-h-0 flex-col border-border lg:order-1 lg:border-r">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             <div>
-              <h2 className="text-sm font-semibold">{heading}</h2>
+              <h2 className="text-sm font-semibold">{selected ? heading : <LoadingStatus>Loading today…</LoadingStatus>}</h2>
               <p className="text-xs text-muted-foreground">{selectedNotes.length} Note{selectedNotes.length === 1 ? "" : "s"}</p>
             </div>
             <Button size="icon" disabled={!selected} onClick={() => openTask(null)} aria-label="Add note or task" title="Add note or task">
@@ -192,7 +225,7 @@ export function CalendarView({
           </div>
         </section>
         <section className="order-1 flex min-h-0 p-3 sm:p-6 lg:order-2 lg:overflow-y-auto">
-          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} onOpenNote={openTask} onReschedule={(id, range) => void reschedule(id, range)} />}
+          {selected && <DatedNotesCalendar notes={notes} selected={selected} onSelect={selectDate} onOpenNote={openTask} onReschedule={(id, range) => void reschedule(id, range)} onDuplicate={(id, range) => void duplicate(id, range)} />}
         </section>
       </div>
       {selected && (

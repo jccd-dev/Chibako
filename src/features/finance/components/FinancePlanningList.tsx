@@ -1,10 +1,11 @@
 "use client";
 
 import { format } from "date-fns";
-import { IconArrowDownLeft, IconArrowUpRight, IconRepeat } from "@tabler/icons-react";
+import { IconArrowDownLeft, IconArrowUpRight } from "@tabler/icons-react";
+import { cn } from "cn";
 import type { PlanningItem } from "../planning-list-types";
 import type { FinancePlanningListController } from "../use-finance-planning-list";
-import { formatPHP } from "../presentation";
+import { flowTile, flowTone, formatPHP } from "../presentation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +19,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 function cadence(item: PlanningItem) {
   if (item.kind === "one-time") return "One-time";
@@ -34,10 +36,10 @@ function statusBadge(item: PlanningItem): "destructive" | "secondary" | null {
   if (item.status === "due-today") return "secondary";
   return null;
 }
-function Icon(item: PlanningItem) {
-  if (item.kind === "schedule") return IconRepeat;
-  return item.type === "income" ? IconArrowDownLeft : IconArrowUpRight;
-}
+const groups = [
+  { type: "income", label: "Income", name: "Income plans", direction: "in", sign: "+", Icon: IconArrowDownLeft },
+  { type: "expense", label: "Expenses", name: "Expense plans", direction: "out", sign: "−", Icon: IconArrowUpRight },
+] as const;
 
 export function FinancePlanningList({ list, onAdd, onOpen, busy }: { list: FinancePlanningListController; onAdd: () => void; onOpen: (item: PlanningItem) => void; busy: boolean }) {
   const { page, error, loading, filter, offset, setOffset, changeFilter, refresh } = list;
@@ -53,16 +55,25 @@ export function FinancePlanningList({ list, onAdd, onOpen, busy }: { list: Finan
       <CardContent className="flex flex-col gap-3">
         <ToggleGroup aria-label="Filter plans" variant="outline" value={[filter]} onValueChange={values => { if (values[0]) changeFilter(values[0]); }} className="w-full flex-wrap justify-start">
           <ToggleGroupItem value="all">All</ToggleGroupItem>
+          <ToggleGroupItem value="income">Income</ToggleGroupItem>
+          <ToggleGroupItem value="expense">Expenses</ToggleGroupItem>
           <ToggleGroupItem value="attention">Needs attention</ToggleGroupItem>
-          <ToggleGroupItem value="upcoming">Upcoming</ToggleGroupItem>
           <ToggleGroupItem value="paused">Paused</ToggleGroupItem>
         </ToggleGroup>
         {error ? <Alert><AlertDescription>{error}<Button variant="outline" onClick={refresh}>Retry plans</Button></AlertDescription></Alert>
-          : loading ? <p role="status" className="py-3 text-sm text-muted-foreground">Loading plans…</p>
-            : page?.items.length ? <ul className="flex flex-col divide-y divide-border/60">{page.items.map(item => {
+          : loading ? <LoadingStatus className="py-3 text-sm text-muted-foreground">Loading plans…</LoadingStatus>
+            : page?.items.length ? <div className="flex flex-col gap-4">{groups.map(({ type, label, name, direction, sign, Icon }) => {
+              const items = page.items.filter(item => item.type === type);
+              if (!items.length) return null;
+              return <section key={type} aria-label={name}>
+                <h3 className="flex items-center gap-2 px-1 pb-1 text-xs font-medium text-muted-foreground">
+                  <span aria-hidden="true" className={cn("size-1.5 rounded-full", direction === "in" ? "bg-success" : "bg-destructive")} />
+                  {label}<span className="tabular-nums">· {items.length}</span>
+                </h3>
+                <ul className="flex flex-col divide-y divide-border/60">{items.map(item => {
               const badgeVariant = statusBadge(item);
-              const badge = statusLabel(item);
-              const RowIcon = Icon(item);
+              // Next due already says when; only non-routine states earn a label.
+              const badge = item.status === "upcoming" && !item.automatic_error ? null : statusLabel(item);
               return <li key={`${item.kind}:${item.id}`} className="py-0.5">
                 <button
                   className="flex w-full items-start gap-3 rounded-sm px-1 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
@@ -70,24 +81,26 @@ export function FinancePlanningList({ list, onAdd, onOpen, busy }: { list: Finan
                   disabled={busy}
                   aria-label={`Open ${item.title}`}
                 >
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                    <RowIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                  <span aria-hidden="true" className={cn("flex size-8 shrink-0 items-center justify-center rounded-md", flowTile[direction])}>
+                    <Icon className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block break-words text-xs font-medium">{item.title}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">{item.type === "income" ? "Income" : "Expense"} · {cadence(item)} · {item.handling === "automatic" ? "Automatic" : "Manual"} · {item.account_name}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{cadence(item)} · {item.handling === "automatic" ? "Automatic" : "Manual"} · {item.account_name}</span>
                     {item.next_due_date && <span className="mt-0.5 block text-xs tabular-nums">Next due {format(new Date(`${item.next_due_date}T12:00:00`), "MMMM d, yyyy")}</span>}
                     {item.paused && item.overdue_count > 0 && <span className="mt-1 block text-xs">{item.overdue_count} overdue {item.overdue_count === 1 ? "payment still needs" : "payments still need"} review</span>}
                     {item.automatic_error && <span className="mt-1 block text-xs text-destructive">{item.automatic_error}</span>}
                   </span>
                   <span className="shrink-0 text-right">
-                    <span className="block text-xs font-semibold tabular-nums">{formatPHP(item.amount_cents)}</span>
-                    {badgeVariant ? <Badge variant={badgeVariant} className="mt-1">{badge}</Badge> : <span className="mt-0.5 block text-xs text-muted-foreground">{badge}</span>}
+                    <span className={cn("block text-xs font-semibold tabular-nums", flowTone[direction])}><span className="sr-only">{label}: </span>{sign}{formatPHP(item.amount_cents)}</span>
+                    {badgeVariant ? <Badge variant={badgeVariant} className="mt-1">{badge}</Badge> : badge && <span className="mt-0.5 block text-xs text-muted-foreground">{badge}</span>}
                   </span>
                 </button>
                 {item.manual_due_count > 0 && <div className="flex justify-end pl-11 pr-1 pb-2 pt-1"><Button variant="outline" disabled={busy} onClick={() => onOpen(item)}>{item.manual_due_count > 1 ? `Review ${item.manual_due_count} due payments` : "Review payment"}</Button></div>}
               </li>;
             })}</ul>
+              </section>;
+            })}</div>
               : <Empty className="px-0 py-2">
                 <EmptyHeader>
                   <EmptyTitle>{filter === "all" ? "No plans yet" : "No matching plans"}</EmptyTitle>

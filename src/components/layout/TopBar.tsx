@@ -36,7 +36,8 @@ export function TopBar({
   onToggleSidebar,
 }: {
   sidebarOpen: boolean;
-  onToggleSidebar: () => void;
+  /** Omitted where the file panel cannot open (desktop Home). */
+  onToggleSidebar?: () => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -68,7 +69,7 @@ export function TopBar({
   return (
     <header className="flex h-11 min-w-0 items-center border-b border-border px-2 sm:px-3">
       <div className="flex h-full min-w-0 flex-1 items-center gap-1">
-        <IconTip
+        {onToggleSidebar && <IconTip
           label={sidebarOpen ? "Hide left sidebar" : "Show left sidebar"}
           onClick={onToggleSidebar}
           expanded={sidebarOpen}
@@ -78,7 +79,7 @@ export function TopBar({
           ) : (
             <IconLayoutSidebarLeftExpand size={16} />
           )}
-        </IconTip>
+        </IconTip>}
         <NoteTabs />
       </div>
 

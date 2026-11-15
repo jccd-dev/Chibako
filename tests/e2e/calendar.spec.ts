@@ -101,7 +101,7 @@ test("Calendar groups valid Note dates and lists the selected day", async ({ pag
   // A Note with only `date` still draws a pill in its grid cell.
   await expect(dayCell(page, `${year}-02-04`).getByTestId("calendar-pill").filter({ hasText: `Other day ${suffix}` })).toBeVisible();
 
-  await page.getByRole("button", { name: new RegExp(`February 4, ${year}, 1 Note`) }).click();
+  await page.getByRole("button", { name: new RegExp(`February 4, ${year}, 1 Note`) }).click({ position: { x: 10, y: 10 } }); // the date corner; the cell body holds the pill
   await expect(page).toHaveURL(`/app/calendar?date=${year}-02-04`);
   await expect(page.getByTestId("calendar-note-list").getByText(`Other day ${suffix}`)).toBeVisible();
 });
@@ -311,6 +311,25 @@ test("Calendar drags a pill to move it and drags its edges to resize the range",
   // A plain click still opens the Note.
   await pills.first().click();
   await expect(page.getByRole("dialog").getByLabel("Task title")).toHaveValue(title);
+});
+
+test("Calendar Alt-drags a pill to drop a copy and keeps the original", async ({ page }) => {
+  await authenticate(page);
+  const suffix = Date.now();
+  const year = 6000 + suffix % 1000;
+  const title = `Copy ${suffix}`;
+  const { id } = await createDatedNote(page, { title, date: `${year}-06-10` });
+  await page.goto(`/app/calendar?date=${year}-06-10`);
+  await page.waitForLoadState("networkidle");
+
+  await page.keyboard.down("Alt");
+  await mouseDrag(page, page.getByTestId("calendar-pill").filter({ hasText: title }).first(), page.locator(`[data-note-date="${year}-06-12"]`));
+  await page.keyboard.up("Alt");
+
+  await expect(dayCell(page, `${year}-06-12`).getByTestId("calendar-pill").filter({ hasText: `${title} (copy)` })).toBeVisible();
+  await expect(dayCell(page, `${year}-06-10`).getByTestId("calendar-pill").filter({ hasText: title })).toBeVisible();
+  expect(await savedRange(page, id)).toEqual({ date: `${year}-06-10`, end_date: undefined });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test.describe("on a touch tablet", () => {

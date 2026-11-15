@@ -7,8 +7,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { IconCalendarMonth, IconChartPie, IconChecklist, IconCreditCard, IconDotsVertical, IconFold, IconFolderPlus, IconHistory, IconLayoutDashboard, IconTags, IconUpload, IconWallet } from "@tabler/icons-react";
 import type { NoteSummary } from "@/lib/notes";
+import { readTabs } from "@/features/notes/note-tabs-state";
 import { useRevealActiveNote } from "./use-reveal-active-note";
 import { useTreeFilter } from "./use-tree-filter";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import { folderQualifier } from "@/features/notes/search-query";
 import { openCommandPalette } from "./CommandPalette";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
@@ -16,7 +18,7 @@ import { copyTitle, downloadMarkdown, fetchCurrentNote } from "@/features/notes/
 import { notifyOrganizationChanged as notifyChanged, requestOrganizationChange as request } from "@/features/organization/organization-client";
 import type { NoteBatchInput } from "@/features/organization/note-batch";
 import type { Bookmark } from "@/lib/bookmarks";
-import { financeTabs, financeTabLabel, isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
+import { ADD_TRANSACTION_EVENT, financeTabs, financeTabLabel, isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
 import { cn } from "@/lib/utils";
 import { IconBookmark, IconBot, IconChevron, IconFile, IconFolder, IconGraph, IconHome, IconPlus, IconSearch, IconTrash, IconX } from "@/components/icons";
 import { SettingsUpdateLink } from "@/features/updates/components/SettingsUpdateLink";
@@ -55,6 +57,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const financeTabParam = searchParams.get("tab");
   const financeTab: FinanceTab = isFinanceTab(financeTabParam) ? financeTabParam : "overview";
   const onFinance = pathname === "/app/finance";
+  const onHome = pathname === "/app";
+  const onNotePage = pathname === "/app/note" || pathname.startsWith("/app/note/");
 
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -74,6 +78,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   const [parent, setParent] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [dragging, setDragging] = useState<Item | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<NoteSummary | null>(null);
@@ -107,7 +112,8 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         setTrash((await trashed.json()).notes);
         if (marks.ok) setBookmarks((await marks.json()).bookmarks);
       })
-      .catch(() => { toast.error("Could not load notes. Try again."); });
+      .catch(() => { toast.error("Could not load notes. Try again."); })
+      .finally(() => setLoading(false));
   }, [treeCache]);
 
   // Refresh on focus or an explicit write. Navigation never changes the note
@@ -200,10 +206,12 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     finally { setBusy(false); }
   }
   async function exportNote(item: Item) {
+    setBusy(true);
     try {
       const note = await fetchCurrentNote(item.id);
       downloadMarkdown(note.title, note.content);
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not export Note."); }
+    finally { setBusy(false); }
   }
   async function move(item: Item, destination: string) {
     if (item.parent === destination) return;
@@ -330,21 +338,37 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
   async function submitBookmark(e: React.FormEvent) {
     e.preventDefault();
     if (!bookmarkDialog) return;
-    const existing = bookmarkByNote.get(bookmarkDialog.noteId);
-    const group = bookmarkDialog.group === "__new__" ? bmNewGroup.trim() : bookmarkDialog.group;
-    const res = await fetch("/api/bookmarks", {
-      method: existing ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(existing
-        ? { id: existing.id, label: "", group_name: group }
-        : { note_id: bookmarkDialog.noteId, label: "", group_name: group }),
-    });
-    if (res.ok) { setBookmarkDialog(null); void reloadBookmarks(); }
-    else toast.error("Could not save bookmark.");
+    if (busy) return;
+    setBusy(true);
+    try {
+      const existing = bookmarkByNote.get(bookmarkDialog.noteId);
+      const group = bookmarkDialog.group === "__new__" ? bmNewGroup.trim() : bookmarkDialog.group;
+      const res = await fetch("/api/bookmarks", {
+        method: existing ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(existing
+          ? { id: existing.id, label: "", group_name: group }
+          : { note_id: bookmarkDialog.noteId, label: "", group_name: group }),
+      });
+      if (res.ok) { setBookmarkDialog(null); void reloadBookmarks(); }
+      else toast.error("Could not save bookmark.");
+    } catch {
+      toast.error("Could not update bookmark. Try again.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function removeBookmark(id: string) {
-    const res = await fetch(`/api/bookmarks?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (res.ok) void reloadBookmarks(); else toast.error("Could not remove bookmark.");
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/bookmarks?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (res.ok) void reloadBookmarks(); else toast.error("Could not remove bookmark.");
+    } catch {
+      toast.error("Could not update bookmark. Try again.");
+    } finally {
+      setBusy(false);
+    }
   }
   function bookmarkDragProps(b: Bookmark) {
     return {
@@ -475,6 +499,9 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         )}
       </div>
       <nav aria-label="Files and folders" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
+        {loading && <LoadingStatus className="px-2 py-3 text-xs">Loading files…</LoadingStatus>}
+        {filterView?.busy && <LoadingStatus state="searching" className="px-2 py-3 text-xs">Searching files…</LoadingStatus>}
+        {filterView?.error && <p role="alert" className="px-2 py-3 text-xs text-destructive">{filterView.error}</p>}
         {!filterView && bookmarks.length > 0 && (
           <details open className="mb-1">
             <summary className="tree-item"><IconBookmark size={14} />Bookmarks</summary>
@@ -510,7 +537,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={clearSelection}><IconX /></Button>
         </div>
       )}
-      <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{notes.length} files</div>
+      <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{busy ? <LoadingStatus size={16} className="text-xs">Working on files…</LoadingStatus> : `${notes.length} files`}</div>
     </>
   );
 
@@ -525,7 +552,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-        {trash.length === 0 ? (
+        {loading ? <LoadingStatus className="px-3 py-6">Loading trash…</LoadingStatus> : trash.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">Trash is empty.</div>
         ) : trash.map(n => (
           <div key={n.id} onClick={e => { if (multiSelect(e)) toggleSelected(n.id); else setSelected(new Set([n.id])); }}
@@ -533,17 +560,31 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
             <span className="min-w-0 flex-1 truncate text-xs" title={n.title}>{n.title}</span>
             <Button variant="ghost" size="sm" onClick={async e => {
               e.stopPropagation(); clearSelection();
+              setBusy(true);
               try { await request(`/api/notes/${n.id}/restore`, "POST"); router.push(`/app/note/${n.id}`); }
               catch { toast.error("Could not restore file."); }
+              finally { setBusy(false); }
             }}>Restore</Button>
             <Button variant="ghost" size="icon-sm" aria-label={`Delete ${n.title} forever`} onClick={e => { e.stopPropagation(); if (selected.size > 1 && selected.has(n.id)) setBulkPurgeOpen(true); else setPurgeTarget(n); }}><IconTrash /></Button>
           </div>
         ))}
       </div>
+      {busy && <LoadingStatus size={16} className="px-4 py-2 text-xs">Working on files…</LoadingStatus>}
     </div>
   );
 
-  const financeNav = (
+  function addTransaction() {
+    if (mobile) onMobileOpenChange(false);
+    window.dispatchEvent(new Event(ADD_TRANSACTION_EVENT));
+  }
+
+  const financeNav = (<>
+    <div className="px-2 pb-2">
+      <Button className="h-9 w-full" onClick={addTransaction}>
+        <IconPlus aria-hidden="true" data-icon="inline-start" />
+        Add transaction
+      </Button>
+    </div>
     <nav aria-label="Finance views" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3">
       <div className="px-2 py-1 text-[11px] font-semibold tracking-wider text-muted-foreground">Finance</div>
       {financeTabs.map((value) => {
@@ -564,7 +605,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         );
       })}
     </nav>
-  );
+  </>);
 
   const filePanel = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -587,6 +628,13 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
     </div>
   );
 
+  // Home and Finance have no file panel, so Files/Trash go to the last open tab, else the empty note page.
+  function openFilesFromHome() {
+    const ids = new Set(notes.map(note => note.id));
+    const tab = readTabs().findLast(tab => ids.has(tab.id));
+    router.push(tab ? `/app/note/${encodeURIComponent(tab.id)}` : "/app/note");
+  }
+
   const activityRail = (
     <nav aria-label="Workspace" className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border py-2">
       <Link
@@ -607,13 +655,13 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         title="Files"
         className={cn(
           "grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
-          !onFinance && fileView === "files" && !collapsed && "bg-accent text-foreground"
+          onNotePage && fileView === "files" && "bg-accent text-foreground"
         )}
         onClick={() => {
           setFileView("files");
           clearSelection();
           if (collapsed) onExpand();
-          if (onFinance) router.push("/app");
+          if (onFinance || onHome) openFilesFromHome();
         }}
       >
         <IconFile size={16} />
@@ -639,7 +687,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           setFileView("trash");
           clearSelection();
           if (collapsed) onExpand();
-          if (onFinance) router.push("/app");
+          if (onFinance || onHome) openFilesFromHome();
         }}
       >
         <IconTrash size={16} />
@@ -689,6 +737,17 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       >
         <IconWallet size={16} />
       </Link>
+      {onFinance && collapsed && (
+        <button
+          type="button"
+          aria-label="Add transaction"
+          title="Add transaction"
+          className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground transition-transform duration-150 ease-out hover:bg-primary/90 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none"
+          onClick={addTransaction}
+        >
+          <IconPlus size={16} aria-hidden="true" />
+        </button>
+      )}
       <div className="mt-auto flex flex-col items-center gap-1">
         <UpdateRailButton />
         <Link
@@ -739,7 +798,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
           {action?.mode !== "rename" && <Field><FieldLabel htmlFor="item-parent">Folder</FieldLabel>{folderPicker(parent, setParent, action?.mode === "move" ? action.item : undefined, "item-parent")}</Field>}
           {error && <FieldError>{error}</FieldError>}
         </FieldGroup>
-        <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setAction(null)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Saving…" : action?.mode === "move" ? "Move" : action?.mode === "rename" ? "Rename" : "Create"}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setAction(null)}>Cancel</Button><Button type="submit" loading={busy}>{busy ? "Saving…" : action?.mode === "move" ? "Move" : action?.mode === "rename" ? "Rename" : "Create"}</Button></DialogFooter>
       </form></DialogContent>
     </Dialog>
 
@@ -750,7 +809,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
       }} className="flex flex-col gap-4">
         <DialogHeader><DialogTitle>Move {selected.size} files</DialogTitle></DialogHeader>
         <FieldGroup><Field><FieldLabel htmlFor="bulk-parent">Folder</FieldLabel>{folderPicker(bulkMoveParent, setBulkMoveParent, undefined, "bulk-parent")}</Field></FieldGroup>
-        <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setBulkMoveOpen(false)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Moving…" : "Move"}</Button></DialogFooter>
+        <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setBulkMoveOpen(false)}>Cancel</Button><Button type="submit" loading={busy}>{busy ? "Moving…" : "Move"}</Button></DialogFooter>
       </form></DialogContent>
     </Dialog>
 
@@ -786,7 +845,7 @@ export function Sidebar({ collapsed, mobile, mobileOpen, onMobileOpenChange, onE
         </FieldGroup>
         <DialogFooter>
           <Button variant="outline" type="button" onClick={() => setBookmarkDialog(null)}>Cancel</Button>
-          <Button type="submit">Save bookmark</Button>
+          <Button type="submit" loading={busy}>Save bookmark</Button>
         </DialogFooter>
       </form></DialogContent>
     </Dialog>

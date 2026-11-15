@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PlanningFilter, PlanningPage } from "./planning-list-types";
+import { planningFilterSchema, type PlanningFilter, type PlanningPage } from "./planning-list-types";
 import { financeJson } from "./client-json";
 import { localCalendarDate } from "./presentation";
 
@@ -30,7 +30,8 @@ export function useFinancePlanningList() {
     return () => abort.abort();
   }, [filter, offset, revision, today, key]);
   function changeFilter(value: string) {
-    if (value === "all" || value === "attention" || value === "upcoming" || value === "paused") { setFilter(value); setOffset(0); }
+    const parsed = planningFilterSchema.safeParse(value);
+    if (parsed.success) { setFilter(parsed.data); setOffset(0); }
   }
   return { filter, changeFilter, offset, setOffset, page: result?.key === key ? result.page : undefined, error: result?.key === key ? result.error : undefined, loading: result?.key !== key, refresh: () => setRevision(value => value + 1) };
 }

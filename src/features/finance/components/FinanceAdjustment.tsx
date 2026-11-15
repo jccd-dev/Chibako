@@ -12,6 +12,7 @@ import type { FinanceActivityController } from "@/features/finance/use-finance-a
 import { DateInput } from "@/components/ui/date-inputs";
 import { MoneyInput } from "./MoneyInput";
 import { financeDrawerFooter, financeSheet, formatPHP } from "@/features/finance/presentation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 export function FinanceAdjustment({ selected, activity, onClose }: { selected: FinanceAccount | null; activity: FinanceActivityController; onClose: () => void }) {
   const adjustment = useFinanceAdjustment(activity, selected?.id ?? null);
@@ -33,9 +34,9 @@ export function FinanceAdjustment({ selected, activity, onClose }: { selected: F
           </FieldGroup>
           <p role="status" className="text-sm">{adjustment.difference === null ? "Enter the actual amount to compare." : `Dated difference to record: ${formatPHP(adjustment.difference)}.${asset ? " No cash will move." : ""}`}</p>
           <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">Additional details</summary><Field className="mt-4"><FieldLabel htmlFor="adjustment-text">Adjustment text</FieldLabel><Textarea id="adjustment-text" value={adjustment.text} maxLength={2000} disabled={activity.busy} onChange={event => adjustment.setText(event.target.value)} /></Field></details>
-        </> : <p role="status">Loading current balance…</p>}
+        </> : <LoadingStatus>Loading current balance…</LoadingStatus>}
         {activity.saveError && <Alert><AlertDescription>{activity.saveError} Entries are kept. Retry the save safely, or refresh the balance and compare again if it changed.</AlertDescription></Alert>}
-        <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={activity.busy} onClick={onClose}>Cancel</Button><Button type="button" variant="outline" disabled={activity.busy} onClick={adjustment.refresh}>Refresh balance</Button><Button type="submit" disabled={activity.busy || !adjustment.account}>{activity.busy ? "Saving…" : "Record difference"}</Button></div>
+        <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={activity.busy} onClick={onClose}>Cancel</Button><Button type="button" variant="outline" disabled={activity.busy} onClick={adjustment.refresh}>Refresh balance</Button><Button loading={activity.busy} type="submit" disabled={activity.busy || !adjustment.account}>{activity.busy ? "Saving…" : "Record difference"}</Button></div>
       </form>
     </SheetContent>
   </Sheet>;

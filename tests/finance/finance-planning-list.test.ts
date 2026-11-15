@@ -61,7 +61,8 @@ test("filters and totals cover the whole list before bounded stable pagination",
   assert.equal(attention.items[0].id, late.id);
   assert.equal(listPlanning(owner, { as_of, filter: "attention", limit: 1, offset: 1 }).items[0].id, due.id);
   assert.equal(listPlanning(owner, { as_of, filter: "attention", limit: 1, offset: 2 }).items[0].id, automatic.id);
-  assert.equal(listPlanning(owner, { as_of, filter: "upcoming" }).total, 31);
+  assert.equal(listPlanning(owner, { as_of, filter: "expense" }).total, 33);
+  assert.equal(listPlanning(owner, { as_of, filter: "income" }).total, 0);
   assert.deepEqual(listPlanning(owner, { as_of, offset: 100 }).items, []);
   assert.equal(listPlanning(owner, { as_of, offset: 100 }).total, 33);
 });
@@ -91,7 +92,7 @@ test("paused manual dues and manually reverted automatic occurrences still need 
   assert.equal(attention.items.find(row => row.id === paused.id)?.status, "paused");
   assert.equal(attention.items.find(row => row.id === automatic.id)?.manual_due_count, 1);
   assert.deepEqual(listPlanning(owner, { as_of, filter: "paused" }).items.map(row => row.id), [paused.id]);
-  assert.equal(listPlanning(owner, { as_of, filter: "upcoming" }).total, 0);
+  assert.equal(listPlanning(owner, { as_of, filter: "income" }).total, 0);
 });
 
 test("all preserves terminal one-offs and ended schedules without counting their history as pending", () => {
@@ -106,7 +107,7 @@ test("all preserves terminal one-offs and ended schedules without counting their
   assert.deepEqual(new Set(page.items.map(row => row.status)), new Set(["recorded", "cancelled", "ended"]));
   assert.ok(page.items.every(row => row.next_due_date === null && row.pending_count === 0 && row.first_pending_id === null));
   assert.equal(listPlanning(owner, { as_of, filter: "attention" }).total, 0);
-  assert.equal(listPlanning(owner, { as_of, filter: "upcoming" }).total, 0);
+  assert.equal(listPlanning(owner, { as_of, filter: "income" }).total, 0);
 });
 
 test("projected dates share month-end, end-date, occurrence and total caps including cadence slot offsets", () => {

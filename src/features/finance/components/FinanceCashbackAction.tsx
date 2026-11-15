@@ -45,9 +45,9 @@ export function FinanceCashbackAction({ record, activity, onSaved }: {
           <DateInput id="cashback-credited-date" min={record.transaction_date} max={today} value={date} onChange={setDate} disabled={activity.busy} />
           <FieldDescription>The date the bank credited the reward, on or after the purchase date.</FieldDescription>
         </Field>
-        <Button type="submit" variant="outline" disabled={activity.busy || invalid}>{activity.busy ? "Saving…" : "Apply cashback"}</Button>
+        <Button loading={activity.busy} type="submit" variant="outline" disabled={activity.busy || invalid}>{activity.busy ? "Saving…" : "Apply cashback"}</Button>
       </>}
-      {applied > 0 && <Button type="button" variant="outline" disabled={activity.busy} onClick={() => void run(false)}>
+      {applied > 0 && <Button loading={activity.busy} type="button" variant="outline" disabled={activity.busy} onClick={() => void run(false)}>
         {activity.busy ? "Saving…" : `Undo all applied cashback (${formatPHP(applied)})`}
       </Button>}
     </form>

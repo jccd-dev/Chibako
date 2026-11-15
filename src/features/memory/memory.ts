@@ -17,14 +17,19 @@ export interface MemoryReceipt {
   saved: true;
 }
 
+/** The configured memory area folder, or null when automatic memory is off. */
+export function memoryArea(): string | null {
+  const configured = process.env.CHIBAKO_MEMORY_FOLDER;
+  return (configured && normalizeFolder(configured)) || null;
+}
+
 export function getMemoryStatus(principal: ApiKeyPrincipal): {
   contract_version: 1; session_lifecycle: 1; projects: 1; continuity: 1; principal_id: string; scopes: string[]; enabled: boolean; area: string | null;
 } {
   if (!principal.id || !principal.scopes.includes("memory:write")) {
     throw new MemoryError("Forbidden: missing memory:write scope", 403, "forbidden");
   }
-  const configured = process.env.CHIBAKO_MEMORY_FOLDER;
-  const area = configured ? normalizeFolder(configured) : null;
+  const area = memoryArea();
   return { contract_version: 1, session_lifecycle: 1, projects: 1, continuity: 1, principal_id: principal.id, scopes: [...principal.scopes], enabled: Boolean(area), area: area || null };
 }
 

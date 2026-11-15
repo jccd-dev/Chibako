@@ -1,6 +1,7 @@
 "use client";
 
 import { CompactMoney } from "./CompactMoney";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 import { Pie, PieChart } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -86,7 +87,7 @@ export function FinanceCostAnalysis({
             )}
           </>
         ) : (
-          <p className="text-xs text-muted-foreground">{report ? "No positive category spending for these dates." : "Loading category spending…"}</p>
+          report ? <p className="text-xs text-muted-foreground">No positive category spending for these dates.</p> : <LoadingStatus className="text-xs">Loading category spending…</LoadingStatus>
         )}
         {report && report.unbudgeted_cents !== 0 && (
           <p className="text-xs text-muted-foreground">Unbudgeted spending · <CompactMoney cents={report.unbudgeted_cents} className="tabular-nums" /></p>

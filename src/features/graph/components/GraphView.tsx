@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import {
   forceSimulation,
   forceLink,
@@ -79,18 +81,25 @@ export function GraphView() {
   const gRef = useRef<SVGGElement>(null);
   const simulationRef = useRef<Simulation<GraphNode, GraphLink> | null>(null);
   const [data, setData] = useState<GraphData | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [hovered, setHovered] = useState<GraphNode | null>(null);
   const [orphansOnly, setOrphansOnly] = useState(false);
   const [folder, setFolder] = useState("");
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [pattern, setPattern] = useGraphPattern();
   const [labels, setLabels] = useGraphLabels();
+  const [controlsOpen, setControlsOpen] = useState(false);
 
   useEffect(() => {
+    let current = true;
     fetch("/api/graph")
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => {});
+      .then((r) => {
+        if (!r.ok) throw new Error("Could not load the graph. Reload to try again.");
+        return r.json();
+      })
+      .then((data: GraphData) => { if (current) setData(data); })
+      .catch(() => { if (current) setLoadError("Could not load the graph. Reload to try again."); });
+    return () => { current = false; };
   }, []);
 
   const nodes = useMemo<GraphNode[]>(
@@ -356,18 +365,29 @@ export function GraphView() {
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
-      <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
+      <div className="absolute left-4 top-4 z-10 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-popover px-3 py-2.5 text-xs font-medium text-muted-foreground sm:hidden"
+          onClick={() => setControlsOpen((v) => !v)}
+          aria-expanded={controlsOpen}
+          aria-controls="graph-controls"
+        >
+          <IconAdjustmentsHorizontal className="size-4" aria-hidden="true" />
+          {controlsOpen ? "Hide controls" : "Controls"}
+        </button>
+        <div id="graph-controls" className={cn("w-44 flex-col items-stretch gap-2 sm:flex sm:w-auto sm:flex-row sm:items-center", controlsOpen ? "flex" : "hidden")}>
         <FolderPicker
           aria-label="Filter by folder"
           folders={folders}
           value={folder}
           emptyLabel="All folders"
           onChange={setFolder}
-          className="h-auto rounded-lg border-border bg-popover px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground dark:bg-popover dark:hover:bg-popover"
+          className="h-auto rounded-lg border-border bg-popover px-2.5 py-2.5 text-xs text-muted-foreground hover:text-foreground sm:py-1.5 dark:bg-popover dark:hover:bg-popover"
         />
         <button
           className={cn(
-            "rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+            "rounded-lg border px-2.5 py-2.5 text-xs font-medium transition sm:py-1.5",
             orphansOnly
               ? "border-primary bg-primary/12 text-primary"
               : "border-border bg-popover text-muted-foreground"
@@ -381,7 +401,7 @@ export function GraphView() {
         <GraphPatternSwitch value={pattern} onChange={setPattern} />
         <button
           className={cn(
-            "rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
+            "rounded-lg border px-2.5 py-2.5 text-xs font-medium transition sm:py-1.5",
             labels
               ? "border-primary bg-primary/12 text-primary"
               : "border-border bg-popover text-muted-foreground"
@@ -393,14 +413,19 @@ export function GraphView() {
           Labels
         </button>
         <button
-          className="rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+          className="rounded-lg border border-border bg-popover px-2.5 py-2.5 text-xs text-muted-foreground transition hover:text-foreground sm:py-1.5"
           onClick={resetView}
           title="Reset zoom, pan, and layout"
         >
           Reset view
         </button>
+        </div>
       </div>
-      {!nodes.length && (
+      {loadError ? (
+        <p role="alert" className="absolute inset-0 flex items-center justify-center p-6 text-sm text-destructive">{loadError}</p>
+      ) : !data ? (
+        <LoadingStatus size={96} className="absolute inset-0 flex-col justify-center p-6">Loading graph…</LoadingStatus>
+      ) : !nodes.length && (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
           No notes yet — create a note to start the graph.
         </div>

@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { toast } from "sonner";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,20 +29,32 @@ export function ConfirmDialog({
   description: string;
   confirmLabel?: string;
   destructive?: boolean;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
 }) {
+  const [pending, setPending] = useState(false);
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }}>
       <AlertDialogContent size="sm">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? "destructive" : "default"}
-            onClick={onConfirm}
+            loading={pending}
+            onClick={async () => {
+              if (pending) return;
+              setPending(true);
+              try {
+                await onConfirm();
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Could not complete the action. Try again.");
+              } finally {
+                setPending(false);
+              }
+            }}
           >
             {confirmLabel}
           </AlertDialogAction>

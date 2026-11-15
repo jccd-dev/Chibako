@@ -553,7 +553,7 @@ export function FinanceClassifications({
               >
                 Cancel
               </Button>
-              <Button
+              <Button loading={activity.busy}
                 type="submit"
                 disabled={activity.busy || !model.draftName.trim()}
               >

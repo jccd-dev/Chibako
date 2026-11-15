@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/lib/use-hydrated";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { IconPlus, IconX } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { ActivityOrb, LoadingStatus } from "@/components/LoadingStatus";
 import { cn } from "@/lib/utils";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
-import { restoreNoteTabs, type NoteTab } from "@/features/notes/note-tabs-state";
+import { readTabs, restoreNoteTabs, saveTabs, type NoteTab } from "@/features/notes/note-tabs-state";
 
-const STORAGE_KEY = "chibako_note_tabs";
 
 type NoteTabEvent = { id: string; title: string };
 
@@ -20,33 +20,6 @@ function noteIdFromPath(pathname: string | null): string | null {
   return id ? decodeURIComponent(id) : null;
 }
 
-function readTabs(): NoteTab[] {
-  try {
-    const value: unknown = JSON.parse(
-      localStorage.getItem(STORAGE_KEY) ?? "null",
-    );
-    if (!Array.isArray(value)) return [];
-    const seen = new Set<string>();
-    return value.filter((tab): tab is NoteTab => {
-      if (!tab || typeof tab !== "object") return false;
-      const { id, title } = tab as Partial<NoteTab>;
-      if (typeof id !== "string" || !id || seen.has(id)) return false;
-      seen.add(id);
-      return typeof title === "string";
-    });
-  } catch {
-    return [];
-  }
-}
-
-function saveTabs(tabs: NoteTab[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
-  } catch {
-    // private mode — tabs still work for this session
-  }
-}
-
 export function NoteTabs() {
   const pathname = usePathname();
   const router = useRouter();
@@ -54,6 +27,7 @@ export function NoteTabs() {
   const [tabs, setTabs] = useState<NoteTab[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [navigating, startNavigation] = useTransition();
   const treeCache = useMemo(() => noteTreeCache(async () => {
     const response = await fetch("/api/notes");
     if (!response.ok) throw new Error("Could not load notes");
@@ -89,7 +63,7 @@ export function NoteTabs() {
             const rest = tabsRef.current.filter((tab) => tab.id === "new" || ids.has(tab.id));
             const index = tabsRef.current.findIndex((tab) => tab.id === active);
             const fallback = rest[Math.min(Math.max(index - 1, 0), rest.length - 1)];
-            router.push(fallback ? `/app/note/${fallback.id}` : "/app");
+            router.push(fallback ? `/app/note/${fallback.id}` : "/app/note");
           }
         })
         .catch(() => { /* transient fetch failure — keep current tabs */ });
@@ -127,13 +101,16 @@ export function NoteTabs() {
   }, [loaded, tabs]);
 
   const [previousActiveId, setPreviousActiveId] = useState<string | null>(null);
-  if (loaded && activeId && previousActiveId !== activeId) {
+  // Track null too, so reopening the same note after leaving the last tab adds it back.
+  if (loaded && previousActiveId !== activeId) {
     setPreviousActiveId(activeId);
-    const withoutDraft = activeId === "new" ? tabs : tabs.filter(tab => tab.id !== "new");
-    const next = withoutDraft.some(tab => tab.id === activeId)
-      ? withoutDraft
-      : [...withoutDraft, { id: activeId, title: activeId === "new" ? "Untitled" : "Loading…" }];
-    if (next !== tabs) setTabs(next);
+    if (activeId) {
+      const withoutDraft = activeId === "new" ? tabs : tabs.filter(tab => tab.id !== "new");
+      const next = withoutDraft.some(tab => tab.id === activeId)
+        ? withoutDraft
+        : [...withoutDraft, { id: activeId, title: activeId === "new" ? "Untitled" : "Loading…" }];
+      if (next !== tabs) setTabs(next);
+    }
   }
 
   // Drag-to-reorder lives in transient state; the dropped order persists through
@@ -166,14 +143,13 @@ export function NoteTabs() {
   }
 
   function closeTab(id: string) {
-    if (tabs.length === 1) return;
     const index = tabs.findIndex((tab) => tab.id === id);
     if (index < 0) return;
     const next = tabs.filter((tab) => tab.id !== id);
     setTabs(next);
     if (id === activeId) {
       const fallback = tabs[index - 1] ?? tabs[index + 1];
-      if (fallback) router.push(`/app/note/${fallback.id}`);
+      startNavigation(() => router.push(fallback ? `/app/note/${fallback.id}` : "/app/note"));
     }
   }
 
@@ -285,9 +261,9 @@ export function NoteTabs() {
                 aria-selected={active}
                 title={tab.title}
                 className="min-w-0 flex-1 truncate rounded-md px-3 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
-                onClick={() => router.push(`/app/note/${tab.id}`)}
+                onClick={() => startNavigation(() => router.push(`/app/note/${tab.id}`))}
               >
-                {tab.title}
+                {tab.title === "Loading…" && <ActivityOrb size={16} className="mr-1 inline-block align-middle" />}{tab.title}
               </button>
               <button
                 type="button"
@@ -303,16 +279,18 @@ export function NoteTabs() {
             </div>
           );
         })}
+        {navigating && <LoadingStatus size={16} className="shrink-0"><span className="sr-only">Opening note…</span></LoadingStatus>}
         <Button
           variant="ghost"
           size="icon"
           aria-label="New note tab"
           aria-busy={creating}
           disabled={creating}
+          loading={creating}
           className="mr-2 rounded-md bg-muted/60 hover:bg-muted"
           onClick={() => void createNoteTab()}
         >
-          <IconPlus />
+          {!creating && <IconPlus />}
         </Button>
       </div>
     </div>

@@ -26,6 +26,7 @@ import {
 import { FinancePlanningForm } from "./FinancePlanningForm";
 import { FinanceSchedulePayments } from "./FinanceSchedulePayments";
 import type { ReminderOptions } from "./FinancePlans";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 function humanDate(iso: string) {
   return format(new Date(`${iso}T12:00:00`), "MMMM d, yyyy");
@@ -72,7 +73,7 @@ export function FinanceRecurrence({ activity, planning, selection, onCloseSelect
     {recurrence.saveError && !panel && <Alert className="mt-4"><AlertDescription>{recurrence.saveError}</AlertDescription></Alert>}
     <Sheet open={panel !== null} onOpenChange={value => { if (!value && !recurrence.busy && !planning.busy && !formBusy && !activity.busy) close(); }}><SheetContent className={`${financeSheet} overscroll-contain`}>
       <SheetHeader className="border-b border-border p-4 pr-10"><SheetTitle>{panel === "create" ? "Add income or expense plan" : occurrence ? "Edit this and future occurrences" : detail?.type === "income" ? "Recurring income plan" : "Recurring expense plan"}</SheetTitle><SheetDescription>{panel === "create" || occurrence ? "Choose when and how this plan repeats." : "Summary, payments, and schedule actions."}</SheetDescription></SheetHeader>
-      {error ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{error}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry schedule inspection</Button><Button variant="outline" onClick={close}>Close schedule</Button></div> : panel === "create" || detail ? <SchedulePanel key={`${panel}:${detail?.version ?? "new"}:${reload}`} schedule={detail} occurrence={occurrence} activity={activity} recurrence={recurrence} planning={planning} reminders={reminders} onClose={close} renderPayment={renderPayment} onBusyChange={setFormBusy} onRefresh={() => { recurrence.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><p role="status">Loading schedule…</p><Button variant="outline" onClick={close}>Close schedule</Button></div>}
+      {error ? <div className="flex flex-col gap-4 p-4"><Alert><AlertDescription>{error}</AlertDescription></Alert><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry schedule inspection</Button><Button variant="outline" onClick={close}>Close schedule</Button></div> : panel === "create" || detail ? <SchedulePanel key={`${panel}:${detail?.version ?? "new"}:${reload}`} schedule={detail} occurrence={occurrence} activity={activity} recurrence={recurrence} planning={planning} reminders={reminders} onClose={close} renderPayment={renderPayment} onBusyChange={setFormBusy} onRefresh={() => { recurrence.resetSave(); setReload(value => value + 1); }} /> : <div className="flex flex-col gap-4 p-4"><LoadingStatus>Loading schedule…</LoadingStatus><Button variant="outline" onClick={close}>Close schedule</Button></div>}
     </SheetContent></Sheet>
   </>;
 }
@@ -108,7 +109,7 @@ function SchedulePanel({ schedule, occurrence, activity, recurrence, planning, r
     {schedule.obligation_id && <p className="text-sm">Linked {schedule.type === "expense" ? "debt" : "receivable"}: {reminders.obligations.find(row => row.id === schedule.obligation_id)?.name ?? "obligation"}. Pending occurrences require principal review.</p>}
     <div className="flex flex-wrap gap-2" aria-label="Schedule actions">
       <Button variant="outline" disabled={recurrence.busy || planning.busy} onClick={() => setEditing(true)}>Edit plan</Button>
-      <Button variant="outline" disabled={recurrence.busy || planning.busy} onClick={() => void recurrence.save(schedule.id, schedule.paused ? "resume" : "pause", { version: schedule.version }).then(result => { if (result) onRefresh(); })}>{recurrence.busy ? "Saving…" : schedule.paused ? "Resume schedule" : "Pause schedule"}</Button>
+      <Button loading={recurrence.busy} variant="outline" disabled={recurrence.busy || planning.busy} onClick={() => void recurrence.save(schedule.id, schedule.paused ? "resume" : "pause", { version: schedule.version }).then(result => { if (result) onRefresh(); })}>{recurrence.busy ? "Saving…" : schedule.paused ? "Resume schedule" : "Pause schedule"}</Button>
       <AlertDialog>
         <AlertDialogTrigger render={<Button variant="outline" className="text-destructive" disabled={recurrence.busy || planning.busy}>Delete plan</Button>} />
         <AlertDialogContent size="sm">
@@ -118,7 +119,7 @@ function SchedulePanel({ schedule, occurrence, activity, recurrence, planning, r
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={recurrence.busy || planning.busy}>Keep plan</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={recurrence.busy || planning.busy} onClick={() => void recurrence.save(schedule.id, "delete", { version: schedule.version }).then(result => { if (result) onClose(); })}>{recurrence.busy ? "Deleting…" : "Delete plan"}</AlertDialogAction>
+            <AlertDialogAction loading={recurrence.busy} variant="destructive" disabled={recurrence.busy || planning.busy} onClick={() => void recurrence.save(schedule.id, "delete", { version: schedule.version }).then(result => { if (result) onClose(); })}>{recurrence.busy ? "Deleting…" : "Delete plan"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
