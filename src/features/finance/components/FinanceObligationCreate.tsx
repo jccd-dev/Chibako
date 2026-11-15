@@ -84,8 +84,8 @@ export function FinanceObligationCreate({ obligations: o, activity }: { obligati
       {o.notice && <p role="status" className="text-sm">{o.notice}</p>}
       <div className={financeDrawerFooter}>
         <Button type="button" variant="outline" disabled={o.busy} onClick={o.close}>Cancel</Button>
-        <Button type="submit" name="another" variant="outline" disabled={disabled || !!shortfall}>Save and add another</Button>
-        <Button type="submit" disabled={disabled || !!shortfall}>{o.busy ? "Saving…" : text.submit}</Button>
+        <Button loading={o.busy} type="submit" name="another" variant="outline" disabled={disabled || !!shortfall}>Save and add another</Button>
+        <Button loading={o.busy} type="submit" disabled={disabled || !!shortfall}>{o.busy ? "Saving…" : text.submit}</Button>
       </div>
     </form>
   </div>;

@@ -23,14 +23,20 @@ export function SetupForm() {
     if (passwordError) return setError(passwordError);
     if (password !== confirm) return setError("Passwords do not match.");
     setBusy(true);
-    const res = await fetch("/api/setup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password, setupToken }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(data.error ?? "Setup failed.");
+    try {
+      const res = await fetch("/api/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, setupToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Setup failed.");
+        setBusy(false);
+        return;
+      }
+    } catch {
+      setError("Could not connect to Chibako. Try again.");
       setBusy(false);
       return;
     }
@@ -60,7 +66,7 @@ export function SetupForm() {
           <Input id="setup-confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat password" required />
         </Field>
       </FieldGroup>
-      <Button className="w-full" disabled={busy} type="submit">
+      <Button className="w-full" loading={busy} type="submit">
         {busy ? "Setting up…" : "Create account"}
       </Button>
     </form>

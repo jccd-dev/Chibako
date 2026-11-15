@@ -37,6 +37,9 @@ test("one Plans list shows each schedule once with overdue counts, one-offs and 
   assert.match(html, /One-time/);
   assert.match(html, /Recorded/);
   assert.match(html, /Needs attention/);
+  assert.match(html, /aria-label="Expense plans"/);
+  assert.doesNotMatch(html, /aria-label="Income plans"/);
+  assert.match(html, /−PHP 1,122\.00/);
   assert.doesNotMatch(html, /Planned activity and occurrences|Schedule status|Plan status|Refresh due occurrences/);
 });
 

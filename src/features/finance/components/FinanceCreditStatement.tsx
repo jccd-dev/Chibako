@@ -8,12 +8,13 @@ import type { FinanceAccount } from "../types";
 import { formatHistoryDate, formatPHP } from "../presentation";
 import { useFinanceCreditCycles } from "../use-finance-credit-cycles";
 import { FinanceCreditPayment } from "./FinanceCreditPayment";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 function CreditCycles({ account, onSaved }: { account: FinanceAccount; onSaved: () => void }) {
   const { data, error, reload } = useFinanceCreditCycles(account.id);
   const [picked, setPicked] = useState<string | null>(null);
   if (error && !data) return <Alert><AlertDescription>{error} <Button type="button" variant="link" onClick={reload}>Retry</Button></AlertDescription></Alert>;
-  if (!data) return <p role="status" className="text-sm text-muted-foreground">Loading statements…</p>;
+  if (!data) return <LoadingStatus className="text-sm text-muted-foreground">Loading statements…</LoadingStatus>;
   const cycles = [...data.cycles].sort((a, b) => b.statement_date.localeCompare(a.statement_date));
   const oldestUnpaid = [...cycles].reverse().find(c => c.status === "closed" && c.remaining_due_cents > 0);
   const selected = cycles.find(c => c.statement_date === picked) ?? oldestUnpaid ?? cycles[0];

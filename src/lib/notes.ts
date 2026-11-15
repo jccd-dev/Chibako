@@ -164,6 +164,21 @@ function createNoteRecord(input: CreateNoteInput): Note {
   return getNote(id)!;
 }
 
+/** Copies a Note into its folder under a free "(copy)" title, merging `properties` into the copy's frontmatter. */
+export function duplicateNote(id: string, properties?: Record<string, PropValue | null>): Note | null {
+  return getDb().transaction(() => {
+    const source = getNote(id);
+    if (!source) return null;
+    const taken = new Set(
+      (getDb().prepare(`SELECT title FROM notes WHERE folder = ? AND deleted_at IS NULL`).all(source.folder) as Array<{ title: string }>)
+        .map((row) => row.title)
+    );
+    let title = `${source.title} (copy)`;
+    for (let n = 2; taken.has(title); n++) title = `${source.title} (copy ${n})`;
+    return createNoteRecord({ title, folder: source.folder, content: source.content, kind: source.kind, properties });
+  })();
+}
+
 export interface UpdateNoteInput {
   title?: string;
   folder?: string;

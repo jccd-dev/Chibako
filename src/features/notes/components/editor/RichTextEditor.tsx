@@ -1,5 +1,7 @@
 "use client";
 
+import { LoadingStatus } from "@/components/LoadingStatus";
+
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { Editor, EditorContent, Extension, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -285,6 +287,7 @@ export function RichTextEditor({
   return (
     <div className="md wt-editor relative" onKeyDown={handleRootKeyDown}>
       <div className="relative px-0.5 pt-1 pb-10" onClick={handleClick}>
+        {!editor && <LoadingStatus className="py-4">Loading editor…</LoadingStatus>}
         <EditorContent editor={editor} />
       </div>
 

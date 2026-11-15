@@ -16,6 +16,8 @@ export interface TreeFilterView {
   /** Folders shown open for the filter only; the user's expanded set is untouched. */
   open: Set<string>;
   empty: boolean;
+  busy: boolean;
+  error: string | null;
 }
 
 /**
@@ -28,7 +30,7 @@ export function useTreeFilter(filter: string, notes: { id: string; folder: strin
   // Folder names match regardless of case, like the search route; show the real path.
   const focus = typed === null ? null : folders.find((f) => f.toLowerCase() === typed.toLowerCase()) ?? typed;
   // A bare `folder:` filter needs no search; the tree already holds the subtree.
-  const { results, busy } = useNoteSearch(focus === null ? filter : "");
+  const { results, busy, error } = useNoteSearch(focus === null ? filter : "");
 
   return useMemo((): TreeFilterView | null => {
     if (!filter.trim()) return null;
@@ -39,6 +41,8 @@ export function useTreeFilter(filter: string, notes: { id: string; folder: strin
         showFolder: (path) => open.has(path) || inside(path, focus),
         open,
         empty: !folders.some((f) => f === focus),
+        busy: false,
+        error: null,
       };
     }
     const ids = new Set(results.map((r) => r.id));
@@ -47,7 +51,9 @@ export function useTreeFilter(filter: string, notes: { id: string; folder: strin
       showNote: (note) => ids.has(note.id),
       showFolder: (path) => open.has(path),
       open,
-      empty: !busy && !notes.some((n) => ids.has(n.id)),
+      empty: !busy && !error && !notes.some((n) => ids.has(n.id)),
+      busy,
+      error,
     };
-  }, [filter, focus, results, busy, notes, folders]);
+  }, [filter, focus, results, busy, error, notes, folders]);
 }

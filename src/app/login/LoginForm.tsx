@@ -17,14 +17,20 @@ export function LoginForm() {
     e.preventDefault();
     setError(null);
     setBusy(true);
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(data.error ?? "Invalid password.");
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Invalid password.");
+        setBusy(false);
+        return;
+      }
+    } catch {
+      setError("Could not connect to Chibako. Try again.");
       setBusy(false);
       return;
     }
@@ -45,7 +51,7 @@ export function LoginForm() {
           <Input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your admin password" autoFocus required />
         </Field>
       </FieldGroup>
-      <Button className="w-full" disabled={busy} type="submit">
+      <Button className="w-full" loading={busy} type="submit">
         {busy ? "Signing in…" : "Sign in"}
       </Button>
     </form>

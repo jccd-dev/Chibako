@@ -47,7 +47,7 @@ const selection = `WITH pending AS (
   FROM items WHERE @filter='all'
     OR (@filter='attention' AND (manual_due_count>0 OR automatic_error IS NOT NULL
       OR (kind='schedule' AND handling='manual' AND paused=0 AND next_due_date<=@as_of)))
-    OR (@filter='upcoming' AND next_due_date>@as_of AND paused=0)
+    OR (@filter IN ('income','expense') AND type=@filter)
     OR (@filter='paused' AND paused=1)
 )`;
 

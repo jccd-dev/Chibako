@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import { IconCircleArrowUp, IconChevronRight, IconExternalLink, IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { IconCircleArrowUp, IconChevronRight, IconExternalLink, IconRefresh } from "@tabler/icons-react";
+import { ActivityOrb } from "@/components/LoadingStatus";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -97,7 +98,7 @@ export function UpdateStatusDialog({
         ) : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={onConfirm} disabled={submitting}>
+          <Button onClick={onConfirm} loading={submitting}>
             {submitting ? "Starting…" : "Update now"}
           </Button>
         </DialogFooter>
@@ -153,7 +154,7 @@ export function UpdateNotice() {
     const label = reconnecting ? "Restarting Chibako" : (phase && UPDATE_PHASE_LABEL[phase]) || "Starting the update";
     return (
       <div role="status" className="flex items-center gap-2 border-b border-border bg-muted px-4 py-2 text-sm">
-        <IconLoader2 className="size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden />
+        <ActivityOrb size={16} state={reconnecting ? "waiting" : "working"} />
         <span className="font-medium">Updating{target ? ` to v${target}` : ""}</span>
         <span className="text-muted-foreground">{label}… Chibako restarts briefly while the new version starts.</span>
       </div>

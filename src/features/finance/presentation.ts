@@ -60,6 +60,10 @@ export function localCalendarDate(): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+/** Money-in / money-out color identity shared by transaction, plan and obligation rows. */
+export const flowTone = { in: "text-success", out: "text-destructive", neutral: "text-muted-foreground" };
+export const flowTile = { in: "bg-success/15 text-success", out: "bg-destructive/15 text-destructive", neutral: "bg-muted text-muted-foreground" };
+
 export const financeSheet = "data-[side=right]:w-full gap-0 overflow-y-auto p-0 text-sm data-[side=right]:sm:max-w-md transition-none data-starting-style:translate-x-0 data-ending-style:translate-x-0";
 
 export const financeDrawerFooter = "sticky bottom-0 -mx-4 mt-auto flex flex-wrap justify-end gap-2 border-t border-border bg-background px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6";

@@ -38,6 +38,7 @@ import { financeDrawerFooter, financeSheet, formatPHP as money } from "@/feature
 import type { FinanceReportsController } from "@/features/finance/use-finance-reports";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import type { FinanceBudgetController } from "@/features/finance/use-finance-budget";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 export function FinanceReports({ reports, onCategory }: { reports: FinanceReportsController; onCategory: (id: string) => void }) {
   const [dates, setDates] = useState(reports.dates);
@@ -64,7 +65,7 @@ export function FinanceReports({ reports, onCategory }: { reports: FinanceReport
       <div className="w-36"><Field><FieldLabel htmlFor="report-to" className="text-xs">To</FieldLabel><DateInput id="report-to" required min={dates.date_from || "1000-01-01"} max="9999-12-31" value={dates.date_to} onChange={value => setDates(current => ({ ...current, date_to: value }))} /></Field></div>
       <Button type="submit" variant="outline">Update report</Button>
     </form>
-    {reports.error ? <Alert><AlertDescription>{reports.error}<Button variant="outline" onClick={() => void reports.refresh()}>Retry reports</Button></AlertDescription></Alert> : !report ? <p role="status" className="py-2 text-sm text-muted-foreground">Loading reports…</p> : <>
+    {reports.error ? <Alert><AlertDescription>{reports.error}<Button variant="outline" onClick={() => void reports.refresh()}>Retry reports</Button></AlertDescription></Alert> : !report ? <LoadingStatus className="py-2 text-sm text-muted-foreground">Loading reports…</LoadingStatus> : <>
       <p className="text-sm text-muted-foreground">{report.date_from} to {report.date_to}. Actuals follow transaction dates across all accounts. Limits cover whole calendar months, with no rollover.</p>
       <dl className="grid gap-3 sm:grid-cols-3">
         <div><dt className="text-xs text-muted-foreground">Income in range</dt><dd className="mt-1 break-words text-lg font-semibold tabular-nums">{money(report.income_cents)}</dd></div>
@@ -187,7 +188,7 @@ export function FinanceBudgets({
         {budget.notice && <p role="status" className="text-sm">{budget.notice}</p>}
         <FinanceOptionStatus activity={activity} />
         {reports.error ? <Alert><AlertDescription>{reports.error}<Button variant="outline" onClick={() => void reports.refresh()}>Retry reports</Button></AlertDescription></Alert>
-          : !report ? <p role="status" className="py-2 text-sm text-muted-foreground">Loading budgets and spending…</p>
+          : !report ? <LoadingStatus className="py-2 text-sm text-muted-foreground">Loading budgets and spending…</LoadingStatus>
             : <>
               <div>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -271,7 +272,7 @@ export function FinanceBudgets({
           {loadError && <Alert><AlertDescription>{loadError}<Button variant="outline" onClick={budget.refresh}>Retry budget</Button></AlertDescription></Alert>}
           {saveError && <Alert><AlertDescription>{saveError} Refresh the selected limit before changing a stale version.<Button variant="outline" disabled={busy} onClick={budget.refresh}>Refresh budget</Button></AlertDescription></Alert>}
         </FieldGroup>
-        <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" disabled={busy || !snapshot || !amount}>{busy ? "Saving…" : "Save budget"}</Button></div>
+        <div className={financeDrawerFooter}><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button><Button loading={busy} type="submit" disabled={busy || !snapshot || !amount}>{busy ? "Saving…" : "Save budget"}</Button></div>
       </form>
     </SheetContent></Sheet>
   </section>;

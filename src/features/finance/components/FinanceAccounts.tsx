@@ -1,9 +1,10 @@
 "use client";
 
-import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronRight, IconPlus } from "@tabler/icons-react";
+import { Collapsible } from "@base-ui/react/collapsible";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Empty,
   EmptyHeader,
@@ -20,6 +21,7 @@ import { groupAccounts } from "../account-grouping";
 import { formatHistoryDate, formatPHP, localCalendarDate } from "../presentation";
 import type { FinanceAccount } from "../types";
 import type { FinanceAccountsController } from "../use-finance-accounts";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 export function FinanceAccounts({
   finance,
@@ -88,19 +90,9 @@ export function FinanceAccounts({
         </p>
       )}
       {finance.loading ? (
-        <div
-          role="status"
-          aria-label="Loading accounts"
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
-        >
-          {[0, 1, 2].map((item) => (
-            <Card key={item} aria-hidden="true" className="min-h-24">
-              <CardHeader>
-                <CardTitle>Loading accounts…</CardTitle>
-              </CardHeader>
-            </Card>
-          ))}
-        </div>
+        <LoadingStatus className="min-h-24 justify-center">
+          Loading accounts…
+        </LoadingStatus>
       ) : !finance.total ? (
         <Empty>
           <EmptyHeader>
@@ -116,21 +108,30 @@ export function FinanceAccounts({
         </Empty>
       ) : (
         groups.map((group) => (
-          <section
+          <Collapsible.Root
             key={JSON.stringify([group.kind, group.name])}
-            className="flex flex-col gap-3"
+            defaultOpen
+            render={<section />}
+            className="flex flex-col"
             aria-label={
               groupError
                 ? group.name
                 : `${group.name} ${{ money: "debit accounts", asset: "assets", credit: "credit accounts" }[group.kind]}`
             }
           >
-            <div className="flex flex-wrap items-end justify-between gap-2">
+            <div className="relative -mx-2 flex flex-wrap items-end justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50 has-focus-visible:outline-2 has-focus-visible:outline-ring">
               <div>
                 <h3 className="font-heading text-base font-medium">
-                  {group.name}
+                  {/* after:inset-0 stretches the trigger over the whole header row. */}
+                  <Collapsible.Trigger className="group/trigger flex items-center gap-1.5 text-left outline-none after:absolute after:inset-0 after:rounded-md">
+                    <IconChevronRight
+                      aria-hidden="true"
+                      className="size-4 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] group-data-panel-open/trigger:rotate-90 motion-reduce:transition-none"
+                    />
+                    {group.name}
+                  </Collapsible.Trigger>
                 </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 pl-5.5 text-xs text-muted-foreground">
                   {group.accounts.length}{" "}
                   {group.accounts.length === 1 ? "account" : "accounts"}
                   {!groupError &&
@@ -146,7 +147,9 @@ export function FinanceAccounts({
                 </p>
               )}
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {/* -m-1 p-1 keeps card rings inside the height clip. */}
+            <Collapsible.Panel className="-m-1 h-(--collapsible-panel-height) overflow-hidden p-1 transition-[height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
+            <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2 lg:grid-cols-3">
               {group.accounts.map((account) => (
                 <Card
                   key={account.id}
@@ -201,7 +204,8 @@ export function FinanceAccounts({
                 </Card>
               ))}
             </div>
-          </section>
+            </Collapsible.Panel>
+          </Collapsible.Root>
         ))
       )}
     </section>

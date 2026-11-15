@@ -13,3 +13,6 @@ export const isFinanceTab = (value: string | undefined | null): value is Finance
 
 export const financeTabLabel = (tab: FinanceTab): string =>
   tab === "activity" ? "History" : tab[0].toUpperCase() + tab.slice(1);
+
+/** The sidebar fires this so the mounted FinanceView opens transaction entry. */
+export const ADD_TRANSACTION_EVENT = "finance-add-transaction";

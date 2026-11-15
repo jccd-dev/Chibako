@@ -12,6 +12,7 @@ import { InstallAppPanel } from "@/features/pwa/components/InstallAppPanel";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -84,15 +85,43 @@ export function SettingsView() {
   const [restoreConfirm, setRestoreConfirm] = useState(false);
   const [embStatus, setEmbStatus] = useState<EmbeddingStatus | null>(null);
   const [reindexing, setReindexing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [embLoading, setEmbLoading] = useState(false);
+  const [embError, setEmbError] = useState("");
+  const [pending, setPending] = useState<string | null>(null);
+
+  async function runAction(name: string, operation: () => Promise<void>) {
+    if (pending) return;
+    setPending(name);
+    try {
+      await operation();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not complete the request. Try again.");
+    } finally {
+      setPending(null);
+    }
+  }
 
   useEffect(() => {
     if (tab === "recall" && !embStatus) void loadEmbeddings();
   }, [tab, embStatus]);
 
   useEffect(() => {
-    fetch("/api/schema").then((r) => r.json()).then((d) => setSchema(d.schema)).catch(() => {});
-    fetch("/api/properties").then((r) => r.json()).then((d) => setPropDefs(d.properties ?? [])).catch(() => {});
-    loadKeys();
+    let current = true;
+    Promise.all(["schema", "properties", "keys"].map(async (name) => {
+      const response = await fetch(`/api/${name}`);
+      if (!response.ok) throw new Error("Could not load settings. Reload to try again.");
+      return response.json();
+    })).then(([schema, properties, keys]) => {
+      if (!current) return;
+      setSchema(schema.schema);
+      setPropDefs(properties.properties ?? []);
+      setKeys(keys.keys);
+    }).catch(() => {
+      if (current) setLoadError("Could not load settings. Reload to try again.");
+    }).finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
   }, []);
 
   function updatePropDef(index: number, patch: Partial<PropDefDraft>) {
@@ -138,12 +167,22 @@ export function SettingsView() {
 
   async function loadKeys() {
     const res = await fetch("/api/keys");
-    if (res.ok) setKeys((await res.json()).keys);
+    if (!res.ok) throw new Error("Could not load API keys. Try again.");
+    setKeys((await res.json()).keys);
   }
 
   async function loadEmbeddings() {
-    const res = await fetch("/api/embeddings");
-    if (res.ok) setEmbStatus((await res.json()).status as EmbeddingStatus);
+    setEmbLoading(true);
+    setEmbError("");
+    try {
+      const res = await fetch("/api/embeddings");
+      if (!res.ok) throw new Error();
+      setEmbStatus((await res.json()).status as EmbeddingStatus);
+    } catch {
+      setEmbError("Could not load Recall status. Try Refresh status.");
+    } finally {
+      setEmbLoading(false);
+    }
   }
 
   async function runReindex() {
@@ -163,6 +202,8 @@ export function SettingsView() {
       }
       await loadEmbeddings();
       toast.success("Reindex complete.");
+    } catch {
+      toast.error("Could not reindex notes. Try again.");
     } finally {
       setReindexing(false);
     }
@@ -177,6 +218,8 @@ export function SettingsView() {
     if (res.ok) {
       setSchemaSaved(true);
       setTimeout(() => setSchemaSaved(false), 2000);
+    } else {
+      throw new Error("Could not save schema. Try again.");
     }
   }
 
@@ -187,6 +230,8 @@ export function SettingsView() {
       const data = await res.json();
       setSchema(data.schema);
       toast("Default restored — press Save schema to apply.");
+    } else {
+      throw new Error("Could not restore the default schema. Try again.");
     }
   }
   async function createKey() {
@@ -204,12 +249,15 @@ export function SettingsView() {
       setRevealed({ name, key });
       setNewKeyName("");
       await loadKeys();
+    } else {
+      throw new Error("Could not create API key. Try again.");
     }
   }
 
   async function revoke() {
     if (!revokeTarget) return;
-    await fetch(`/api/keys/${revokeTarget}`, { method: "DELETE" });
+    const res = await fetch(`/api/keys/${revokeTarget}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Could not revoke API key. Try again.");
     setRevokeTarget(null);
     await loadKeys();
   }
@@ -232,6 +280,8 @@ export function SettingsView() {
   return (
     <div className="mx-auto max-w-3xl overflow-y-auto px-6 py-6">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+      {loading && <LoadingStatus className="mt-3">Loading settings…</LoadingStatus>}
+      {loadError && <p role="alert" className="mt-3 text-sm text-destructive">{loadError}</p>}
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="mt-4">
         <div className="-mx-1 overflow-x-auto px-1 pb-1">
           <TabsList className="w-max min-w-full">
@@ -306,12 +356,12 @@ export function SettingsView() {
             <p className="text-sm text-muted-foreground">
               This is the <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">AGENTS.md</code>-format instructions served to your AI agent. It defines how your agent should read, link, and compile notes — the &ldquo;second brain&rdquo; contract. Edits apply immediately to any agent that fetches it via REST or MCP.
             </p>
-            <Textarea className="h-[26rem] font-mono !text-[13px] leading-relaxed" value={schema} onChange={(e) => setSchema(e.target.value)} spellCheck={false} />
+            <Textarea aria-label="Knowledge schema" className="h-[26rem] font-mono !text-[13px] leading-relaxed" value={schema} disabled={loading || !!loadError || pending === "schema"} onChange={(e) => setSchema(e.target.value)} spellCheck={false} />
             <div className="flex items-center gap-2">
-              <Button onClick={saveSchema} disabled={schemaSaved}>
+              <Button onClick={() => void runAction("schema", saveSchema)} loading={pending === "schema"} disabled={loading || !!loadError || !!pending || schemaSaved}>
                 {schemaSaved ? <><IconCheck size={14} data-icon="inline-start" /> Saved</> : "Save schema"}
               </Button>
-              <Button variant="outline" onClick={() => setRestoreConfirm(true)}>
+              <Button variant="outline" onClick={() => setRestoreConfirm(true)} loading={pending === "restore"} disabled={!!pending || loading}>
                 Restore default
               </Button>
               <span className="ml-auto text-xs text-muted-foreground">
@@ -373,7 +423,7 @@ export function SettingsView() {
               <Button variant="outline" onClick={addPropDef}>
                 <IconPlus size={14} data-icon="inline-start" /> Add property
               </Button>
-              <Button onClick={savePropDefs} disabled={propsSaved}>
+              <Button onClick={() => void runAction("properties", savePropDefs)} loading={pending === "properties"} disabled={loading || !!loadError || !!pending || propsSaved}>
                 {propsSaved ? <><IconCheck size={14} data-icon="inline-start" /> Saved</> : "Save properties"}
               </Button>
             </div>
@@ -398,7 +448,7 @@ export function SettingsView() {
                   </ToggleGroup>
                   <p className="text-xs leading-relaxed text-muted-foreground">Finance scopes are independent. Reading balances requires finance:read; managing accounts requires finance:manage. Existing keys keep their current permissions.</p>
                 </Field>
-                <div><Button onClick={createKey}>Generate key</Button></div>
+                <div><Button onClick={() => void runAction("key", createKey)} loading={pending === "key"} disabled={loading || !!loadError || !!pending}>Generate key</Button></div>
               </CardContent>
             </Card>
 
@@ -442,13 +492,19 @@ export function SettingsView() {
         </TabsContent>
 
         <TabsContent value="recall" className="fade-in">
+          {embStatus && embError && <p role="alert" className="mt-3 text-sm text-destructive">{embError}</p>}
           <div className="flex flex-col gap-4 pt-3">
             <p className="text-sm text-muted-foreground">
               Optional semantic recall. Configure <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">CHIBAKO_EMBEDDING_*</code>{" "}
               to fuse vector search with keyword search. When unset, this stays off and no note content leaves the server.
             </p>
             {!embStatus ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
+              <div className="flex flex-col items-start gap-3">
+                {embLoading ? <LoadingStatus>Loading Recall status…</LoadingStatus> : <>
+                  <p role="alert" className="text-sm text-destructive">{embError || "Recall status is unavailable."}</p>
+                  <Button variant="outline" onClick={loadEmbeddings}>Refresh status</Button>
+                </>}
+              </div>
             ) : !embStatus.enabled ? (
               <Alert>
                 <AlertDescription>
@@ -493,10 +549,10 @@ export function SettingsView() {
                   </Alert>
                 )}
                 <div className="flex items-center gap-2">
-                  <Button onClick={runReindex} disabled={reindexing}>
+                  <Button onClick={runReindex} loading={reindexing} disabled={embLoading}>
                     {reindexing ? "Reindexing…" : "Reindex now"}
                   </Button>
-                  <Button variant="outline" onClick={loadEmbeddings} disabled={reindexing}>
+                  <Button variant="outline" onClick={loadEmbeddings} loading={embLoading} disabled={reindexing}>
                     Refresh status
                   </Button>
                 </div>
@@ -506,7 +562,7 @@ export function SettingsView() {
         </TabsContent>
 
         <TabsContent value="password" className="fade-in">
-          <form className="flex max-w-sm flex-col gap-3 pt-3" onSubmit={changePassword}>
+          <form className="flex max-w-sm flex-col gap-3 pt-3" onSubmit={(event) => { event.preventDefault(); void runAction("password", () => changePassword(event)); }}>
             {pwMsg && (
               <Alert variant={pwMsg.ok ? "default" : "destructive"} className={pwMsg.ok ? "border-success/30 bg-success/10 text-success" : undefined}>
                 <AlertDescription>{pwMsg.text}</AlertDescription>
@@ -522,7 +578,7 @@ export function SettingsView() {
                 <Input id="pw-next" type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} placeholder="At least 15 characters" minLength={MIN_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} autoComplete="new-password" required />
               </Field>
             </FieldGroup>
-            <div><Button type="submit">Update password</Button></div>
+            <div><Button type="submit" loading={pending === "password"} disabled={!!pending}>Update password</Button></div>
           </form>
         </TabsContent>
         <TabsContent value="updates" className="fade-in">
@@ -534,7 +590,11 @@ export function SettingsView() {
       </Tabs>
 
       <div className="mt-8 border-t border-border pt-4">
-        <Button variant="ghost" onClick={() => { fetch("/api/logout", { method: "POST" }); router.push("/login"); }}>
+        <Button variant="ghost" loading={pending === "logout"} disabled={!!pending} onClick={() => void runAction("logout", async () => {
+          const response = await fetch("/api/logout", { method: "POST" });
+          if (!response.ok) throw new Error("Could not sign out. Try again.");
+          router.push("/login");
+        })}>
           Sign out
         </Button>
       </div>
@@ -545,7 +605,7 @@ export function SettingsView() {
         description="Agents using it will lose access immediately."
         confirmLabel="Revoke key"
         destructive
-        onConfirm={revoke}
+        onConfirm={() => runAction("revoke", revoke)}
       />
       <ConfirmDialog
         open={restoreConfirm}
@@ -553,7 +613,7 @@ export function SettingsView() {
         title="Restore default schema?"
         description="Your current knowledge-schema edits will be lost."
         confirmLabel="Restore default"
-        onConfirm={restoreDefaultSchema}
+        onConfirm={() => runAction("restore", restoreDefaultSchema)}
       />
     </div>
   );

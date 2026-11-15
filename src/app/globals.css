@@ -24,6 +24,9 @@
   --mark: oklch(0.92 0.08 215);
   --success: oklch(0.58 0.12 155);
   --warning: oklch(0.68 0.12 75);
+  /* Logo blue pushed toward violet; Home's one accent. */
+  --brand: oklch(0.54 0.21 285);
+  --brand-foreground: oklch(0.985 0.003 120);
   --graph-wiki: var(--success);
   --graph-index: var(--warning);
   --galaxy-0: oklch(0.74 0.16 78);
@@ -120,6 +123,8 @@ html[data-note-font="existing"] {
   --mark: oklch(0.3 0.05 215);
   --success: oklch(0.74 0.13 155);
   --warning: oklch(0.82 0.13 80);
+  --brand: oklch(0.74 0.14 288);
+  --brand-foreground: var(--background);
   --graph-wiki: var(--success);
   --graph-index: var(--warning);
   --galaxy-0: oklch(0.9 0.13 88);
@@ -372,6 +377,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
   --color-graph-wiki: var(--graph-wiki);
   --color-graph-index: var(--graph-index);
   --color-accent-foreground: var(--accent-foreground);

@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
+test.use({ reducedMotion: "reduce" });
+
 const updaterDir = process.env.CHIBAKO_E2E_UPDATER_DIR ?? "";
 
 async function authenticate(page: Page): Promise<void> {
@@ -103,6 +105,7 @@ test("manual check shows pending, success, and the updater's error", async ({ pa
   await expect(check).toBeEnabled();
   await check.click();
   await expect(page.getByRole("button", { name: "Checking…" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Checking…" }).locator("svg")).toBeVisible();
   await expect.poll(() => fs.readdirSync(path.join(updaterDir, "in")).length).toBe(1);
   const success = onlyRequest();
   expect(success).toMatchObject({ action: "check" });
@@ -170,7 +173,7 @@ test("successful update preserves unsaved settings until reload is explicitly co
     await route.continue();
   });
   await page.goto("/app/settings");
-  const schema = page.getByRole("textbox").first();
+  const schema = page.getByRole("textbox", { name: "Knowledge schema" });
   await expect(schema).toBeVisible();
   await expect(schema).toHaveValue(/# Chibako Vault Schema/);
   await schema.fill("Unsaved update regression fixture");
@@ -241,7 +244,7 @@ test("an observer tab offers a manual reload for a newer version without losing 
   });
   await page.clock.install({ time: new Date() });
   await page.goto("/app/settings");
-  const schema = page.getByRole("textbox").first();
+  const schema = page.getByRole("textbox", { name: "Knowledge schema" });
   await expect(schema).toHaveValue(/# Chibako Vault Schema/);
   await schema.fill("Unsaved observer-tab fixture");
 

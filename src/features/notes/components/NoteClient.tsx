@@ -29,6 +29,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { IconDotsVertical } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useHydrated } from "@/lib/use-hydrated";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import { useNoteEditorSession } from "@/features/notes/editor/useNoteEditorSession";
 import { createNoteDetailClient, type MentionInfo } from "@/features/notes/note-detail-client";
 import { noteTreeCache } from "@/features/notes/note-tree-cache";
@@ -108,8 +109,9 @@ function PropTextEditor({ initial, onCommit, placeholder, type, ariaLabel }: {
   );
 }
 
-export function NoteClient({ initial, allNotes: initialAll, draftDate, initialView }: {
+export function NoteClient({ initial, allNotes: initialAll, draftDate, initialView, opening = false }: {
   initial: Note | null;
+  opening?: boolean;
   /** Optional server-provided tree; the client cache fetches one when absent. */
   allNotes?: NoteSummary[];
   draftDate?: string;
@@ -124,6 +126,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
   const [bmGroup, setBmGroup] = useState("");
   const [bmNewGroup, setBmNewGroup] = useState("");
   const [bmBusy, setBmBusy] = useState(false);
+  const [noteAction, setNoteAction] = useState<string | null>(null);
   // Single-scroll panes: the typed-properties block collapses under this toggle.
   const [showProps, setShowProps] = useState(true);
   function setPropsAndRemember(next: boolean) {
@@ -277,7 +280,8 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
     },
     onOrganizationError: () => toast.error("Could not refresh the organized note."),
   }, !initial && isNoteDate(draftDate) ? { content: applyFrontmatter("", { date: draftDate }) } : undefined);
-  const { note, title, folder, content, kind, pinned, persist, patch } = session;
+  const { note, title, folder, content, kind, pinned, saveState, persist, patch } = session;
+  const activityLabel = noteAction ?? (bmBusy ? "Updating bookmark…" : opening ? "Opening note…" : saveState === "saving" ? "Saving…" : null);
   useLayoutEffect(() => { currentNoteIdRef.current = note?.id ?? null; }, [note?.id]);
 
   useEffect(() => {
@@ -593,14 +597,22 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
 
   async function removeBookmark() {
     if (!bookmark) return;
-    const res = await fetch(`/api/bookmarks?id=${encodeURIComponent(bookmark.id)}`, { method: "DELETE" });
-    if (res.ok) {
-      setBookmark(null);
-      setBookmarkOpen(false);
-      toast("Bookmark removed.");
-      window.dispatchEvent(new Event("chibako:notes-changed"));
-    } else {
-      toast.error("Could not remove bookmark.");
+    if (bmBusy) return;
+    setBmBusy(true);
+    try {
+      const res = await fetch(`/api/bookmarks?id=${encodeURIComponent(bookmark.id)}`, { method: "DELETE" });
+      if (res.ok) {
+        setBookmark(null);
+        setBookmarkOpen(false);
+        toast("Bookmark removed.");
+        window.dispatchEvent(new Event("chibako:notes-changed"));
+      } else {
+        toast.error("Could not remove bookmark.");
+      }
+    } catch {
+      toast.error("Could not remove bookmark. Try again.");
+    } finally {
+      setBmBusy(false);
     }
   }
 
@@ -690,47 +702,64 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
 
   async function createMissing() {
     if (!createModal) return;
-    const res = await fetch("/api/notes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: createModal, folder: createFolder, content: `# ${createModal}\n` }),
-    });
-    if (res.ok) {
-      const { note: created } = await res.json();
-      setCreateModal(null);
-      router.push(`/app/note/${created.id}`);
+    if (noteAction) return;
+    setNoteAction("Creating note…");
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: createModal, folder: createFolder, content: `# ${createModal}\n` }),
+      });
+      if (!res.ok) throw new Error("Could not create note.");
+      if (res.ok) {
+        const { note: created } = await res.json();
+        setCreateModal(null);
+        router.push(`/app/note/${created.id}`);
+      }
+    } catch {
+      toast.error("Could not complete the note action. Try again.");
+    } finally {
+      setNoteAction(null);
     }
   }
 
   async function handleDelete() {
     if (!note) return;
-    const res = await fetch(`/api/notes/${note.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      toast.error("Could not move note to Trash.");
-      return;
-    }
-    const trashedId = note.id;
-    const trashedTitle = note.title;
-    window.dispatchEvent(new Event("chibako:notes-changed"));
-    const home = allNotes.find((n) => n.kind === "index");
-    router.push(home && home.id !== note.id ? `/app/note/${home.id}` : "/app");
-    router.refresh();
-    toast("Moved to Trash", {
-      description: `"${trashedTitle}" will be purged after 30 days.`,
-      action: {
-        label: "Undo",
-        onClick: async () => {
-          const r = await fetch(`/api/notes/${trashedId}/restore`, { method: "POST" });
-          if (r.ok) {
-            window.dispatchEvent(new Event("chibako:notes-changed"));
-            router.push(`/app/note/${trashedId}`);
-            toast.success("Note restored.");
-          } else {
-            toast.error("Could not restore note.");
-          }
+    if (noteAction) return;
+    setNoteAction("Moving note to Trash…");
+    try {
+      const res = await fetch(`/api/notes/${note.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast.error("Could not move note to Trash.");
+        return;
+      }
+      const trashedId = note.id;
+      const trashedTitle = note.title;
+      window.dispatchEvent(new Event("chibako:notes-changed"));
+      const home = allNotes.find((n) => n.kind === "index");
+      router.push(home && home.id !== note.id ? `/app/note/${home.id}` : "/app");
+      router.refresh();
+      toast("Moved to Trash", {
+        description: `"${trashedTitle}" will be purged after 30 days.`,
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const r = await fetch(`/api/notes/${trashedId}/restore`, { method: "POST" });
+            if (r.ok) {
+              window.dispatchEvent(new Event("chibako:notes-changed"));
+              router.push(`/app/note/${trashedId}`);
+              toast.success("Note restored.");
+            } else {
+              toast.error("Could not restore note.");
+            }
+          },
         },
-      },
-    });
+      });
+    } catch {
+      toast.error("Could not complete the note action. Try again.");
+    } finally {
+      setNoteAction(null);
+    }
   }
 
   async function newNote() {
@@ -1065,6 +1094,12 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
             >
               {reading ? <IconPencil size={16} /> : <IconEye size={16} />}
             </IconTip>
+            {activityLabel && (
+              <LoadingStatus state={noteAction || opening || bmBusy ? "working" : "background"} size={16} className="text-xs">
+                <span className="sr-only sm:not-sr-only">{activityLabel}</span>
+              </LoadingStatus>
+            )}
+            {saveState === "error" && <span role="status" className="text-xs text-destructive">Save failed</span>}
             {/* Vertical-dot actions dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground" aria-label="Note actions" />}>
@@ -1272,7 +1307,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
             <Button variant="outline" onClick={() => setCreateModal(null)}>
               Cancel
             </Button>
-            <Button onClick={createMissing}>
+            <Button onClick={createMissing} loading={!!noteAction}>
               <IconCheck size={14} data-icon="inline-start" /> Create
             </Button>
           </DialogFooter>
@@ -1327,7 +1362,7 @@ export function NoteClient({ initial, allNotes: initialAll, draftDate, initialVi
               )}
               <div className="flex gap-2">
                 <Button variant="outline" type="button" onClick={() => setBookmarkOpen(false)}>Cancel</Button>
-                <Button type="submit" disabled={bmBusy}>{bookmark ? "Save" : "Bookmark"}</Button>
+                <Button type="submit" loading={bmBusy}>{bookmark ? "Save" : "Bookmark"}</Button>
               </div>
             </DialogFooter>
           </form>

@@ -7,6 +7,7 @@ import type { ActivityPage } from "../activity-types";
 import { financeJson } from "../client-json";
 import { formatPHP, formatHistoryDate } from "../presentation";
 import { FinanceTransactionRow } from "./FinanceTransactionRow";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 const labels = {
   income: "Income",
@@ -79,9 +80,9 @@ export function FinanceAccountHistory({
           </AlertDescription>
         </Alert>
       ) : !visiblePage ? (
-        <p role="status" className="text-sm text-muted-foreground">
+        <LoadingStatus className="text-sm text-muted-foreground">
           Loading history…
-        </p>
+        </LoadingStatus>
       ) : !visiblePage.transactions.length ? (
         <p className="text-sm text-muted-foreground">
           No recorded activity. The opening balance is shown above.

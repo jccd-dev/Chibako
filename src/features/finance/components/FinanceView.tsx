@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconChevronDown, IconPlus } from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 import { useFinanceAccounts } from "@/features/finance/use-finance-accounts";
 import { useFinanceActivity } from "@/features/finance/use-finance-activity";
 import {
@@ -23,7 +23,9 @@ import { FinanceClassifications } from "./FinanceClassifications";
 import { FinanceOverviewDashboard } from "./FinanceOverviewDashboard";
 import type { FinanceAccount } from "@/features/finance/types";
 import { Button } from "@/components/ui/button";
-import { isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
+import { ADD_TRANSACTION_EVENT, isFinanceTab, type FinanceTab } from "@/features/finance/finance-tabs";
+import { FinanceMobileNav } from "./FinanceMobileNav";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 export function FinanceView({ initialTab }: { initialTab?: string }) {
   const router = useRouter();
@@ -50,6 +52,11 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   }, [activity.notice, finance.notice, planning.notice]);
   const [transactionOpen, setTransactionOpen] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
+  useEffect(() => {
+    const openEntry = () => setTransactionOpen(true);
+    window.addEventListener(ADD_TRANSACTION_EVENT, openEntry);
+    return () => window.removeEventListener(ADD_TRANSACTION_EVENT, openEntry);
+  }, []);
   useEffect(() => {
     if (finance.notice) void refreshOptions();
   }, [finance.notice, refreshOptions]);
@@ -90,8 +97,9 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-4">
+    // pb-28 keeps the last rows clear of the floating mobile bar.
+    <div className="mx-auto max-w-[1600px] px-4 pt-4 pb-28 sm:px-6 md:pb-4">
+      <header className="mb-4">
         <div>
           <h1 className="font-heading text-2xl font-semibold tracking-tight">
             Finance
@@ -99,12 +107,6 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
           <p className="mt-1.5 max-w-prose text-sm text-muted-foreground">
             Your accounts and activity, in PHP. Cash and assets stay separate.
           </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button onClick={() => setTransactionOpen(true)}>
-            <IconPlus aria-hidden="true" data-icon="inline-start" />
-            Add transaction
-          </Button>
         </div>
       </header>
 
@@ -138,15 +140,9 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         {tab === "overview" && (
           <div>
             {finance.loading && !finance.summary ? (
-              <div
-                role="status"
-                aria-label="Loading balances"
-                className="grid gap-6 sm:grid-cols-2"
-              >
-                {[0, 1].map((item) => (
-                  <div key={item} className="h-36 rounded-lg bg-muted" />
-                ))}
-              </div>
+              <LoadingStatus className="min-h-72 justify-center">
+                Loading balances…
+              </LoadingStatus>
             ) : (
               finance.summary && (
                 <>
@@ -231,6 +227,7 @@ export function FinanceView({ initialTab }: { initialTab?: string }) {
         )}
       </div>
 
+      <FinanceMobileNav tab={tab} onAdd={() => setTransactionOpen(true)} />
       <FinanceTransactionDetails
         key={transactionId ?? "closed"}
         activity={activity}

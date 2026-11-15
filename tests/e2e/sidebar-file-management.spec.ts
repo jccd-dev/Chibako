@@ -16,6 +16,7 @@ async function authenticate(page: Page): Promise<void> {
     await page.getByRole("button", { name: setup ? "Create account" : "Sign in" }).click();
   }
   await expect(page).toHaveURL(/\/app(?:\/note\/[^/]+)?$/);
+  await page.goto("/app/note");
 }
 
 async function createNote(request: APIRequestContext, title: string, folder = ""): Promise<{ id: string }> {
@@ -30,7 +31,7 @@ test("clicking a folder points New file at that folder", async ({ page }) => {
   const folder = `Target ${stamp}`;
   const title = `In target ${stamp}`;
   expect((await page.request.post("/api/folders", { data: { path: folder } })).ok()).toBeTruthy();
-  await page.goto("/app");
+  await page.goto("/app/note");
 
   const sidebar = page.getByRole("complementary", { name: "Sidebar" });
   const folderButton = sidebar.getByRole("button", { name: folder, exact: true });
@@ -97,7 +98,7 @@ test("cmd-click multi-select deletes several files at once", async ({ page }) =>
   const titles = [`Bulk one ${stamp}`, `Bulk two ${stamp}`];
   const ids = await Promise.all(titles.map(t => createNote(page.request, t).then(n => n.id)));
 
-  await page.goto("/app");
+  await page.goto("/app/note");
   const root = page.getByRole("navigation", { name: "Files and folders" }).locator("xpath=./div").last();
   const row = (title: string) => root.getByRole("link", { name: title, exact: true });
   await row(titles[0]).click({ modifiers: ["Meta"] });
@@ -122,7 +123,7 @@ test("dragging a multi-selected file moves all selected files", async ({ page })
   expect((await page.request.post("/api/folders", { data: { path: folder } })).ok()).toBeTruthy();
   await Promise.all(titles.map(t => createNote(page.request, t)));
 
-  await page.goto("/app");
+  await page.goto("/app/note");
   const sidebar = page.getByRole("navigation", { name: "Files and folders" });
   const root = sidebar.locator("xpath=./div").last();
   const row = (title: string) => root.getByRole("link", { name: title, exact: true });
@@ -155,7 +156,7 @@ test("a conflicting multi-Note drag leaves the entire selection unchanged", asyn
   const titles = [`Can move ${stamp}`, `Cannot move ${stamp}`];
   const ids = await Promise.all(titles.map(title => createNote(page.request, title).then(note => note.id)));
   await createNote(page.request, titles[1], folder);
-  await page.goto("/app");
+  await page.goto("/app/note");
   const root = page.getByRole("navigation", { name: "Files and folders" }).locator("xpath=./div").last();
   for (const title of titles) await root.getByRole("link", { name: title, exact: true }).click({ modifiers: ["Meta"] });
   const result = page.waitForResponse(response => response.url().endsWith("/api/notes/batch"));
@@ -200,7 +201,7 @@ test("plain clicks and open space clear multi-selection", async ({ page }) => {
   expect((await page.request.post("/api/folders", { data: { path: folder } })).ok()).toBeTruthy();
   await Promise.all(titles.map(t => createNote(page.request, t)));
 
-  await page.goto("/app");
+  await page.goto("/app/note");
   const sidebar = page.getByRole("navigation", { name: "Files and folders" });
   const root = sidebar.locator("xpath=./div").last();
   const row = (title: string) => root.getByRole("link", { name: title, exact: true });
@@ -232,7 +233,7 @@ test("deleting one multi-selected file deletes all selected files", async ({ pag
   const titles = [`Menu one ${stamp}`, `Menu two ${stamp}`];
   const ids = await Promise.all(titles.map(t => createNote(page.request, t).then(n => n.id)));
 
-  await page.goto("/app");
+  await page.goto("/app/note");
   const sidebar = page.getByRole("navigation", { name: "Files and folders" });
   const root = sidebar.locator("xpath=./div").last();
   const row = (title: string) => root.getByRole("link", { name: title, exact: true });
@@ -262,7 +263,7 @@ test("cmd-click multi-select purges several trashed files at once", async ({ pag
     return note.id;
   }));
 
-  await page.goto("/app");
+  await page.goto("/app/note");
   await page.getByRole("button", { name: "Trash", exact: true }).click();
   await page.getByTitle(titles[0]).click();
   await page.getByTitle(titles[1]).click({ modifiers: ["Meta"] });
@@ -299,7 +300,7 @@ test("Collapse folders stays reachable after scrolling a long file tree", async 
   await authenticate(page);
   const stamp = Date.now().toString(36);
   for (let i = 0; i < 40; i++) await createNote(page.request, `Scroll ${stamp} ${i}`);
-  await page.goto("/app");
+  await page.goto("/app/note");
 
   const tree = page.getByRole("navigation", { name: "Files and folders" });
   await expect(tree.getByRole("link", { name: `Scroll ${stamp} 39`, exact: true })).toBeAttached();
@@ -315,7 +316,7 @@ test("Duplicate opens a copy with the same body and properties", async ({ page }
   const content = `---\nstatus: draft\n---\n# ${title}\n\nduplicated body`;
   const res = await page.request.post("/api/notes", { data: { title, folder, content } });
   expect(res.ok()).toBeTruthy();
-  await page.goto("/app");
+  await page.goto("/app/note");
 
   const sidebar = page.getByRole("complementary", { name: "Sidebar" });
   await sidebar.getByRole("button", { name: folder, exact: true }).click();
@@ -344,7 +345,7 @@ test("Export .md downloads the note and re-importing restores its properties", a
   const title = `Export: ${stamp}?`;
   const content = `---\nstatus: done\npriority: 2\n---\n# Export ${stamp}\n\nexported body`;
   expect((await page.request.post("/api/notes", { data: { title, content } })).ok()).toBeTruthy();
-  await page.goto("/app");
+  await page.goto("/app/note");
 
   const sidebar = page.getByRole("complementary", { name: "Sidebar" });
   await sidebar.getByRole("button", { name: `Actions for ${title}`, exact: true }).click();
@@ -376,7 +377,7 @@ test("filtering the file tree shows matches with their folders and clearing rest
   expect((await page.request.patch(`/api/notes/${(await createNote(page.request, `Hit body ${stamp}`, `${outer}/${inner}`)).id}`, { data: { content: `# x\n\nnarwhal${stamp}` } })).ok()).toBeTruthy();
   await createNote(page.request, `Sibling ${stamp}`, outer);
   await createNote(page.request, `Root ${stamp}`);
-  await page.goto("/app");
+  await page.goto("/app/note");
 
   const sidebar = page.getByRole("complementary", { name: "Sidebar" });
   const root = page.getByRole("navigation", { name: "Files and folders" }).locator("xpath=./div").last();
@@ -411,7 +412,7 @@ test("Focus folder shows only that folder's subtree", async ({ page }) => {
   await createNote(page.request, `Guide note ${stamp}`, guides);
   await createNote(page.request, `Deep guide ${stamp}`, `${guides}/Deep ${stamp}`);
   await createNote(page.request, `Outside ${stamp}`);
-  await page.goto("/app");
+  await page.goto("/app/note");
 
   const sidebar = page.getByRole("complementary", { name: "Sidebar" });
   const root = page.getByRole("navigation", { name: "Files and folders" }).locator("xpath=./div").last();

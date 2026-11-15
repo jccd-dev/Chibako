@@ -62,8 +62,10 @@ test("fast typing never shows stale results", async ({ page }) => {
   const input = await openPalette(page);
   await input.fill(`alpha${stamp}`);
   await page.waitForTimeout(400); // past the debounce, so the slow request is in flight
+  await expect(page.getByRole("status").filter({ hasText: "Searching notes…" }).locator("svg")).toBeVisible();
   await input.fill(`beta${stamp}`);
   await expect(results(page).getByRole("option", { name: new RegExp(`Beta ${stamp}`) })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Searching notes…" })).toHaveCount(0);
   await page.waitForTimeout(2000);
   await expect(results(page).getByRole("option", { name: new RegExp(`Alpha ${stamp}`) })).toHaveCount(0);
 });
@@ -95,7 +97,7 @@ test("folder: limits results and suggests folders", async ({ page }) => {
 test("the rail search icon and Cmd+K open the same palette", async ({ page }) => {
   await authenticate(page);
   await page.goto("/app");
-  await page.getByRole("button", { name: "Search notes" }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Search notes" }).click();
   const input = page.getByRole("combobox", { name: "Command palette" });
   await expect(input).toBeVisible();
   await expect(input).toBeFocused();

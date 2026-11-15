@@ -12,6 +12,8 @@ export interface RangeDrag {
   mode: DragMode;
   from: string;
   over: string;
+  /** Alt/Option held on a move: drop a copy and leave the original. */
+  copy: boolean;
 }
 
 /** Day under a point, from the `data-note-date` on calendar day cells. */
@@ -26,8 +28,9 @@ function dayAt(x: number, y: number): string | null {
 /**
  * Pointer-event drag for calendar ranges: mouse, touch and pen share one path.
  * Mouse starts after a small move; touch and pen after a long press. Escape cancels.
+ * With `canCopy`, holding Alt/Option during a move drops a copy instead.
  */
-export function useRangeDrag(onDrop: (id: string, range: NoteDateRange) => void) {
+export function useRangeDrag(onDrop: (id: string, range: NoteDateRange, copy: boolean) => void, canCopy = false) {
   const [drag, setDrag] = useState<RangeDrag | null>(null);
   const cleanup = useRef<(() => void) | null>(null);
   const suppressClickUntil = useRef(0);
@@ -41,9 +44,17 @@ export function useRangeDrag(onDrop: (id: string, range: NoteDateRange) => void)
     cleanup.current?.();
     const { pointerId, pointerType, clientX: startX, clientY: startY } = event;
     let active: RangeDrag | null = null;
+    let altKey = event.altKey;
+    const isCopy = () => canCopy && mode === "move" && altKey;
     const activate = () => {
-      active = { note, mode, from, over: from };
+      active = { note, mode, from, over: from, copy: isCopy() };
       setDrag(active);
+    };
+    const syncCopy = () => {
+      if (active && active.copy !== isCopy()) {
+        active = { ...active, copy: isCopy() };
+        setDrag(active);
+      }
     };
     const timer = pointerType === "mouse" ? undefined : window.setTimeout(activate, LONG_PRESS_MS);
 
@@ -55,10 +66,12 @@ export function useRangeDrag(onDrop: (id: string, range: NoteDateRange) => void)
       setDrag(null);
       if (!commit) return;
       const next = rescheduleRange(note, mode, active.from, active.over);
-      if (next.date !== note.date || (next.end_date ?? next.date) !== note.endDate) onDrop(note.id, next);
+      if (active.copy || next.date !== note.date || (next.end_date ?? next.date) !== note.endDate) onDrop(note.id, next, active.copy);
     };
     const onMove = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return;
+      altKey = e.altKey;
+      syncCopy();
       if (!active) {
         if (Math.hypot(e.clientX - startX, e.clientY - startY) < MOVE_SLOP_PX) return;
         // Touch moved before the long press: it is a scroll, not a drag.
@@ -73,7 +86,11 @@ export function useRangeDrag(onDrop: (id: string, range: NoteDateRange) => void)
     };
     const onUp = (e: PointerEvent) => { if (e.pointerId === pointerId) finish(true); };
     const onCancel = (e: PointerEvent) => { if (e.pointerId === pointerId) finish(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") finish(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return finish(false);
+      altKey = e.altKey;
+      syncCopy();
+    };
     // Pills set `touch-action: none` so the browser never pans away an active touch drag.
     const onContextMenu = (e: Event) => { if (active) e.preventDefault(); };
 
@@ -81,6 +98,7 @@ export function useRangeDrag(onDrop: (id: string, range: NoteDateRange) => void)
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
     window.addEventListener("contextmenu", onContextMenu);
     cleanup.current = () => {
       window.clearTimeout(timer);
@@ -88,6 +106,7 @@ export function useRangeDrag(onDrop: (id: string, range: NoteDateRange) => void)
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
       window.removeEventListener("contextmenu", onContextMenu);
       cleanup.current = null;
     };

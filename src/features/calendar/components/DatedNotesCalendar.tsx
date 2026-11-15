@@ -1,18 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { NoteSummary } from "@/lib/notes";
 import { getDefaultClassNames } from "react-day-picker";
 import { coversDate, dateToNoteDate, datedNotes, noteDateToDate, rescheduleRange, type DatedNote, type NoteDateRange } from "@/features/calendar/note-dates";
 import { useRangeDrag } from "@/features/calendar/use-range-drag";
 import { Calendar, CalendarDayButton } from "@/components/ui/calendar";
-import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const defaultClassNames = getDefaultClassNames();
-const MAX_SPAN_LANES = 3;
+/** Pills start below the date row; each lane is a 16px pill plus a 2px gap. */
+const PILL_TOP_PX = 22;
+const LANE_PX = 18;
+/** Preview id for the copy an Alt/Option drag will create. */
+const COPY_PREVIEW_ID = "calendar-copy-preview";
 
 /** Greedy lane per dated Note so a span keeps one row across the days it covers. */
 function spanLanes(notes: DatedNote[]) {
@@ -27,7 +30,7 @@ function spanLanes(notes: DatedNote[]) {
     });
 }
 
-export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onOpenNote, onReschedule, compact = false }: {
+export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onOpenNote, onReschedule, onDuplicate, compact = false }: {
   notes: NoteSummary[];
   selected: string;
   /** Inclusive end of the current Note's range, highlighted as a band. */
@@ -37,18 +40,40 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
   onOpenNote?: (id: string) => void;
   /** Enables dragging pills to move or resize their range. */
   onReschedule?: (id: string, range: NoteDateRange) => void;
+  /** Enables Alt/Option-dragging a pill to drop a copy on the new range. */
+  onDuplicate?: (id: string, range: NoteDateRange) => void;
   compact?: boolean;
 }) {
   const selectedDate = noteDateToDate(selected);
   const [month, setMonth] = useState(selectedDate);
-  const { drag, start, isDragClick } = useRangeDrag((id, range) => onReschedule?.(id, range));
+  const { drag, start, isDragClick } = useRangeDrag(
+    (id, range, copy) => copy ? onDuplicate?.(id, range) : onReschedule?.(id, range),
+    Boolean(onDuplicate),
+  );
   const dated = useMemo(() => {
     const all = datedNotes(notes);
     if (!drag) return all;
-    // The dragged pill previews its new range in place.
     const next = rescheduleRange(drag.note, drag.mode, drag.from, drag.over);
-    return all.map((note) => note.id === drag.note.id ? { ...note, date: next.date, endDate: next.end_date ?? next.date } : note);
+    const moved = { ...drag.note, date: next.date, endDate: next.end_date ?? next.date };
+    // A copy previews beside the untouched original; a move previews in place.
+    if (drag.copy) return [...all, { ...moved, id: COPY_PREVIEW_ID }];
+    return all.map((note) => note.id === drag.note.id ? moved : note);
   }, [notes, drag]);
+  const draggedId = drag && (drag.copy ? COPY_PREVIEW_ID : drag.note.id);
+
+  // As many pill lanes as fit the measured cell; the rest collapse into the "+N" count.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [laneCap, setLaneCap] = useState(3);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (compact || !root) return;
+    const observer = new ResizeObserver(() => {
+      const cell = root.querySelector<HTMLElement>("[data-note-date]");
+      if (cell) setLaneCap(Math.max(1, Math.floor((cell.clientHeight - PILL_TOP_PX) / LANE_PX)));
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [compact]);
   const spans = useMemo(() => compact ? [] : spanLanes(dated), [compact, dated]);
   const band = selectedEnd && selectedEnd > selected
     ? { from: selectedDate, to: noteDateToDate(selectedEnd) }
@@ -77,7 +102,7 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
     today: "bg-transparent",
   };
 
-  return (
+  const calendar = (
     <Calendar
       mode="single"
       fixedWeeks={!compact}
@@ -133,7 +158,7 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
               </CalendarDayButton>
             );
           }
-          const visible = daySpans.filter(({ lane }) => lane < MAX_SPAN_LANES);
+          const visible = daySpans.filter(({ lane }) => lane < laneCap);
           const hidden = daySpans.length - visible.length;
           const lanes = visible.length ? Math.max(...visible.map(({ lane }) => lane)) + 1 : 0;
           return (
@@ -146,29 +171,31 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
                 // The cell stays unfilled when selected so pills remain readable.
                 className={cn(
                   props.className,
-                  "aspect-auto h-full items-stretch justify-start overflow-hidden rounded-none p-1.5 text-left sm:p-2",
+                  "aspect-auto h-full items-stretch justify-start overflow-hidden rounded-none p-1 text-left",
                   "data-[selected-single=true]:bg-transparent data-[selected-single=true]:text-foreground",
                 )}
-                aria-label={label}
+                aria-label={modifiers.today ? `Today, ${label}` : label}
               >
-                <span className="flex items-center gap-1.5 text-sm! opacity-100!">
+                {/* A compact date row leaves the cell height to pills; overflow shows as "+N" beside the date. */}
+                <span className="flex h-4 w-full items-center justify-between gap-1 text-xs! leading-4 opacity-100!">
+                  {/* Today and the selected day are marked by a dot, so the date never grows. */}
                   <span className={cn(
-                    "grid size-6 place-items-center rounded-full tabular-nums",
-                    modifiers.today
-                      ? "bg-primary font-semibold text-primary-foreground"
-                      : modifiers.selected && "ring-1 ring-primary",
+                    "flex items-center gap-1 pl-0.5 font-medium tabular-nums",
+                    modifiers.today && "font-semibold text-primary",
+                    modifiers.selected && !modifiers.today && "font-semibold text-foreground",
                   )}>
                     {day.date.getDate()}
+                    {(modifiers.today || modifiers.selected) && (
+                      <span aria-hidden="true" className={cn("size-1.5 rounded-full", modifiers.today ? "bg-primary" : "bg-foreground")} />
+                    )}
                   </span>
-                  {count > 0 && (
-                    <Badge variant="outline" className="h-4 min-w-4 px-1 text-[10px]" aria-hidden="true">
-                      {count > 99 ? "99+" : count}
-                    </Badge>
+                  {hidden > 0 && (
+                    <span aria-hidden="true" className="pr-0.5 text-[10px] font-medium text-muted-foreground tabular-nums">+{hidden}<span className="hidden sm:inline"> more</span></span>
                   )}
                 </span>
               </CalendarDayButton>
               {/* Pills sit beside the day button because links cannot nest inside a button. */}
-              <div className="pointer-events-none absolute inset-x-0 top-9 z-20 flex flex-col gap-0.5 sm:top-10">
+              <div className="pointer-events-none absolute inset-x-0 top-[22px] z-20 flex flex-col gap-0.5">
                 {Array.from({ length: lanes }, (_, lane) => {
                   const span = visible.find((entry) => entry.lane === lane);
                   const { note } = span ?? {};
@@ -207,7 +234,7 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
                         "pointer-events-auto relative h-4 shrink-0 truncate bg-primary/30 px-1.5 text-[11px] leading-4 font-medium text-foreground transition-colors select-none [-webkit-touch-callout:none] hover:bg-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                         // No browser panning from a pill, so touch drags keep their pointer stream.
                         onReschedule && "cursor-grab touch-none",
-                        drag?.note.id === note.id && "cursor-grabbing bg-primary/50 shadow-sm",
+                        draggedId === note.id && (drag?.copy ? "cursor-copy bg-primary/50 shadow-sm outline-1 outline-dashed outline-primary" : "cursor-grabbing bg-primary/50 shadow-sm"),
                         // Rounded, inset ends mark where a range starts and stops; week continuations stay square and flush.
                         isStart && "ml-1.5 rounded-l-sm",
                         isEnd && "rounded-r-sm",
@@ -219,14 +246,24 @@ export function DatedNotesCalendar({ notes, selected, selectedEnd, onSelect, onO
                     </Link>
                   );
                 })}
-                {hidden > 0 && (
-                  <span className="px-1.5 text-[10px] leading-4 font-medium text-foreground/80 sm:px-2">+{hidden} more</span>
-                )}
               </div>
             </>
           );
         },
       }}
     />
+  );
+  if (compact) return calendar;
+  const goToToday = () => {
+    const today = new Date();
+    setMonth(today);
+    onSelect(dateToNoteDate(today));
+  };
+  return (
+    <div ref={rootRef} className="relative flex h-full w-full min-h-0">
+      {/* Sits beside the next-month arrow. */}
+      <Button variant="outline" size="sm" onClick={goToToday} className="absolute top-0.5 right-11 z-10">Today</Button>
+      {calendar}
+    </div>
   );
 }

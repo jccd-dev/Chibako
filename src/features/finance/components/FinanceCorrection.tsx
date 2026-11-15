@@ -23,6 +23,7 @@ import type { FinanceTransaction } from "@/features/finance/activity-types";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import { useFinanceCorrection } from "@/features/finance/use-finance-correction";
 import { formatPHP } from "@/features/finance/presentation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 import { FinanceAccountChoice } from "./FinanceAccountChoice";
 import { FinanceCashbackAction } from "./FinanceCashbackAction";
@@ -352,7 +353,7 @@ export function FinanceCorrection({
             </Alert>
           )}
           {!!record.fee_transaction_id && !edit.fee && !edit.feeError && (
-            <p role="status">Loading linked fee…</p>
+            <LoadingStatus>Loading linked fee…</LoadingStatus>
           )}
           {Object.keys(edit.errors).length > 0 && (
             <Alert>
@@ -372,7 +373,7 @@ export function FinanceCorrection({
                 Cancel refund
               </Button>
             )}
-            <Button type="submit" disabled={blocked}>
+            <Button loading={activity.busy} type="submit" disabled={blocked}>
               {activity.busy
                 ? "Saving…"
                 : refund
@@ -398,7 +399,7 @@ export function FinanceCorrection({
             <FieldDescription>When the bank actually credited this cashback.</FieldDescription>
             <FieldError id="correction-error-transaction_date">{edit.errors.transaction_date}</FieldError>
           </Field>
-          <Button type="submit" variant="outline" disabled={activity.busy || edit.date === record.transaction_date}>
+          <Button loading={activity.busy} type="submit" variant="outline" disabled={activity.busy || edit.date === record.transaction_date}>
             {activity.busy ? "Saving…" : "Save cashback date"}
           </Button>
         </form>

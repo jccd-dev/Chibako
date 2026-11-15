@@ -73,6 +73,7 @@ test("editor saves a create, queues edits, and retains a failed patch for Retry"
     content: "first body",
     kind: "note",
   });
+  await expect(page.getByRole("status").filter({ hasText: "Saving…" }).locator("svg")).toBeVisible();
 
   await content.fill("second body");
   releaseCreate();
@@ -93,6 +94,8 @@ test("editor saves a create, queues edits, and retains a failed patch for Retry"
   releaseFailure();
   await failedResponse;
   await expect(page.getByText("offline", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Save failed" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Saving…" })).toHaveCount(0);
   await expect(content).toHaveValue("retry body");
   // The current UI retries with the existing save shortcut, not a Retry button.
   const retried = page.waitForResponse((response) => response.request().method() === "PATCH" && response.ok());
@@ -146,8 +149,9 @@ test("saved edits survive Settings and Home navigation without a reload", async 
   await page.getByRole("link", { name: "Settings", exact: true }).press("Enter");
   await expect(page).toHaveURL("/app/settings");
   await page.getByRole("navigation", { name: "Workspace", exact: true }).getByRole("link", { name: "Home", exact: true }).click();
-  await expect(page.getByRole("textbox", { name: "Note title" })).not.toHaveValue(note.title);
-  await page.getByRole("link", { name: note.title, exact: true }).click();
+  await expect(page).toHaveURL("/app");
+  await expect(page.getByRole("textbox", { name: "Note title" })).toHaveCount(0);
+  await page.getByRole("link", { name: new RegExp(note.title) }).click();
   await expect(content).toHaveValue("saved before Settings");
   await page.getByRole("link", { name: "Settings", exact: true }).press("Enter");
   await expect(page).toHaveURL("/app/settings");

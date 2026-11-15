@@ -29,6 +29,7 @@ import { FinanceSchedulePreview } from "./FinanceSchedulePreview";
 import { FinanceOptionStatus } from "./FinanceActivity";
 import { MoneyInput } from "./MoneyInput";
 import type { ReminderOptions } from "./FinancePlans";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 // This drawer keeps its own scroll body, so the footer is a plain flex child
 // flush to the drawer bottom instead of the shared sticky footer helper.
@@ -270,9 +271,9 @@ export function FinancePlanningForm({
                       </AlertDescription>
                     </Alert>
                   ) : reminders.loading ? (
-                    <p role="status" className="text-sm">
+                    <LoadingStatus className="text-sm">
                       Loading reminder options…
-                    </p>
+                    </LoadingStatus>
                   ) : (
                     <Field>
                       <FieldLabel htmlFor="schedule-obligation_id">
@@ -362,7 +363,7 @@ export function FinancePlanningForm({
         >
           Cancel
         </Button>
-        <Button type="submit" disabled={busy}>
+        <Button loading={busy} type="submit" disabled={busy}>
           {busy
             ? "Saving…"
             : schedule

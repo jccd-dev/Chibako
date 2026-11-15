@@ -9,6 +9,7 @@ import type { FinanceNoteChoice } from "@/features/finance/note-link-types";
 import type { FinanceTransaction } from "@/features/finance/activity-types";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import { useFinanceNoteLinks, useFinanceNotePicker } from "@/features/finance/use-finance-note-links";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 export function FinanceNotePicker({ notes, onChange, disabled }: { notes: FinanceNoteChoice[]; onChange: (notes: FinanceNoteChoice[]) => void; disabled: boolean }) {
   const picker = useFinanceNotePicker();
@@ -28,7 +29,7 @@ export function FinanceNotePicker({ notes, onChange, disabled }: { notes: Financ
         <Button type="button" variant="outline" disabled={disabled} aria-label={`Remove Note link ${note.title}`} onClick={() => onChange(notes.filter(item => item.id !== note.id))}>Remove link</Button>
       </li>)}</ul> : <p className="text-sm text-muted-foreground">No Note links selected.</p>}
     </div>
-    {picker.error ? <Alert><AlertDescription>{picker.error} Try Find Notes again.</AlertDescription></Alert> : picker.loading ? <p role="status" className="text-sm text-muted-foreground">Finding Notes…</p> : picker.page ? <div className="flex flex-col gap-3">
+    {picker.error ? <Alert><AlertDescription>{picker.error} Try Find Notes again.</AlertDescription></Alert> : picker.loading ? <LoadingStatus className="text-sm text-muted-foreground">Finding Notes…</LoadingStatus> : picker.page ? <div className="flex flex-col gap-3">
       {picker.page.notes.length ? <ul className="flex flex-col gap-3" aria-label="Note search results">{picker.page.notes.map(note => <li key={note.id} className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1 basis-32 break-words text-sm">{note.title}</span>
         <Button type="button" variant="outline" disabled={disabled} aria-label={`Inspect candidate Note ${note.title}`} onClick={() => void picker.inspect(note.id)}>Inspect</Button>
@@ -45,7 +46,7 @@ export function FinanceNotePicker({ notes, onChange, disabled }: { notes: Financ
         <h4 className="break-words text-sm font-medium">{picker.preview.title}</h4>
         <p className="text-sm text-muted-foreground">Read-only Note content. This does not select or change the Note.</p>
         <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-sans text-sm">{picker.preview.content || "This Note is empty."}</pre>
-      </> : <p role="status" className="text-sm text-muted-foreground">Loading Note…</p>}
+      </> : <LoadingStatus className="text-sm text-muted-foreground">Loading Note…</LoadingStatus>}
       <Button type="button" variant="outline" className="self-start" disabled={disabled} onClick={picker.closePreview}>Close Note inspection</Button>
     </section>}
   </FieldGroup>;
@@ -56,10 +57,10 @@ export function FinanceNoteLinks({ record, activity, onSaved }: { record: Financ
   return <details>
     <summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:outline-2 focus-visible:outline-ring">Additional details: Note links</summary>
     <div className="mt-3 flex flex-col gap-4">
-      {links.loading ? <p role="status" className="text-sm text-muted-foreground">Loading Note links…</p> : links.error ? <Alert><AlertDescription>{links.error}<div className="mt-3 flex flex-wrap gap-3"><Button type="button" variant="outline" disabled={activity.busy} onClick={() => void links.load()}>Retry Note links</Button><Button type="button" variant="outline" disabled={activity.busy} onClick={() => onSaved(record.id)}>Refresh transaction details</Button></div></AlertDescription></Alert> : <>
+      {links.loading ? <LoadingStatus className="text-sm text-muted-foreground">Loading Note links…</LoadingStatus> : links.error ? <Alert><AlertDescription>{links.error}<div className="mt-3 flex flex-wrap gap-3"><Button type="button" variant="outline" disabled={activity.busy} onClick={() => void links.load()}>Retry Note links</Button><Button type="button" variant="outline" disabled={activity.busy} onClick={() => onSaved(record.id)}>Refresh transaction details</Button></div></AlertDescription></Alert> : <>
         <FinanceNotePicker notes={links.notes} onChange={links.setNotes} disabled={activity.busy} />
         {activity.saveError && <Alert><AlertDescription>{activity.saveError} Your selection is kept. Retry safely, or refresh details if the record changed.</AlertDescription></Alert>}
-        <Button type="button" className="self-start" disabled={activity.busy || !links.changed} onClick={async () => { const result = await links.save(); if (result) onSaved(record.id); }}>{activity.busy ? "Saving…" : "Save Note links"}</Button>
+        <Button loading={activity.busy} type="button" className="self-start" disabled={activity.busy || !links.changed} onClick={async () => { const result = await links.save(); if (result) onSaved(record.id); }}>{activity.busy ? "Saving…" : "Save Note links"}</Button>
       </>}
     </div>
   </details>;

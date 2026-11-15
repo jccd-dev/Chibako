@@ -49,6 +49,7 @@ import {
   formatPHP,
   localCalendarDate,
 } from "@/features/finance/presentation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 import { FinanceAccountChoice } from "./FinanceAccountChoice";
 const goalChoice = (row: { account_id: string; account_name: string; logo: string; balance_cents: number; archived?: boolean }) =>
@@ -116,9 +117,9 @@ export function FinanceGoals({
             </AlertDescription>
           </Alert>
         ) : goals.loading ? (
-          <p role="status" className="py-4 text-sm text-muted-foreground">
+          <LoadingStatus className="py-4 text-sm text-muted-foreground">
             Loading goals…
-          </p>
+          </LoadingStatus>
         ) : !goals.page?.goals.length ? (
           <Empty className="px-0 py-4">
             <EmptyHeader>
@@ -301,7 +302,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
   }
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 pb-0 sm:p-6 sm:pb-0">
-      {goals.inspecting && <p role="status">Loading goal…</p>}
+      {goals.inspecting && <LoadingStatus>Loading goal…</LoadingStatus>}
       {goals.saveError && (
         <Alert>
           <AlertDescription>
@@ -378,7 +379,7 @@ function GoalPanel({ goals }: { goals: FinanceGoalsController }) {
             <div className="flex flex-wrap items-center justify-end gap-2">
               {goal && <GoalRemovalActions goal={goal} goals={goals} readOnly={readOnly} />}
               {!readOnly && (
-                <Button type="submit" disabled={disabled}>
+                <Button loading={goals.busy} type="submit" disabled={disabled}>
                   {goals.busy ? "Saving…" : goal ? "Save goal changes" : "Add goal"}
                 </Button>
               )}
@@ -515,7 +516,7 @@ function MovementPanel({ goals, disabled }: { goals: FinanceGoalsController; dis
         )}
       </Field>
       <div className="flex flex-wrap justify-end gap-2">
-        <Button
+        <Button loading={goals.busy}
           disabled={disabled || !goals.accountId}
           onClick={() => void goals.moveMoney()}
         >

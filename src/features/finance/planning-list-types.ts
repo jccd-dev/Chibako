@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { calendarDateSchema } from "./activity-types";
 
-export const planningFilterSchema = z.enum(["all", "attention", "upcoming", "paused"]);
+export const planningFilterSchema = z.enum(["all", "income", "expense", "attention", "paused"]);
 export type PlanningFilter = z.infer<typeof planningFilterSchema>;
 export const listPlanningSchema = z.object({
   filter: planningFilterSchema.default("all"),

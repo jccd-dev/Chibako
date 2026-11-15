@@ -12,6 +12,7 @@ import { RichTextEditor } from "@/features/notes/components/editor/RichTextEdito
 import { taskFolder } from "@/features/calendar/task-folder";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { ActivityOrb, LoadingStatus } from "@/components/LoadingStatus";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -93,7 +94,7 @@ export function TaskDrawer({ open, noteId, date, onOpenChange }: {
         {loadError ? (
           <p className="p-4 text-sm text-destructive" role="alert">{loadError}</p>
         ) : !lookups || (noteId && !note) ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+          <LoadingStatus size={96} className="flex-1 flex-col justify-center p-6">Loading task…</LoadingStatus>
         ) : note ? (
           <TaskEditor key={note.id} initial={note} lookups={lookups} flushRef={flushRef} />
         ) : (
@@ -158,7 +159,7 @@ function TaskCreateForm({ date, lookups, onCreated }: {
       </Field>
       <p className="text-xs text-muted-foreground" data-testid="task-target-folder">Saves to {target || "Vault root"}</p>
       <div className="flex justify-end">
-        <Button type="submit" disabled={saving || !values.title.trim()}>Create task</Button>
+        <Button type="submit" loading={saving} disabled={!values.title.trim()}>Create task</Button>
       </div>
     </form>
   );
@@ -223,7 +224,7 @@ function TaskEditor({ initial, lookups, flushRef }: {
         />
       </div>
       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span role="status">{SAVE_LABEL[saveState]}</span>
+        <span role="status" className="flex items-center gap-2">{saveState === "saving" && <ActivityOrb state="background" size={16} />}{SAVE_LABEL[saveState]}</span>
         <Link href={`/app/note/${note?.id ?? initial.id}`} className="font-medium text-foreground underline-offset-4 hover:underline">Open full note</Link>
       </div>
     </div>

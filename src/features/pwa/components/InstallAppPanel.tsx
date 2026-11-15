@@ -1,6 +1,7 @@
 "use client";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { LoadingStatus } from "@/components/LoadingStatus";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAppInstall } from "./AppInstallProvider";
@@ -21,7 +22,7 @@ export function InstallAppPanel() {
         {!isStandalone && status === "installed" && <p>Chibako was installed. Open it from your app icon.</p>}
         {!installed && status === "accepted" && <p>Installation requested. Follow your device’s installation steps, then open Chibako from its app icon.</p>}
         {!installed && status === "dismissed" && <p>Installation dismissed. You can still install from your browser’s menu.</p>}
-        {!installed && status === "prompting" && <p>Continue in your browser’s installation prompt.</p>}
+        {!installed && status === "prompting" && <LoadingStatus state="waiting">Continue in your browser’s installation prompt.</LoadingStatus>}
       </div>
       {!installed && canInstall && <div>
         <Button className="min-h-11" onClick={() => void install()}>Install Chibako</Button>

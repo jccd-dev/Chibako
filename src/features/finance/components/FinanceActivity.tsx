@@ -42,6 +42,7 @@ import { MoneyInput } from "./MoneyInput";
 import { useFinanceEntry } from "@/features/finance/use-finance-entry";
 import type { FinanceActivityController } from "@/features/finance/use-finance-activity";
 import { financeDrawerFooter, financeSheet, formatPHP, formatHistoryDate } from "@/features/finance/presentation";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 const activityLabel = (type: FinanceTransaction["type"]) =>
   ({
@@ -122,9 +123,9 @@ export function FinanceMonthlyTotals({
           </div>
         </dl>
       ) : (
-        <p role="status" className="py-5 text-sm text-muted-foreground">
+        <LoadingStatus className="py-5 text-sm text-muted-foreground">
           Loading monthly totals…
-        </p>
+        </LoadingStatus>
       )}
       <p className="mt-3 text-sm text-muted-foreground">
         By the calendar day money moved. Refunds reduce spending on their refund
@@ -172,9 +173,9 @@ export function FinanceActivityList({
               </AlertDescription>
             </Alert>
           ) : activity.loading ? (
-            <p role="status" className="py-6 text-sm text-muted-foreground">
+            <LoadingStatus className="py-6 text-sm text-muted-foreground">
               Loading history…
-            </p>
+            </LoadingStatus>
           ) : activity.page?.transactions.length ? (
             <FinanceTransactionDays
               rows={activity.page.transactions}
@@ -537,7 +538,7 @@ export function FinanceTransactionDetails({
             )}
             </>
           ) : (
-            <p role="status">Loading transaction…</p>
+            <LoadingStatus>Loading transaction…</LoadingStatus>
           )}
           {selected && <FinanceOptionStatus activity={activity} />}
           {selected && (
@@ -880,7 +881,7 @@ export function FinanceTransactionEntry({
             >
               Cancel
             </Button>
-            <Button
+            <Button loading={activity.busy}
               type="submit"
               name="another"
               variant="outline"
@@ -888,7 +889,7 @@ export function FinanceTransactionEntry({
             >
               Save and add another
             </Button>
-            <Button
+            <Button loading={activity.busy}
               type="submit"
               disabled={activity.busy || !!shortfall}
             >

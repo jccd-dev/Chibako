@@ -1,6 +1,7 @@
 "use client";
 
 import { CompactMoney } from "./CompactMoney";
+import { LoadingStatus } from "@/components/LoadingStatus";
 
 
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
@@ -17,15 +18,7 @@ import {
   IconTarget,
   IconWallet,
 } from "@tabler/icons-react";
-import {
-  Bar,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ReferenceLine,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import {
   ChartContainer,
   ChartTooltip,
@@ -78,9 +71,8 @@ interface FinanceOverviewDashboardProps {
 }
 
 const chartConfig = {
-  income: { label: "Income", color: "var(--primary)" },
-  expenses: { label: "Expenses", color: "var(--chart-2)" },
-  net: { label: "Net cash flow", color: "var(--foreground)" },
+  income: { label: "Income", color: "var(--success)" },
+  expenses: { label: "Expenses", color: "var(--destructive)" },
 } satisfies ChartConfig;
 
 type OverviewPeriod = "today" | "week" | "month";
@@ -105,9 +97,9 @@ function periodRange(period: OverviewPeriod, today: string) {
   if (period === "today") return { date_from: today, date_to: today };
   if (period === "week") {
     const [year, month, day] = today.split("-").map(Number);
-    const sinceMonday = (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
-    const monday = addDays(today, -sinceMonday);
-    return { date_from: monday, date_to: addDays(monday, 6) };
+    // Sunday-start, matching the app calendar's week rows.
+    const sunday = addDays(today, -new Date(Date.UTC(year, month - 1, day)).getUTCDay());
+    return { date_from: sunday, date_to: addDays(sunday, 6) };
   }
   const [year, month] = today.split("-").map(Number);
   return { date_from: `${today.slice(0, 7)}-01`, date_to: endOfMonth(year, month) };
@@ -117,6 +109,46 @@ function dayAxisLabel(iso: string) {
   const [year, month, day] = iso.split("-").map(Number);
   return new Date(year, month - 1, day).toLocaleDateString("en-PH", {
     weekday: "short",
+  });
+}
+
+type DailyFlow = { date: string; income_cents: number; spending_cents: number };
+
+/** Running income/expense totals: days for a week, Sunday-start calendar weeks for a month. */
+export function flowPoints(period: OverviewPeriod, daily: DailyFlow[], today: string) {
+  if (period === "today") {
+    const day = daily.find((item) => item.date === today);
+    return [
+      { tick: "Start", label: "Start of today", income: 0, expenses: 0 },
+      { tick: "Now", label: formatHistoryDate(today), income: day?.income_cents ?? 0, expenses: day?.spending_cents ?? 0 },
+    ];
+  }
+  const buckets: { from: string; to: string; income: number; expenses: number }[] = [];
+  for (const day of daily) {
+    const last = buckets.at(-1);
+    const sunday = new Date(`${day.date}T00:00:00Z`).getUTCDay() === 0;
+    if (last && period === "month" && !sunday) {
+      last.to = day.date;
+      last.income += day.income_cents;
+      last.expenses += day.spending_cents;
+    } else {
+      buckets.push({ from: day.date, to: day.date, income: day.income_cents, expenses: day.spending_cents });
+    }
+  }
+  let income = 0;
+  let expenses = 0;
+  return buckets.map((bucket, index) => {
+    income += bucket.income;
+    expenses += bucket.expenses;
+    const single = bucket.from === bucket.to;
+    // Future buckets stay empty so the line stops at today instead of running flat.
+    const future = bucket.from > today;
+    return {
+      tick: period === "week" ? dayAxisLabel(bucket.from) : `Week ${index + 1}`,
+      label: single ? formatHistoryDate(bucket.from) : `${formatHistoryDate(bucket.from).replace(/, \d{4}$/, "")} – ${formatHistoryDate(bucket.to)}`,
+      income: future ? null : income,
+      expenses: future ? null : expenses,
+    };
   });
 }
 
@@ -184,30 +216,8 @@ export function FinanceOverviewDashboard({
     report?.months.some(
       (month) => month.income_cents !== 0 || month.spending_cents !== 0,
     ) ?? false;
-  const dailyBuckets = period === "month" ? [] : report?.daily ?? [];
-  const chartData = dailyBuckets.length
-    ? dailyBuckets.map((item) => ({
-        month: period === "today" ? "Today" : dayAxisLabel(item.date),
-        label: formatHistoryDate(item.date),
-        income: item.income_cents,
-        expenses: -item.spending_cents,
-        net: item.income_cents - item.spending_cents,
-      }))
-    : (report?.months ?? []).map((item) => {
-        const [y, m] = item.month.split("-").map(Number);
-        const date = new Date(y, m - 1, 1);
-        return {
-          month: date.toLocaleDateString("en-PH", { month: "short" }),
-          label: date.toLocaleDateString("en-PH", {
-            month: "long",
-            year: "numeric",
-          }),
-          income: item.income_cents,
-          expenses: -item.spending_cents,
-          net: item.income_cents - item.spending_cents,
-        };
-      });
   const today = localCalendarDate();
+  const chartData = flowPoints(period, report?.daily ?? [], today);
   const periodDates = periodRange(period, today);
   const recent = useFinanceRecentActivity(periodDates.date_from, periodDates.date_to);
   const transactions = recent.page?.transactions ?? [];
@@ -293,40 +303,46 @@ export function FinanceOverviewDashboard({
                     aria-label="Chart legend"
                   >
                     <span className="flex items-center gap-1.5">
-                      <span className="size-2 rounded-sm bg-primary" />
+                      <span className="h-0.5 w-3 rounded-full bg-success" />
                       Income
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <span className="size-2 rounded-sm bg-chart-2" />
+                      <span className="h-0.5 w-3 rounded-full bg-destructive" />
                       Expenses
                     </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-0.5 w-3 bg-foreground" />
-                      Net
-                    </span>
+                    <span className="ml-auto">Running total</span>
                   </div>
                   <ChartContainer
                     config={chartConfig}
                     className="h-48 w-full min-w-0 aspect-auto"
                     aria-label="Recorded cash flow chart"
                   >
-                    <ComposedChart
+                    <AreaChart
                       accessibilityLayer
                       data={chartData}
                       margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
-                      barGap={3}
                     >
+                      <defs>
+                        {(["income", "expenses"] as const).map((key) => (
+                          <linearGradient key={key} id={`finance-flow-${key}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={`var(--color-${key})`} stopOpacity={0.28} />
+                            <stop offset="100%" stopColor={`var(--color-${key})`} stopOpacity={0} />
+                          </linearGradient>
+                        ))}
+                      </defs>
                       <CartesianGrid vertical={false} />
                       <XAxis
-                        dataKey="month"
+                        dataKey="tick"
                         tickLine={false}
                         axisLine={false}
                         tickMargin={8}
+                        interval="preserveStartEnd"
                       />
                       <YAxis
                         tickLine={false}
                         axisLine={false}
                         width={62}
+                        allowDecimals={false}
                         tickFormatter={(value) =>
                           new Intl.NumberFormat("en-PH", {
                             notation: "compact",
@@ -334,63 +350,53 @@ export function FinanceOverviewDashboard({
                           }).format(Number(value) / 100)
                         }
                       />
-                      <ReferenceLine y={0} stroke="var(--border)" />
                       <ChartTooltip
-                        cursor={false}
+                        cursor={{ stroke: "var(--border)" }}
                         content={
                           <ChartTooltipContent
+                            indicator="line"
                             labelFormatter={(_, payload) =>
                               payload[0]?.payload.label ?? ""
                             }
                             formatter={(value, name) => (
                               <div className="flex w-full items-center justify-between gap-4">
                                 <span className="text-muted-foreground">
-                                  {name === "net"
-                                    ? "Net cash flow"
-                                    : name === "income"
-                                      ? "Income"
-                                      : "Expenses"}
+                                  {name === "income" ? "Income" : "Expenses"}
                                 </span>
                                 <span className="font-medium tabular-nums">
-                                  {money(
-                                    name === "expenses"
-                                      ? -Number(value)
-                                      : Number(value),
-                                  )}
+                                  {money(Number(value))}
                                 </span>
                               </div>
                             )}
                           />
                         }
                       />
-                      <Bar
-                        dataKey="income"
-                        fill="var(--color-income)"
-                        radius={3}
-                        maxBarSize={20}
-                        isAnimationActive={false}
-                      />
-                      <Bar
-                        dataKey="expenses"
-                        fill="var(--color-expenses)"
-                        radius={3}
-                        maxBarSize={20}
-                        isAnimationActive={false}
-                      />
-                      <Line
-                        dataKey="net"
-                        stroke="var(--color-net)"
-                        strokeWidth={1.5}
-                        dot={{ r: 2 }}
-                        isAnimationActive={false}
-                      />
-                    </ComposedChart>
+                      {(["income", "expenses"] as const).map((key) => (
+                        <Area
+                          key={key}
+                          dataKey={key}
+                          type="monotone"
+                          stroke={`var(--color-${key})`}
+                          strokeWidth={2}
+                          fill={`url(#finance-flow-${key})`}
+                          dot={false}
+                          activeDot={{ r: 3, strokeWidth: 0 }}
+                          isAnimationActive={false}
+                        />
+                      ))}
+                    </AreaChart>
                   </ChartContainer>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {report
-                      ? "PHP. Only activity within the report dates is shown."
-                      : reports.error || "Loading cash flow…"}
-                  </p>
+                  {report || reports.error ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {report
+                        ? `PHP, ${periodText[period]}. Each point adds up activity so far.`
+                        : reports.error}
+                    </p>
+                  ) : (
+                    <LoadingStatus className="mt-2 text-xs">
+                      Loading cash flow…
+                    </LoadingStatus>
+                  )}
                 </>
               ) : (
                 <Empty className="px-0">
