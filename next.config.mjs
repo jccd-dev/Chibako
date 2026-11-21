@@ -13,6 +13,7 @@ const nextConfig = {
   output: "standalone",
   serverExternalPackages: ["better-sqlite3"],
   experimental: {
+    agentUpgrade: "security",
     serverActions: { bodySizeLimit: "8mb" }
   }
 };
