@@ -49,7 +49,7 @@ export function FinanceCorrection({
         (record.type === "valuation" && !refund
           ? account.kind === "asset"
           : account.kind === "money" ||
-            (account.kind === "credit" && (refund || record.type === "expense" || record.type === "refund")))),
+            (account.kind === "credit" && (refund || (record.type === "expense" && !record.obligation_payment) || record.type === "refund")))),
   );
   const errorProps = (key: string) => ({
     "aria-invalid": !!edit.errors[key],

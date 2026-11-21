@@ -120,7 +120,7 @@ const payment: FinancePlan = {
   id: "TEST payment", type: "expense", account_id: "TEST account", account_name: "TEST account", currency: "PHP", amount_cents: 1000,
   due_date: "2027-01-15", category_id: null, subcategory_id: null, category_name: null, obligation_id: null,
   logged_time: "00:00", timezone: "UTC", handling: "manual", schedule_id: "TEST schedule", occurrence_date: "2027-01-15",
-  status: "pending", transaction_id: null, version: 1, recorded_amount_cents: null, recorded_date: null, recorded_account_name: null,
+  status: "pending", transaction_id: null, version: 1, recorded_amount_cents: null, recorded_date: null, recorded_account_id: null, recorded_account_name: null,
 };
 
 function PaymentEntry({ plan }: { plan: FinancePlan }) {
@@ -190,8 +190,9 @@ test("a payment recorded at a different amount shows the recorded amount and the
 
 test("a recorded payment shows its paid date, and its account only when it differs from the plan's", () => {
   const row = (extra: Partial<FinancePlan>) => renderToStaticMarkup(createElement(FinanceSchedulePaymentRow, { plan: { ...payment, status: "satisfied", transaction_id: "TEST tx", recorded_amount_cents: 1000, ...extra }, today: "2027-02-01", busy: false, onReview: () => undefined }));
-  const late = row({ recorded_date: "2027-01-16", recorded_account_name: "TEST card" });
+  const late = row({ recorded_date: "2027-01-16", recorded_account_id: "TEST card", recorded_account_name: "TEST card" });
   assert.match(late, /January 15, 2027/);
   assert.match(late, /Recorded Jan 16 · TEST card · Manual/);
-  assert.match(row({ recorded_date: "2027-01-15", recorded_account_name: "TEST account" }), /Recorded on due date · Manual/);
+  assert.match(row({ recorded_date: "2027-01-15", recorded_account_id: "TEST account", recorded_account_name: "TEST account" }), /Recorded on due date · Manual/);
+  assert.match(row({ recorded_date: "2027-01-15", recorded_account_id: "TEST other", recorded_account_name: "TEST account" }), /Recorded on due date · TEST account · Manual/);
 });

@@ -143,7 +143,7 @@ export function correctActivity(actor: FinanceActor, id: string, input: unknown)
     if ((before.type !== "transfer" && patch.destination_account_id !== undefined) || (before.type !== "transfer" && !before.obligation_payment && patch.fee !== undefined)) throw new FinanceError("Fields do not apply to this activity", 400, "invalid_input");
     if ((movement || before.type === "refund") && (patch.category_id !== undefined || patch.subcategory_id !== undefined)) throw new FinanceError("This activity inherits or excludes categories", 400, "invalid_category");
     if (before.linked_record_id && !before.cashback_expense_id && (account !== before.account_id || date !== before.transaction_date)) throw new FinanceError("Correct the linked activity to move its fee together", 409, "linked_activity");
-    if (account !== before.account_id) activeAccount(account, before.type === "valuation" ? "asset" : before.type === "expense" || before.type === "refund" ? "money or credit" : "money");
+    if (account !== before.account_id) activeAccount(account, before.type === "valuation" ? "asset" : (before.type === "expense" && !before.obligation_payment) || before.type === "refund" ? "money or credit" : "money");
     if (before.type !== "reconciliation" && before.type !== "valuation" && amount <= 0) throw new FinanceError("Amount must be positive", 400, "invalid_input");
     if (obligation) {
       const delta = BigInt(amount) - BigInt(before.amount_cents);

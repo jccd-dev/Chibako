@@ -194,6 +194,7 @@ test("expense plans can be logged to an active card within its limit; income pla
   assert.equal(satisfied.account_id, wallet.id);
   assert.equal(satisfied.recorded_date, "2026-10-03");
   assert.equal(satisfied.recorded_account_name, "Plan card");
+  assert.equal(satisfied.recorded_account_id, card.id);
   assert.equal(onCard.recorded_date, null);
   assert.equal(onCard.recorded_account_name, null);
 });

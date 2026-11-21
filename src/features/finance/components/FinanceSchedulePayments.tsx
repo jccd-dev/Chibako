@@ -41,7 +41,7 @@ export function FinanceSchedulePaymentRow({ plan, today, busy, onReview }: { pla
   const status = !pending ? plan.status === "satisfied" ? "Recorded" : "Skipped" : overdue ? "Overdue" : plan.due_date === today ? "Due today" : "Upcoming";
   const recorded = plan.status === "satisfied" && plan.recorded_date
     ? [plan.recorded_date === plan.due_date ? "Recorded on due date" : `Recorded ${format(new Date(`${plan.recorded_date}T12:00:00`), "MMM d")}`,
-      ...(plan.recorded_account_name && plan.recorded_account_name !== plan.account_name ? [plan.recorded_account_name] : [])].join(" · ")
+      ...(plan.recorded_account_name && plan.recorded_account_id !== plan.account_id ? [plan.recorded_account_name] : [])].join(" · ")
     : null;
   return <li className="flex items-center gap-2 py-2">
     <span className={`mt-0.5 size-2 shrink-0 rounded-full ${pending ? overdue ? "bg-destructive" : plan.due_date === today ? "bg-primary" : "bg-foreground/30" : "bg-muted-foreground/40"}`} aria-hidden />

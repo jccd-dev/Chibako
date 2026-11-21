@@ -570,6 +570,19 @@ test("partial payments use one cash effect, correct/revert with progress, and wr
       }),
     { code: "overpayment" },
   );
+  const card = createAccount(owner, { request_id: request(), name: "Payment card", kind: "credit", opening_balance: "0", credit_limit: "100", currency: "PHP" }).account;
+  assert.throws(
+    () =>
+      correctActivity(owner, paid.transaction.id, {
+        request_id: request(),
+        version: corrected.transaction.version,
+        obligation_version: corrected.obligation!.version,
+        account_id: card.id,
+      }),
+    { code: "invalid_account" },
+  );
+  assert.equal(getAccount(owner, card.id).balance_cents, 0);
+  assert.equal(getAccount(owner, cash.id).balance_cents, 7500);
   const history = getObligationPaymentHistory(owner, debt.id, {
     limit: 10,
     offset: 0,

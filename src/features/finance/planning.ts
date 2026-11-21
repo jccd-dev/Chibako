@@ -12,7 +12,7 @@ import { parseFinance, financeMutation } from "./mutations";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema, type FinancePlan, type PlanPage, type SatisfiedPlan } from "./planning-types";
 
 const selection = `SELECT p.*, a.name AS account_name, c.name AS category_name, t.amount_cents AS recorded_amount_cents,
-  t.transaction_date AS recorded_date, ta.name AS recorded_account_name FROM finance_plans p
+  t.transaction_date AS recorded_date, t.account_id AS recorded_account_id, ta.name AS recorded_account_name FROM finance_plans p
   JOIN finance_accounts a ON a.id = p.account_id LEFT JOIN finance_classifications c ON c.id = p.category_id
   LEFT JOIN finance_transactions t ON t.id = p.transaction_id AND p.status = 'satisfied' LEFT JOIN finance_accounts ta ON ta.id = t.account_id`;
 type PlanRow = Omit<FinancePlan, "currency" | "tag_ids" | "handling"> & {
