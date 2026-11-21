@@ -36,3 +36,7 @@ npm run build                    # next build + MCP bundle
 - **Updates** run through a separate companion process (`updater/`, built by `npm run build:updater`, `Dockerfile.updater`) that owns Docker access, snapshots, and recovery; the app side is `src/features/updates`. Read `docs/UPDATES.md` before touching it.
 - **Agent memory plugins**: shared runner/engine in `scripts/memory/`, one adapter and entry per host in `scripts/memory/<claude|codex|hermes>/`, package metadata per target in `scripts/build-memory-plugins.mjs`, plus `skills/` and `integrations/agent-memory/`. Each target has its own version in `plugin-versions.json`; the committed `plugins/` output and those versions are rebuilt and released per target after merge by `.github/workflows/plugin-release.yml`. Don't edit `plugins/` or `plugin-versions.json` in a PR. See `docs/AGENT-MEMORY.md`.
 - Domain terms: `GLOSSARY.md`. Product/design intent: `PRODUCT.md`, `DESIGN.md`.
+
+## Agent skills
+
+JCCDLabs skills config, plans, and handoffs live in `.slime/`. See `.slime/config.md`.
