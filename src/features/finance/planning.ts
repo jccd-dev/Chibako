@@ -11,9 +11,10 @@ import { decimalCents } from "./money";
 import { parseFinance, financeMutation } from "./mutations";
 import { createPlanSchema, getPlanSchema, listPlansSchema, updatePlanSchema, planActionSchema, postPlanSchema, matchPlanSchema, type FinancePlan, type PlanPage, type SatisfiedPlan } from "./planning-types";
 
-const selection = `SELECT p.*, a.name AS account_name, c.name AS category_name, t.amount_cents AS recorded_amount_cents FROM finance_plans p
+const selection = `SELECT p.*, a.name AS account_name, c.name AS category_name, t.amount_cents AS recorded_amount_cents,
+  t.transaction_date AS recorded_date, ta.name AS recorded_account_name FROM finance_plans p
   JOIN finance_accounts a ON a.id = p.account_id LEFT JOIN finance_classifications c ON c.id = p.category_id
-  LEFT JOIN finance_transactions t ON t.id = p.transaction_id AND p.status = 'satisfied'`;
+  LEFT JOIN finance_transactions t ON t.id = p.transaction_id AND p.status = 'satisfied' LEFT JOIN finance_accounts ta ON ta.id = t.account_id`;
 type PlanRow = Omit<FinancePlan, "currency" | "tag_ids" | "handling"> & {
   automatic_eligible: number; text: string; tag_ids: string; created_at: number; updated_at: number; schedule_generation: number | null;
   cancel_reason: "skipped" | "boundary" | "cadence" | null;
@@ -71,9 +72,10 @@ export function pendingPlan(id: string, version: number) {
   if (plan.status !== "pending") throw new FinanceError("Only pending plans can be changed or satisfied", 409, "not_pending");
   return plan;
 }
-export function validatePlanAccount(id: string) {
-  const account = readAccountBalance(id);
-  if (account.kind !== "money" || account.archived) throw new FinanceError("Choose an active money account", 400, "invalid_account");
+export function validatePlanAccount(id: string, type: "income" | "expense", obligationId?: string | null) {
+  const account = readAccountBalance(id), cardAllowed = type === "expense" && !obligationId;
+  if (account.archived || !(account.kind === "money" || (account.kind === "credit" && cardAllowed)))
+    throw new FinanceError(cardAllowed ? "Choose an active money or credit account" : "Choose an active money account", 400, "invalid_account");
   return account;
 }
 export function positiveAmount(value: string) {
@@ -91,7 +93,7 @@ export function createPlan(actor: FinanceActor, input: unknown): { plan: Finance
   authorizeFinance(actor, "finance:write");
   const { request_id, ...payload } = parseFinance(createPlanSchema, input), amount = positiveAmount(payload.amount);
   return financeMutation(actor, request_id, "plan.create", payload, () => {
-    validatePlanAccount(payload.account_id); validateTransactionClassifications(payload);
+    validatePlanAccount(payload.account_id, payload.type); validateTransactionClassifications(payload);
     const id = randomUUID(), timestamp = now();
     getDb().prepare("INSERT INTO finance_plans (id,type,account_id,amount_cents,due_date,category_id,subcategory_id,text,tag_ids,created_at,updated_at,logged_time,timezone) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .run(id, payload.type, payload.account_id, amount, payload.due_date, payload.category_id, payload.subcategory_id, payload.text, JSON.stringify(payload.tag_ids), timestamp, timestamp, payload.logged_time, payload.timezone);
@@ -106,7 +108,7 @@ export function updatePlan(actor: FinanceActor, id: string, input: unknown): { p
     const after = { ...before, ...patch, amount_cents: patch.amount === undefined ? before.amount_cents : positiveAmount(patch.amount), tag_ids: patch.tag_ids ?? before.tag_ids ?? [] };
     if (after.obligation_id && !before.schedule_id) throw new FinanceError("Payment reminders require a recurring occurrence", 400, "invalid_obligation");
     validatePlanObligation(after.obligation_id, after.type);
-    if (after.account_id !== before.account_id) validatePlanAccount(after.account_id);
+    if (after.account_id !== before.account_id || after.type !== before.type || after.obligation_id !== before.obligation_id) validatePlanAccount(after.account_id, after.type, after.obligation_id);
     if (patch.type !== undefined || patch.category_id !== undefined || patch.subcategory_id !== undefined || patch.tag_ids !== undefined) validateTransactionClassifications(after);
     getDb().prepare("UPDATE finance_plans SET type=?,account_id=?,amount_cents=?,due_date=?,category_id=?,subcategory_id=?,text=?,tag_ids=?,obligation_id=?,logged_time=?,timezone=?,automatic_eligible=CASE WHEN ? IS NULL THEN automatic_eligible ELSE 0 END,version=version+1,updated_at=? WHERE id=?")
       .run(after.type, after.account_id, after.amount_cents, after.due_date, after.category_id, after.subcategory_id, after.text ?? "", JSON.stringify(after.tag_ids), after.obligation_id, after.logged_time, after.timezone, after.obligation_id, now(), id);
@@ -136,7 +138,7 @@ export function postPlan(actor: FinanceActor, id: string, input: unknown): Satis
     }
     if (payload.obligation_version !== undefined || payload.fee || payload.cash_activity_id || payload.cash_activity_version !== undefined)
       throw new FinanceError("Payment review fields require an obligation reminder", 400, "invalid_input");
-    const account = validatePlanAccount(payload.account_id);
+    const account = validatePlanAccount(payload.account_id, before.type);
     if (before.type === "expense") requireSufficientFunds(account, amount);
     validateTransactionClassifications({ ...before, tag_ids: before.tag_ids ?? [] });
     const transactionId = insertTransaction({ type: before.type, account_id: payload.account_id, amount_cents: amount,
