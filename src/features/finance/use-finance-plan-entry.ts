@@ -41,7 +41,8 @@ export function useFinancePlanEntry(plan: FinancePlan | null, activity: FinanceA
   const subcategories = activity.classifications.filter(row => row.parent_id === category && (!row.archived || row.id === subcategory));
   const feeCategories = activity.classifications.filter(row => row.kind === "category" && row.type === feeType && !row.parent_id && (!row.archived || row.id === feeCategoryId));
   const feeSubcategories = activity.classifications.filter(row => row.parent_id === feeCategoryId && (!row.archived || row.id === feeSubcategoryId));
-  const accounts = activity.accounts.filter(row => row.kind === "money" && (!row.archived || (mode !== "post" && row.id === account) || row.id === cashPick?.account_id));
+  const cardAllowed = type === "expense" && !(mode === "post" ? linked : association);
+  const accounts = activity.accounts.filter(row => (row.kind === "money" || (cardAllowed && row.kind === "credit")) && (!row.archived || (mode !== "post" && row.id === account) || row.id === cashPick?.account_id));
 
   const planType = plan?.type;
   const cashRequest = `${plan?.id ?? "new"}:${planType ?? ""}:${linked}:${mode}:${cashSource}:${cashOffset}:${cashReload}`;

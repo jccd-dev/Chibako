@@ -91,7 +91,7 @@ export function createSchedule(actor: FinanceActor, input: unknown): { schedule:
   if (totalLimit !== null && totalLimit < amount) throw new FinanceError("Total must cover at least one payment", 400, "invalid_input");
   validateAutomatic(actor, { ...payload, obligation_id: payload.obligation_id ?? null });
   return financeMutation(actor, request_id, "schedule.create", payload, () => {
-    validatePlanAccount(payload.account_id); validateTransactionClassifications(payload); validatePlanObligation(payload.obligation_id, payload.type);
+    validatePlanAccount(payload.account_id, payload.type, payload.obligation_id); validateTransactionClassifications(payload); validatePlanObligation(payload.obligation_id, payload.type);
     const id = randomUUID(), timestamp = now();
     getDb().prepare(`INSERT INTO finance_schedules (id,type,account_id,amount_cents,category_id,subcategory_id,text,tag_ids,interval_count,interval_unit,start_date,end_date,paused,created_at,updated_at,obligation_id,handling,max_occurrences,total_limit_cents,logged_time,timezone)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, payload.type, payload.account_id, amount, payload.category_id, payload.subcategory_id, payload.text,
@@ -237,7 +237,7 @@ export function updateSchedule(actor: FinanceActor, id: string, input: unknown):
     if (after.total_limit_cents !== null && after.total_limit_cents < after.amount_cents)
       throw new FinanceError("Total must cover at least one payment", 400, "invalid_input");
     validatePlanObligation(after.obligation_id, after.type);
-    if (after.account_id !== row.account_id) validatePlanAccount(after.account_id);
+    if (after.account_id !== row.account_id || after.type !== row.type || after.obligation_id !== row.obligation_id) validatePlanAccount(after.account_id, after.type, after.obligation_id);
     if (patch.type !== undefined || patch.category_id !== undefined || patch.subcategory_id !== undefined || patch.tag_ids !== undefined)
       validateTransactionClassifications({ ...after, tag_ids: JSON.parse(after.tag_ids) as string[] });
     const affected = db.prepare("SELECT id,version FROM finance_plans WHERE schedule_id=? AND occurrence_date>=? AND status='pending' ORDER BY occurrence_date,id")

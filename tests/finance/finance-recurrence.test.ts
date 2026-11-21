@@ -240,3 +240,18 @@ test("import-style paused schedules generate nothing until explicit future resum
   assert.equal(updateSchedule(owner, fresh.id, patch).schedule.version, 2);
   assert.equal(listSchedules(owner, { paused: "true" }).total, 0);
 });
+
+test("expense schedules accept an active card; income schedules do not", () => {
+  const cash = account();
+  const card = createAccount(owner, { request_id: randomUUID(), name: "Schedule card", kind: "credit", currency: "PHP", opening_balance: "0", credit_limit: "5000" }).account;
+  assert.throws(() => schedule(card.id, { type: "income" }), { code: "invalid_account" });
+  const income = schedule(cash.id, { type: "income" });
+  assert.throws(() => updateSchedule(owner, income.id, { ...action(income.version), account_id: card.id }), { code: "invalid_account" });
+  const row = schedule(card.id);
+  assert.equal(row.account_id, card.id);
+  assert.throws(() => updateSchedule(owner, row.id, { ...action(row.version), type: "income" }), { code: "invalid_account" });
+  catchup("2026-01-31");
+  const [plan] = listPlans(owner, { schedule_id: row.id }).plans;
+  postPlan(owner, plan.id, { ...action(plan.version), account_id: card.id, amount: "12", transaction_date: "2026-01-31" });
+  assert.equal(getAccount(owner, card.id).balance_cents, -1200);
+});

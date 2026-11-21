@@ -172,3 +172,29 @@ test("plans validate dates, cents, pagination and accounts; transfer fees and ge
   assert.notEqual(firstPage.plans[0].id, next.plans[0].id);
   assert.equal(listTransactions(owner, { matchable: true, type: "expense", hidden: "all" }).total, 0);
 });
+
+test("expense plans can be logged to an active card within its limit; income plans stay money-only", () => {
+  const wallet = cash();
+  const card = createAccount(owner, { request_id: randomUUID(), name: "Plan card", kind: "credit", currency: "PHP", opening_balance: "0", credit_limit: "20" }).account;
+  assert.throws(() => createPlan(owner, input(card.id, { type: "income" })), { code: "invalid_account" });
+  const income = createPlan(owner, input(wallet.id, { type: "income" })).plan;
+  assert.throws(() => updatePlan(owner, income.id, { ...action(1), account_id: card.id }), { code: "invalid_account" });
+  const onCard = createPlan(owner, input(card.id)).plan;
+  assert.throws(() => updatePlan(owner, onCard.id, { ...action(1), type: "income" }), { code: "invalid_account" });
+  const plan = createPlan(owner, input(wallet.id)).plan;
+  const over = { ...action(plan.version), account_id: card.id, amount: "20.01", transaction_date: "2026-10-03" };
+  assert.throws(() => postPlan(owner, plan.id, over), { status: 409, code: "credit_limit_exceeded" });
+  assert.equal(getPlan(owner, plan.id).status, "pending");
+  assert.equal(getAccount(owner, card.id).balance_cents, 0);
+  const posted = postPlan(owner, plan.id, { ...over, request_id: randomUUID(), amount: "14.44" });
+  assert.equal(posted.transaction.account_id, card.id);
+  assert.equal(getAccount(owner, card.id).balance_cents, -1444);
+  assert.equal(getAccount(owner, wallet.id).balance_cents, 10000);
+  const satisfied = getPlan(owner, plan.id);
+  assert.equal(satisfied.account_id, wallet.id);
+  assert.equal(satisfied.recorded_date, "2026-10-03");
+  assert.equal(satisfied.recorded_account_name, "Plan card");
+  assert.equal(satisfied.recorded_account_id, card.id);
+  assert.equal(onCard.recorded_date, null);
+  assert.equal(onCard.recorded_account_name, null);
+});

@@ -43,6 +43,7 @@ export interface FinancePlan {
   status: "pending" | "satisfied" | "cancelled"; transaction_id: string | null; version: number;
   /** Amount of the satisfying transaction; differs from amount_cents when the payment was confirmed at another amount. */
   recorded_amount_cents: number | null;
+  recorded_date: string | null; recorded_account_id: string | null; recorded_account_name: string | null;
   text?: string; tag_ids?: string[]; created_at?: number; updated_at?: number;
 }
 export interface PlanPage { plans: FinancePlan[]; total: number; limit: number; offset: number }

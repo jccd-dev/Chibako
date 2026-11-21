@@ -178,7 +178,10 @@ export function FinancePlanningForm({
               onChange={setAccount}
               disabled={busy}
               accounts={activity.accounts.filter(
-                (row) => row.kind === "money" && (!row.archived || row.id === account),
+                (row) =>
+                  (row.kind === "money" ||
+                    (row.kind === "credit" && type === "expense" && !association)) &&
+                  (!row.archived || row.id === account),
               )}
             />
             <FieldError id="schedule-error-account_id">
